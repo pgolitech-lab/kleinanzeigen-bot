@@ -155,6 +155,22 @@ def init_db() -> None:
         # рендерится в карточке Telegram как раздел «Дополнительные инструкции».
         # Каждая запись на отдельной строке: «HH:MM <emoji> @actor: <text>».
         _add_column_if_missing(conn, "messages", "extra_notes", "TEXT")
+        # is_autopilot_reply=1 у row которая была сгенерена и отправлена в авто-пилот режиме.
+        _add_column_if_missing(conn, "messages", "is_autopilot_reply", "INTEGER")
+        # thread_autopilot — состояние авто-пилота per-thread.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS thread_autopilot (
+                gmail_thread_id TEXT PRIMARY KEY,
+                active INTEGER NOT NULL DEFAULT 1,
+                floor_price_eur REAL NOT NULL,
+                notify_mode TEXT NOT NULL,
+                messages_sent INTEGER NOT NULL DEFAULT 0,
+                started_by TEXT,
+                started_at TEXT NOT NULL,
+                stopped_at TEXT,
+                stop_reason TEXT
+            )
+        """)
         # similar_buyers_json — список JSON {msg_id, display_name, suspicion_score, reason}
         # для подозрительно похожих по стилю incoming-сообщений от других клиентов
         # (для детекта «один и тот же человек под разными именами/в разные аккаунты»).
@@ -308,6 +324,75 @@ def delete_message(message_id: int) -> None:
     """Удалить сообщение по id."""
     with get_conn() as conn:
         conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+
+
+def get_thread_autopilot(thread_id: Optional[str]) -> Optional[sqlite3.Row]:
+    """Получить state автопилота для треда (или None)."""
+    if not thread_id:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM thread_autopilot WHERE gmail_thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+
+
+def start_thread_autopilot(
+    thread_id: str, floor_price_eur: float, notify_mode: str,
+    started_by: Optional[str] = None,
+) -> None:
+    """Включить (или переактивировать) автопилот для треда."""
+    if not thread_id:
+        return
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        # UPSERT: если уже была запись (например stopped) — переактивируем
+        conn.execute(
+            """
+            INSERT INTO thread_autopilot
+                (gmail_thread_id, active, floor_price_eur, notify_mode, messages_sent,
+                 started_by, started_at, stopped_at, stop_reason)
+            VALUES (?, 1, ?, ?, 0, ?, ?, NULL, NULL)
+            ON CONFLICT(gmail_thread_id) DO UPDATE SET
+                active = 1,
+                floor_price_eur = excluded.floor_price_eur,
+                notify_mode = excluded.notify_mode,
+                messages_sent = 0,
+                started_by = excluded.started_by,
+                started_at = excluded.started_at,
+                stopped_at = NULL,
+                stop_reason = NULL
+            """,
+            (thread_id, floor_price_eur, notify_mode, started_by, now),
+        )
+
+
+def increment_autopilot_messages(thread_id: str) -> int:
+    """Увеличить счётчик отправленных автопилотом. Возвращает новый count."""
+    if not thread_id:
+        return 0
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE thread_autopilot SET messages_sent = messages_sent + 1 WHERE gmail_thread_id = ?",
+            (thread_id,),
+        )
+        row = conn.execute(
+            "SELECT messages_sent FROM thread_autopilot WHERE gmail_thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+    return row["messages_sent"] if row else 0
+
+
+def stop_thread_autopilot(thread_id: str, reason: str) -> None:
+    """Выключить автопилот с указанной причиной."""
+    if not thread_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE thread_autopilot SET active = 0, stopped_at = ?, stop_reason = ? "
+            "WHERE gmail_thread_id = ?",
+            (datetime.utcnow().isoformat(), reason, thread_id),
+        )
 
 
 def add_card_dispatch(message_id: int, chat_id: str, tg_msg_id: int) -> None:

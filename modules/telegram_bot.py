@@ -411,6 +411,17 @@ def _format_review_text(msg: sqlite3.Row) -> str:
     if status and status not in ("new", "pending"):
         header += f" · <code>{_html(status)}</code>"
     lines: list[str] = [header]
+    # Если для треда активен автопилот — большой жёлтый блок наверху
+    ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
+    if ap and ap["active"]:
+        lines.append(
+            "🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨\n"
+            f"🤖 <b>АВТОПИЛОТ АКТИВЕН ({ap['messages_sent']}/20)</b>\n"
+            f"floor: <code>{ap['floor_price_eur']}€</code> · "
+            f"режим: {'🔔 notify' if ap['notify_mode'] == 'notify' else '🤫 silent'}\n"
+            f"<i>запущен {_html(ap['started_by'] or '?')} в {(ap['started_at'] or '')[11:19]}</i>\n"
+            "🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨"
+        )
     # Warning если этот клиент уже пишет в нескольких тредах
     related_warn = _format_related_warning(msg)
     if related_warn:
@@ -617,10 +628,30 @@ def _review_keyboard(message_id: int) -> dict[str, Any]:
                 {"text": "📋 История клиента", "callback_data": f"clienthist:{message_id}"},
             ],
             [
+                {"text": "🚀 Полный автопилот", "callback_data": f"apstart:{message_id}"},
+            ],
+            [
                 {"text": "↩ Назад к pipeline", "callback_data": f"back:{message_id}"},
             ],
         ]
     }
+
+
+def _autopilot_active_keyboard(message_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура карточки активного автопилота: только Stop + Назад."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛑 Остановить автопилот", callback_data=f"apstop:{message_id}")],
+        [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
+    ])
+
+
+def _autopilot_mode_choice_keyboard(message_id: int) -> InlineKeyboardMarkup:
+    """После ввода floor — выбор режима уведомлений."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔔 Notify (start/inbound/stop)", callback_data=f"apconfirm:notify:{message_id}")],
+        [InlineKeyboardButton("🤫 Silent (только при стопе)", callback_data=f"apconfirm:silent:{message_id}")],
+        [InlineKeyboardButton("❌ Отменить", callback_data=f"inputcancel:{message_id}")],
+    ])
 
 
 def _review_keyboard_obj(message_id: int) -> InlineKeyboardMarkup:
@@ -870,6 +901,77 @@ def send_reminder_offer(out_message_id: int, days_silent: int) -> Optional[int]:
     return result.get("message_id")
 
 
+# ============================================================
+# Autopilot notifications (вызываются из scheduler._autopilot_dispatch)
+# ============================================================
+
+_AUTOPILOT_STOP_REASONS = {
+    "limit": ("🛑", "исчерпан лимит 20 сообщений"),
+    "ready_to_buy": ("🎯", "клиент готов покупать, иди закрывай сделку"),
+    "wants_contact": ("📞", "просит контакты/реквизиты, передаёт человеку"),
+    "threat": ("⚠️", "клиент угрожает, бот предупредил"),
+    "manual": (None, None),  # silent
+    "stopped_by_sonnet": ("🤖", "Sonnet решил что нужно остановиться"),
+}
+
+
+def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
+    """Пинг операторам в DM при остановке автопилота. reason='manual' — silent."""
+    info = _AUTOPILOT_STOP_REASONS.get(reason, ("🛑", reason))
+    if info[0] is None:
+        return  # silent (manual stop)
+    msg = db.get_message(msg_id)
+    if not msg:
+        return
+    ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
+    sent_count = ap["messages_sent"] if ap else 0
+    text = (
+        "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨\n"
+        f"🛑 <b>АВТОПИЛОТ ОСТАНОВЛЕН · #{msg_id}</b>\n"
+        f"Причина: {info[0]} {info[1]}\n"
+        f"Сообщений отправлено: <code>{sent_count}/20</code>\n"
+        "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨"
+    )
+    kb = {
+        "inline_keyboard": [[
+            {"text": "📋 Открыть карточку треда", "callback_data": f"pipe:{msg_id}"},
+        ]]
+    }
+    _http_post("sendMessage", {
+        "chat_id": config.telegram_chat_id(),
+        "text": text,
+        "reply_markup": kb,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    })
+
+
+def send_autopilot_progress(msg_id: int, count: int) -> None:
+    """Короткий пинг при каждом авто-ответе (только если notify_mode='notify')."""
+    msg = db.get_message(msg_id)
+    if not msg:
+        return
+    excerpt = (msg["de_answer"] or "").replace("\n", " ").strip()[:80]
+    _http_post("sendMessage", {
+        "chat_id": config.telegram_chat_id(),
+        "text": f"🤖 <code>#{msg_id}</code> · автопилот {count}/20: <i>{_html(excerpt)}</i>",
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    })
+
+
+def send_autopilot_start_notification(msg_id: int, floor: float, actor: str) -> None:
+    """Пинг при включении автопилота (notify mode)."""
+    _http_post("sendMessage", {
+        "chat_id": config.telegram_chat_id(),
+        "text": (
+            f"🚀 <b>АВТОПИЛОТ ВКЛЮЧЁН · #{msg_id}</b>\n"
+            f"floor: <code>{int(floor)}€</code> · запустил {_html(actor)}"
+        ),
+        "parse_mode": "HTML",
+    })
+
+
 def send_for_review(message_id: int) -> Optional[int]:
     """Отправить карточку оператору(ам) в Telegram. Возвращает первый telegram message_id.
 
@@ -885,7 +987,17 @@ def send_for_review(message_id: int) -> Optional[int]:
         return None
 
     text = _format_review_text(msg)
-    kb = _review_keyboard(message_id)
+    # Если автопилот активен для треда — урезанная клавиатура (только Stop + Back)
+    ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
+    if ap and ap["active"]:
+        kb_obj = _autopilot_active_keyboard(message_id)
+        # Конвертируем в dict для _http_post (sync API)
+        kb = {"inline_keyboard": [
+            [{"text": btn.text, "callback_data": btn.callback_data} for btn in row]
+            for row in kb_obj.inline_keyboard
+        ]}
+    else:
+        kb = _review_keyboard(message_id)
     dm_ids = config.telegram_operator_dm_ids()
     targets = dm_ids if dm_ids else [config.telegram_chat_id()]
 
@@ -1370,7 +1482,13 @@ def _pipeline_thread_card(r: sqlite3.Row, n: int, marker: str) -> tuple[str, Inl
     has_draft = bool(_safe_get(r, "has_pending_draft"))
     has_ack_only = has_any_sent and not has_real
 
-    if has_real:
+    # Автопилот active → перебивает обычный status
+    ap = db.get_thread_autopilot(r["gmail_thread_id"] or "")
+    is_ap_active = bool(ap and ap["active"])
+
+    if is_ap_active:
+        status_txt = f"🤖 автопилот {ap['messages_sent']}/20"
+    elif has_real:
         status_txt = "ответили"
     elif has_ack_only and has_draft:
         status_txt = "ack+draft"
@@ -1381,7 +1499,7 @@ def _pipeline_thread_card(r: sqlite3.Row, n: int, marker: str) -> tuple[str, Inl
     else:
         status_txt = "новый"
 
-    draft_marker = "📝" if has_draft else ""
+    draft_marker = "📝" if has_draft and not is_ap_active else ""
     buyer_raw = _safe_get(r, "buyer_display_name") or r["buyer_name"] or "?"
     buyer = (buyer_raw.split("@")[0] if "@" in buyer_raw else buyer_raw)[:25]
     ad = _short_ad_label(r)
@@ -2011,6 +2129,102 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _delete_range(context, chat_id, clicked_msg_id, scan=50)
         return
 
+    # ── Autopilot start: ввод floor ──
+    if action == "apstart":
+        # Проверим не активен ли уже
+        ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
+        if ap and ap["active"]:
+            await query.answer(
+                f"🤖 Уже активен ({ap['messages_sent']}/20). Используй 🛑 чтоб остановить.",
+                show_alert=True,
+            )
+            return
+        # Default floor — из ad_briefs.key_facts.min_acceptable_eur
+        ad_id_val = _safe_get(msg, "ad_id")
+        default_floor = ""
+        if ad_id_val:
+            try:
+                bf = db.get_ad_brief(ad_id_val)
+                if bf and bf["key_facts_json"]:
+                    kf = json.loads(bf["key_facts_json"] or "{}")
+                    mp = kf.get("min_acceptable_eur")
+                    if isinstance(mp, (int, float)) and mp > 0:
+                        default_floor = str(int(mp))
+            except Exception:
+                pass
+        prompt = (
+            "🚀 <b>Включаем автопилот</b>\n"
+            "<i>Бот будет авто-отвечать клиенту до закрытия сделки или 20-го сообщения.</i>\n\n"
+            f"💰 <b>Floor цены (€)</b> — ниже не уступит."
+        )
+        if default_floor:
+            prompt += f" Default: <code>{default_floor}</code>"
+        await _enter_input_mode(
+            query, context, update,
+            action="autopilot_floor", msg=msg,
+            prompt_label=prompt,
+            draft_text=None,
+            placeholder=default_floor or "1500",
+        )
+        return
+
+    # ── Autopilot confirm (после ввода floor + выбора режима): apconfirm:silent:N / apconfirm:notify:N ──
+    if action == "apconfirm":
+        notify_mode = sub  # "silent" или "notify"
+        if notify_mode not in ("silent", "notify"):
+            await query.message.reply_text(f"Битый режим: {sub}")
+            return
+        # Floor должен быть в state — но мы храним в _PENDING_INPUTS["payload"]
+        chat_id_now = query.message.chat_id
+        user_id_now = update.effective_user.id if update.effective_user else 0
+        pending = _PENDING_INPUTS.get((chat_id_now, user_id_now))
+        floor_val = None
+        if pending and pending.get("action") == "autopilot_pending_mode":
+            floor_val = pending.get("floor_eur")
+        if floor_val is None:
+            await query.message.reply_text("⚠️ Состояние потеряно — начни заново через 🚀")
+            return
+        # Активируем
+        thread_id = msg["gmail_thread_id"] or ""
+        db.start_thread_autopilot(
+            thread_id, floor_price_eur=float(floor_val),
+            notify_mode=notify_mode, started_by=actor,
+        )
+        # Очищаем state
+        _PENDING_INPUTS.pop((chat_id_now, user_id_now), None)
+        # Удалим stub-сообщение если есть
+        stub = pending.get("stub_msg_id") if pending else None
+        if stub:
+            try:
+                await context.bot.delete_message(chat_id=chat_id_now, message_id=stub)
+            except Exception:
+                pass
+        # Обновляем карточку (broadcast) — теперь с autopilot-active клавиатурой
+        updated = db.get_message(msg_id)
+        await _broadcast_card(
+            context, msg_id, _format_review_text(updated),
+            reply_markup=_autopilot_active_keyboard(msg_id),
+        )
+        # Notify-старт если режим notify
+        if notify_mode == "notify":
+            try:
+                send_autopilot_start_notification(msg_id, float(floor_val), actor)
+            except Exception:
+                logger.exception("autopilot start notification fail")
+        return
+
+    # ── Autopilot stop (manual) ──
+    if action == "apstop":
+        thread_id = msg["gmail_thread_id"] or ""
+        db.stop_thread_autopilot(thread_id, "manual")
+        updated = db.get_message(msg_id)
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(updated) + f"\n\n<i>🛑 {_html(actor)} остановил автопилот вручную</i>",
+            reply_markup=_review_keyboard_obj(msg_id),
+        )
+        return
+
     # ── Lock-check: actions меняющие state треда требуют монопольного доступа ──
     # Если другой оператор уже работает с тредом — popup, return.
     LOCKABLE_ACTIONS = {"send", "skip", "sold", "editru", "editde", "price", "instr",
@@ -2530,6 +2744,45 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                                   _format_review_text(msg_row) + f"\n\n{_html(result['message'])}",
                                   reply_markup=_review_keyboard_obj(msg_id))
         _release_lock(msg_id)
+        return
+
+    # ============================================================
+    # autopilot_floor — ввод floor цены, далее показываем выбор режима
+    # ============================================================
+    if action == "autopilot_floor":
+        m = re.search(r"(\d{1,7})", text.replace(" ", ""))
+        if not m:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Не нашёл число в «{text[:40]}». Попробуй заново через 🚀.",
+            )
+            await _broadcast_card(
+                context, msg_id, _format_review_text(msg_row),
+                reply_markup=_review_keyboard_obj(msg_id),
+            )
+            return
+        floor = float(m.group(1))
+        if not (1 <= floor < 1_000_000):
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Странный floor {floor}€.")
+            return
+        # Сохраняем floor в state, переключаемся в режим выбора notify_mode
+        _PENDING_INPUTS[(chat_id, user_id)] = {
+            "action": "autopilot_pending_mode",
+            "msg_id": msg_id,
+            "tg_msg_id": tg_msg_id,
+            "stub_msg_id": stub_msg_id,
+            "floor_eur": floor,
+        }
+        # Edit карточку: показать выбор режима
+        await _bot_edit(
+            context, chat_id, tg_msg_id,
+            _format_review_text(msg_row) + (
+                f"\n\n🚀 <b>floor = {int(floor)}€</b> — выбери режим уведомлений:\n"
+                f"• 🔔 Notify — пинг при старте/incoming/стопе\n"
+                f"• 🤫 Silent — пинг только при стопе"
+            ),
+            reply_markup=_autopilot_mode_choice_keyboard(msg_id),
+        )
         return
 
     # ============================================================

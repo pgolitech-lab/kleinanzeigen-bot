@@ -188,6 +188,65 @@ def _send_auto_ack(
     return ack_id
 
 
+def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) -> None:
+    """Обработать reply в автопилот-режиме.
+
+    Stop checks, авто-отправка / review-card / threat warning, counter increment, notification.
+    """
+    thread_id = autopilot_row["gmail_thread_id"]
+    notify_mode = autopilot_row["notify_mode"]
+    current_count = autopilot_row["messages_sent"]
+
+    # Stop checks ПЕРЕД отправкой
+    stop_reason: Optional[str] = None
+    if reply.get("should_stop"):
+        stop_reason = (reply.get("stop_reason") or "stopped_by_sonnet").strip() or "stopped_by_sonnet"
+    elif (current_count + 1) > 20:
+        stop_reason = "limit"
+
+    if stop_reason == "threat":
+        # Отправить предупреждение клиенту + остановить автопилот
+        db.update_message(msg_id, status="approved", is_autopilot_reply=1)
+        result = _send_reply(db.get_message(msg_id))
+        if result.get("kind") in ("sent", "skipped"):
+            db.increment_autopilot_messages(thread_id)
+        db.stop_thread_autopilot(thread_id, "threat")
+        try:
+            telegram_bot.send_autopilot_stop_notification(msg_id, "threat")
+        except Exception:
+            logger.exception("autopilot threat notification fail")
+        return
+
+    if stop_reason:
+        # Остановить БЕЗ отправки — оператор сам разрулит через обычную review-карточку
+        db.stop_thread_autopilot(thread_id, stop_reason)
+        try:
+            telegram_bot.send_for_review(msg_id)
+        except Exception:
+            logger.exception("send_for_review (autopilot stop) fail")
+        try:
+            telegram_bot.send_autopilot_stop_notification(msg_id, stop_reason)
+        except Exception:
+            logger.exception("autopilot stop notification fail")
+        return
+
+    # Нормальная авто-отправка
+    db.update_message(msg_id, status="approved", is_autopilot_reply=1)
+    result = _send_reply(db.get_message(msg_id))
+    if result.get("kind") in ("sent", "skipped"):
+        new_count = db.increment_autopilot_messages(thread_id)
+        if notify_mode == "notify":
+            try:
+                telegram_bot.send_autopilot_progress(msg_id, new_count)
+            except Exception:
+                logger.exception("autopilot progress notification fail")
+        logger.info("autopilot reply sent: msg=%s thread=%s count=%d/20",
+                    msg_id, thread_id, new_count)
+    else:
+        # SMTP fail — counter НЕ инкрементим, автопилот остаётся active
+        logger.warning("autopilot SMTP fail msg=%s — autopilot остаётся active", msg_id)
+
+
 def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) -> None:
     """Обработать одно входящее письмо: создать запись, спарсить, сгенерить ответ, послать оператору.
 
@@ -470,17 +529,47 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     )
     lessons_payload = [dict(r) for r in lessons_rows]
 
+    # Проверим autopilot для треда — если активен, используем generate_autopilot_reply
+    ap_thread_id = email.get("gmail_thread_id") or ""
+    autopilot = db.get_thread_autopilot(ap_thread_id) if ap_thread_id else None
+    is_autopilot = bool(autopilot and autopilot["active"])
+
     try:
-        reply = claude.generate_reply(
-            de_client_text=body,
-            ad_title=ad.get("title", ""),
-            ad_price=ad.get("price", ""),
-            ad_description=ad.get("description", ""),
-            seller_name=ad.get("seller_name", ""),
-            history=history,
-            brief_text=brief_text,
-            lessons=lessons_payload,
-        )
+        if is_autopilot:
+            # last_our_price_eur — из deal_brief последнего outgoing-row в треде
+            last_price = None
+            for r in reversed(db.thread_history(ap_thread_id)):
+                bj = _row_get(r, "deal_brief_json")
+                if bj:
+                    try:
+                        d = json.loads(bj)
+                        p = d.get("negotiated_price_eur")
+                        if isinstance(p, (int, float)) and p > 0:
+                            last_price = float(p)
+                            break
+                    except Exception:
+                        pass
+            reply = claude.generate_autopilot_reply(
+                de_client_text=body,
+                ad_title=ad.get("title", ""),
+                ad_price=ad.get("price", ""),
+                ad_description=ad.get("description", ""),
+                seller_name=ad.get("seller_name", ""),
+                history=history, brief_text=brief_text, lessons=lessons_payload,
+                floor_eur=autopilot["floor_price_eur"],
+                last_our_price_eur=last_price,
+            )
+        else:
+            reply = claude.generate_reply(
+                de_client_text=body,
+                ad_title=ad.get("title", ""),
+                ad_price=ad.get("price", ""),
+                ad_description=ad.get("description", ""),
+                seller_name=ad.get("seller_name", ""),
+                history=history,
+                brief_text=brief_text,
+                lessons=lessons_payload,
+            )
     except Exception as e:
         logger.exception("Claude упал для msg=%s: %s", inserted_id, e)
         return  # оставим в status='new', оператор увидит в веб-морде
@@ -555,6 +644,19 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         deal_brief_json=deal_brief_json,
         similar_buyers_json=similar_json,
     )
+
+    # ── Dispatch: автопилот или обычная карточка ──
+    if is_autopilot:
+        try:
+            _autopilot_dispatch(inserted_id, autopilot, reply)
+        except Exception:
+            logger.exception("autopilot dispatch упал для msg=%s", inserted_id)
+            # На fallback — пошлём обычную карточку, чтоб не потерять
+            try:
+                telegram_bot.send_for_review(inserted_id)
+            except Exception:
+                pass
+        return
 
     try:
         telegram_bot.send_for_review(inserted_id)

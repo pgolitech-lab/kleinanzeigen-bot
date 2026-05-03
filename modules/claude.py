@@ -360,6 +360,147 @@ def generate_reply(
     }
 
 
+_AUTOPILOT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "client_lang": {"type": "string"},
+        "ru_client": {"type": "string"},
+        "ru_answer": {"type": "string"},
+        "client_answer": {"type": "string"},
+        "ru_translation": {"type": "string"},
+        "deal_summary_ru": {"type": "string"},
+        "expected_next": {"type": "string"},
+        "negotiated_price_eur": {"type": ["number", "null"]},
+        "client_assessment": {"type": "string"},
+        "should_stop": {
+            "type": "boolean",
+            "description": "true если автопилот должен остановиться после этого ответа",
+        },
+        "stop_reason": {
+            "type": "string",
+            "description": "Почему стоп: ready_to_buy / wants_contact / threat / '' если не стоп",
+        },
+        "client_pressing_below_floor": {
+            "type": "boolean",
+            "description": "true если клиент давит ниже floor_eur — мы отказали в client_answer",
+        },
+    },
+    "required": [
+        "client_lang", "ru_client", "ru_answer", "client_answer", "ru_translation",
+        "deal_summary_ru", "expected_next", "negotiated_price_eur", "client_assessment",
+        "should_stop", "stop_reason", "client_pressing_below_floor",
+    ],
+    "additionalProperties": False,
+}
+
+
+def generate_autopilot_reply(
+    de_client_text: str,
+    ad_title: str = "",
+    ad_price: str = "",
+    ad_description: str = "",
+    seller_name: str = "",
+    history: Optional[list[dict[str, Any]]] = None,
+    brief_text: str = "",
+    lessons: Optional[list[dict[str, Any]]] = None,
+    floor_eur: float = 0,
+    last_our_price_eur: Optional[float] = None,
+    max_tokens: int = 2500,
+) -> dict[str, Any]:
+    """Sonnet auto-reply для автопилота: floor-aware, с web_search tool, со stop-detection.
+
+    Возвращает dict с полями generate_reply + should_stop / stop_reason /
+    client_pressing_below_floor / used_web_search.
+    """
+    api_key = config.anthropic_api_key()
+    if not api_key:
+        raise RuntimeError("Не задан Anthropic API ключ")
+
+    user_text = _build_user_message(
+        de_client_text=de_client_text,
+        ad_title=ad_title, ad_price=ad_price, ad_description=ad_description,
+        seller_name=seller_name, history=history,
+        brief_text=brief_text, lessons=lessons,
+    )
+
+    autopilot_addendum = (
+        "\n\n=== РЕЖИМ АВТОПИЛОТА ===\n"
+        "Ты ведёшь переговоры самостоятельно — оператор не проверяет твой ответ. Цель — продать товар.\n"
+        f"HARD FLOOR: НЕ ОПУСКАТЬ цену ниже {floor_eur}€. "
+    )
+    if last_our_price_eur and last_our_price_eur > 0:
+        autopilot_addendum += (
+            f"Также НЕ опускать ниже того что уже сказали клиенту в этом треде ({last_our_price_eur}€).\n"
+        )
+    else:
+        autopilot_addendum += "В этом треде мы ещё не озвучивали свою цену.\n"
+    autopilot_addendum += (
+        "\nОБЯЗАТЕЛЬНО останавливай автопилот (should_stop=true) когда:\n"
+        "- клиент готов купить / просит банк-реквизиты / адрес для встречи / детали закрытия → stop_reason=\"ready_to_buy\" или \"wants_contact\"\n"
+        "- клиент пишет угрозы / агрессивные / оскорбительные фразы → stop_reason=\"threat\". В client_answer ответь «Wir betrachten das als Drohung. Bitte unterlassen Sie weitere Nachrichten dieser Art.» или эквивалент на ЯЗЫКЕ КЛИЕНТА. Это единственный stop_reason где мы ВСЁ ЕЩЁ отправляем client_answer (предупреждение); остальные stop-причины → пишем что-то нейтральное в client_answer (всё равно отправится если оператор решит руками).\n"
+        "\nВ остальных случаях продолжай переговоры:\n"
+        "- Просит то чего нет (другая комплектация, цвет, размер) → вежливо откажи: «нет в наличии, доступно только X»\n"
+        "- Просит фото/видео которых у нас нет → «не под рукой, могу позже отправить / приезжайте посмотреть лично»\n"
+        "- Технический вопрос — отвечай из своих знаний. Используй web_search ТОЛЬКО если действительно специфичный вопрос (точный VIN, конкретная совместимость с редкой моделью) и ты не уверен. Мы платим за поиск.\n"
+        "- НЕ ВРИ про конкретные spec-числа которых не знаешь. Лучше: «уточню при встрече» или «в описании указано X, точные характеристики могу проверить».\n"
+        "- Если клиент давит ниже floor → откажи «Это окончательная цена», установи client_pressing_below_floor=true\n"
+        "\nстиль автопилота: настойчивый продавец, дружелюбный но твёрдый, не теряющий фокус на закрытии сделки. Краткий — 2-4 предложения."
+    )
+
+    full_user = user_text + autopilot_addendum
+
+    client = anthropic.Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model=config.claude_model(),
+        max_tokens=max_tokens,
+        system=config.system_prompt(),
+        thinking={"type": "disabled"},
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        output_config={
+            "effort": "low",
+            "format": {"type": "json_schema", "schema": _AUTOPILOT_SCHEMA},
+        },
+        messages=[{"role": "user", "content": full_user}],
+    )
+
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    if not text:
+        raise RuntimeError("Claude вернул пустой ответ (autopilot)")
+
+    # Детект использовал ли web_search
+    used_web_search = any(
+        getattr(b, "type", "") in ("server_tool_use", "tool_use") for b in response.content
+    )
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Autopilot reply невалидный JSON: {e}\n{text[:500]}")
+
+    in_t, out_t, cost = _calc_cost(config.claude_model(), response.usage)
+    deal_brief = {
+        "summary_ru": (data.get("deal_summary_ru") or "").strip(),
+        "expected_next": (data.get("expected_next") or "").strip(),
+        "negotiated_price_eur": data.get("negotiated_price_eur"),
+        "client_assessment": (data.get("client_assessment") or "").strip(),
+    }
+    return {
+        "client_lang": data["client_lang"].strip().lower(),
+        "ru_client": data["ru_client"].strip(),
+        "ru_answer": data["ru_answer"].strip(),
+        "de_answer": data["client_answer"].strip(),
+        "ru_translation": (data.get("ru_translation") or "").strip(),
+        "deal_brief": deal_brief,
+        "should_stop": bool(data.get("should_stop")),
+        "stop_reason": (data.get("stop_reason") or "").strip(),
+        "client_pressing_below_floor": bool(data.get("client_pressing_below_floor")),
+        "used_web_search": used_web_search,
+        "tokens_in": in_t,
+        "tokens_out": out_t,
+        "cost_usd": cost,
+    }
+
+
 def translate_only(
     text: str,
     direction: str = "ru_to_de",
