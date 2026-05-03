@@ -254,6 +254,48 @@ def _safe_get(row: sqlite3.Row, key: str) -> Optional[str]:
         return None
 
 
+def _ensure_ru_client(msg_row: sqlite3.Row) -> str:
+    """Вернуть ru_client. Если пуст — Haiku translate de_client → RU + кэшировать в БД.
+
+    Используется для archived rows из backfill (они без перевода).
+    """
+    existing = (msg_row["ru_client"] or "").strip()
+    if existing:
+        return existing
+    de = (msg_row["de_client"] or "").strip()
+    if not de:
+        return ""
+    try:
+        r = claude.detect_and_translate_to_ru(de)
+        ru = (r.get("translation_ru") or "").strip()
+        if ru:
+            db.update_message(
+                msg_row["id"],
+                ru_client=ru,
+                client_lang=r.get("lang") or msg_row["client_lang"],
+            )
+            return ru
+    except Exception:
+        logger.exception("ensure_ru_client: Haiku translate упал msg=%s", msg_row["id"])
+    return de[:120]  # fallback
+
+
+def _last_our_reply_in_thread(thread_id: str) -> Optional[str]:
+    """RU-текст нашего последнего исходящего в треде (если есть)."""
+    if not thread_id:
+        return None
+    rows = db.thread_history(thread_id)
+    # Ищем последний row с de_answer и status sent/sent_debug/edited (любое исх.)
+    for r in reversed(rows):
+        if r["de_answer"] and r["status"] in ("sent", "sent_debug", "edited"):
+            ru = (r["ru_answer"] or "").strip()
+            if ru:
+                return ru
+            # back-translate если нет RU? Skip — слишком много Haiku-вызовов
+            return (r["de_answer"] or "")[:200]
+    return None
+
+
 def _format_related_warning(msg: sqlite3.Row) -> str:
     """Warning-блок если клиент засветился ещё где-то.
 
@@ -293,15 +335,41 @@ def _format_related_warning(msg: sqlite3.Row) -> str:
             f"({len(related)} тред{'а' if 1 < len(related) < 5 else 'ов'} с тем же именем)"
         )
         for r in related:
-            title = (r["ad_title"] or "—")[:45]
+            title = (r["ad_title"] or "—")[:50]
             price = _short_price(r["ad_price"])
             ts = _safe_get(r, "sent_at") or r["created_at"] or ""
             age = _humanize_age(ts)
             st = r["status"] or ""
+            # Какой НАШ аккаунт получил это inquiry
+            acc_label = ""
+            try:
+                acc = db.get_account(r["account_id"])
+                if acc:
+                    acc_name = acc["name"] or acc["gmail_email"]
+                    acc_label = f" · 📧 {_html(acc_name)}"
+            except Exception:
+                pass
+            lines.append("")
             lines.append(
-                f"  • <code>#{r['id']}</code> · {_html(title)} · {price or '—'} · "
-                f"⏱{age} · <code>{_html(st)}</code>"
+                f"  📦 <b>#{r['id']}</b> · {_html(title)} · {price or '—'} · "
+                f"⏱{age} · <code>{_html(st)}</code>{acc_label}"
             )
+            # Что писал клиент (на RU; для archived rows — translate on-demand)
+            client_ru = _ensure_ru_client(r)
+            if client_ru:
+                excerpt = client_ru.replace("\n", " ").strip()
+                if len(excerpt) > 200:
+                    excerpt = excerpt[:197] + "…"
+                lines.append(f"     ← <i>{_html(excerpt)}</i>")
+            # Что мы ответили в этом треде (если ответили)
+            our_reply = _last_our_reply_in_thread(r["gmail_thread_id"] or "")
+            if our_reply:
+                excerpt = our_reply.replace("\n", " ").strip()
+                if len(excerpt) > 200:
+                    excerpt = excerpt[:197] + "…"
+                lines.append(f"     → <i>мы: {_html(excerpt)}</i>")
+            else:
+                lines.append("     → <i>мы не ответили</i>")
 
     if sim_matches:
         if related:

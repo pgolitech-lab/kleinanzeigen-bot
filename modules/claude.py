@@ -963,6 +963,53 @@ _SIMILAR_BUYER_SCHEMA: dict[str, Any] = {
 }
 
 
+_DETECT_TRANSLATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "lang": {"type": "string", "description": "ISO 639-1 код языка исходного"},
+        "translation_ru": {"type": "string", "description": "Точный перевод на русский"},
+    },
+    "required": ["lang", "translation_ru"],
+    "additionalProperties": False,
+}
+
+
+def detect_and_translate_to_ru(text: str) -> dict[str, Any]:
+    """Haiku: определить язык + перевести на русский.
+
+    Используется для archived rows у которых ru_client пуст (был backfill без Sonnet).
+    Дешёво (~$0.001 на короткий текст).
+    """
+    api_key = config.anthropic_api_key()
+    if not api_key:
+        raise RuntimeError("Не задан Anthropic API key")
+    if not text or not text.strip():
+        return {"lang": "?", "translation_ru": "", "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
+    client = anthropic.Anthropic(api_key=api_key)
+    classifier_model = "claude-haiku-4-5"
+    response = client.messages.create(
+        model=classifier_model,
+        max_tokens=800,
+        system="Ты переводчик. Определи язык исходного текста и сделай точный перевод на русский.",
+        output_config={
+            "format": {"type": "json_schema", "schema": _DETECT_TRANSLATE_SCHEMA},
+        },
+        messages=[{"role": "user", "content": f"Текст:\n«{text[:1500]}»"}],
+    )
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    if not raw:
+        return {"lang": "?", "translation_ru": text[:200], "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
+    data = json.loads(raw)
+    in_t, out_t, cost = _calc_cost(classifier_model, response.usage)
+    return {
+        "lang": (data.get("lang") or "?").lower().strip(),
+        "translation_ru": (data.get("translation_ru") or "").strip(),
+        "cost_usd": cost,
+        "tokens_in": in_t,
+        "tokens_out": out_t,
+    }
+
+
 def detect_similar_buyer(
     current_text: str,
     candidates: list[dict[str, Any]],
