@@ -31,7 +31,9 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - `modules/claude.py` — Anthropic SDK обёртки:
   - `generate_reply` (Sonnet, full schema: client_lang+ru_client+ru_answer+de_answer+**ru_translation**+deal_brief)
   - `regenerate_with_strategy` / `regenerate_with_price` / `regenerate_with_instruction` через `_regenerate_core`
+  - **`generate_autopilot_reply`** (Sonnet с web_search tool, floor-aware, stop-detection)
   - `translate_only(text, source_lang, target_lang)` — для back-translate в Edit DE
+  - `detect_and_translate_to_ru` (Haiku, для backfill-translate в related-client warning)
   - `generate_followup_ping`, `summarize_thread`
   - `classify_email_is_inquiry` (Haiku, junk filter)
   - `generate_auto_ack` (Haiku, для приветствия-заглушки)
@@ -57,6 +59,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - email_subject, tokens_in/out, cost_usd, sent_at, sent_message_id (наш SMTP)
 - reminder_state ('none'/'offered'/'approved'/'skipped'), is_reminder, reminder_snooze_until
 - **is_auto_ack** (NEW: 1 если row — auto-приветствие)
+- **is_autopilot_reply** (NEW: 1 если row отправлена в режиме автопилота — для аналитики и отображения 🤖)
 - **history_summary_ru** (Claude-summary для блока «История»)
 - **extra_notes** (NEW: лог операторских инструкций «💸 цена / 📝 свобод. инстр»)
 - **deal_brief_json** (NEW: JSON {summary_ru, expected_next, negotiated_price_eur, client_assessment} — генерится Sonnet вместе с reply)
@@ -69,6 +72,8 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 **`lessons`**: пары (плохой_бот_драфт → правка_оператора). Топ-5 релевантных передаются в Claude при генерации (in-context learning). Создаются при ручной правке оператором.
 
 **`card_dispatches`** (NEW для DM-fanout): id, message_id (FK→messages), chat_id, tg_msg_id, sent_at. Хранит fanout-копии review-карточки в DM каждого оператора, нужен для broadcast-обновлений.
+
+**`thread_autopilot`** (NEW): per-thread state автопилота. PK=`gmail_thread_id`. Поля: `active`, `floor_price_eur`, `notify_mode` ('silent'|'notify'), `messages_sent` (counter, max 20), `started_by/at`, `stopped_at`, `stop_reason`. UPSERT при start (можно переактивировать после стопа).
 
 ## Telegram-бот (`modules/telegram_bot.py`)
 
@@ -155,6 +160,23 @@ Sitzbank, Sitze Peugeot · 2+1 · 📦 б/у · 1000€   ← товар + ко�
 - **Точное совпадение** по `buyer_display_name` (мгновенно из `db.find_related_inquiries`)
 - **Подозрение по стилю** (из `messages.similar_buyers_json` — Haiku-детект на новых incoming, score ≥ 6/10)
 
+### Autopilot (полная авто-беседа с клиентом)
+- Кнопка `🚀 Полный автопилот` на review-карточке (активирует через input flow: floor цены → выбор `🤫 Silent` / `🔔 Notify` → старт)
+- При активном автопилоте каждое следующее incoming в треде → `claude.generate_autopilot_reply` (Sonnet с web_search tool) → автоматическая отправка БЕЗ operator review
+- DB: `thread_autopilot` table per-thread + `messages.is_autopilot_reply=1` на каждом авто-row
+- **Stop conditions** (любой триггер → `db.stop_thread_autopilot(thread_id, reason)` + DM-нотификация):
+  - `limit` — 20 авто-сообщений
+  - `ready_to_buy` / `wants_contact` — Sonnet детектит что клиент дозрел / просит контакты-реквизиты-встречу. На этом messages не отправляется автопилотом, оператор получает обычную review-карточку
+  - `threat` — Sonnet детектит угрозу. **Только в этом случае** auto-reply ОТПРАВЛЯЕТСЯ (предупреждение клиенту), потом стоп
+  - `manual` — оператор кликнул `🛑 Остановить автопилот` (silent — без пинга)
+- **Bridge в `_process_incoming`**: после Sonnet (или autopilot reply) → `_autopilot_dispatch` → counter increment ПОСЛЕ успешного `_send_reply` (sent или skipped/disabled). SMTP fail → counter не растёт, автопилот active
+- **Floor enforcement** — system prompt передаёт `floor_eur` + `last_our_price_eur` (из `deal_brief_json` предыдущего outgoing). Sonnet по идее не уступит ниже. **NB:** программной валидации цены НЕТ — полагаемся на Sonnet (можно усилить если drift обнаружится)
+- **Pipeline-карточка**: status_txt = «🤖 автопилот N/20» (перебивает обычные ответили/draft/etc)
+- **Review-карточка активного автопилота**: жёлтый header-блок «🤖 АВТОПИЛОТ АКТИВЕН (N/20) · floor: X€ · режим: …» + клавиатура заменена на `🛑 Остановить + ↩ Назад`
+- **Web search**: `tools=[{"type": "web_search_20250305"}]` — Anthropic native. Sonnet решает сам когда использовать (промпт ограничивает «только при специфичных вопросах, мы платим»). Версия tool-а может потребовать обновления при изменении API
+- **Notifications** через `_http_post` (fanout DMs): `send_autopilot_start_notification` (notify mode), `send_autopilot_progress` (notify mode, на каждый авто-ответ), `send_autopilot_stop_notification` (всегда кроме `manual`)
+- Spec: `docs/superpowers/specs/2026-05-03-autopilot-design.md`
+
 ### Auto-ack (накрутка метрики «отвечает в течение X часов»)
 - Per-account toggle `accounts.auto_ack_enabled` (default 0)
 - При первом incoming в новом thread-id → ДО Playwright/Sonnet вызывается `claude.generate_auto_ack` (Haiku ~$0.001) → SMTP send → row в БД с `is_auto_ack=1`
@@ -224,3 +246,4 @@ ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
 ## История фич / спеки
 - `docs/superpowers/specs/2026-05-03-auto-ack-design.md` — auto-приветствие (Haiku, накрутка метрики Kleinanzeigen)
 - `docs/superpowers/specs/2026-05-03-tg-rework-design.md` — полный rewrite Telegram UX (раскладка, confirmation, edit RU/DE, custom price/instruction, draft preload)
+- `docs/superpowers/specs/2026-05-03-autopilot-design.md` — полная авто-беседа с клиентом (Sonnet + web_search, floor + 20-msg cap + stop conditions)
