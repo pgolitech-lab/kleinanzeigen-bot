@@ -340,13 +340,19 @@ def _format_related_warning(msg: sqlite3.Row) -> str:
             ts = _safe_get(r, "sent_at") or r["created_at"] or ""
             age = _humanize_age(ts)
             st = r["status"] or ""
-            # Какой НАШ аккаунт получил это inquiry
+            # Какой НАШ аккаунт получил это inquiry — name + email
             acc_label = ""
             try:
                 acc = db.get_account(r["account_id"])
                 if acc:
-                    acc_name = acc["name"] or acc["gmail_email"]
-                    acc_label = f" · 📧 {_html(acc_name)}"
+                    acc_name = (acc["name"] or "").strip()
+                    acc_email = (acc["gmail_email"] or "").strip()
+                    if acc_name and acc_email:
+                        acc_label = f" · 📧 {_html(acc_name)} ({_html(acc_email)})"
+                    elif acc_email:
+                        acc_label = f" · 📧 {_html(acc_email)}"
+                    elif acc_name:
+                        acc_label = f" · 📧 {_html(acc_name)}"
             except Exception:
                 pass
             lines.append("")
