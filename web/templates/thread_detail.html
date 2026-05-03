@@ -1,0 +1,140 @@
+{# Детальная страница треда: чат-стиль (входящие слева, исходящие справа) +
+   панель действий по pending-черновику (если он есть). #}
+{% extends "base.html" %}
+
+{% block title %}{{ head.ad_title or 'Тред' }} — Kleinanzeigen Bot{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="/threads" class="btn btn-sm btn-outline-secondary">← К списку</a>
+    <span class="text-muted-sm">thread_id: <code>{{ head.thread_id }}</code></span>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h4 mb-2">📦 {{ head.ad_title or '— без объявления —' }}</h2>
+        <div class="d-flex flex-wrap gap-3 text-muted-sm">
+            {% if head.ad_price %}<span>💰 {{ head.ad_price }}</span>{% endif %}
+            {% if head.seller %}<span>🏪 Наш: {{ head.seller }}</span>{% endif %}
+            {% if head.buyer_display or head.buyer_email %}
+            <span>👤 Клиент: {{ head.buyer_display or head.buyer_email }}</span>
+            {% endif %}
+            {% if head.ad_url %}<span>🔗 <a href="{{ head.ad_url }}" target="_blank" rel="noopener">Открыть объявление</a></span>{% endif %}
+            {% set total_cost = messages | selectattr('cost_usd') | sum(attribute='cost_usd', start=0) %}
+            {% if total_cost %}<span>💸 ${{ '%.4f' | format(total_cost) }} за весь тред</span>{% endif %}
+        </div>
+    </div>
+</div>
+
+{% if brief %}
+{% set kf = brief.key_facts %}
+<div class="alert alert-info py-2 px-3 mb-4 d-flex justify-content-between align-items-center small">
+    <span>
+        <strong>📋</strong>
+        {% if kf.title_short %}{{ kf.title_short }}{% endif %}
+        {% if kf.condition %}<span class="text-muted-sm"> — {{ kf.condition }}</span>{% endif %}
+        {% if kf.min_acceptable_eur %}<span class="ms-2">💶 мин. {{ kf.min_acceptable_eur }} €</span>{% endif %}
+    </span>
+    <button class="btn btn-sm btn-link p-0" type="button" data-bs-toggle="collapse" data-bs-target="#brief-full">
+        details
+    </button>
+</div>
+<div class="collapse mb-4" id="brief-full">
+    <div class="card card-body small">
+        <p class="mb-2">{{ brief.brief_md }}</p>
+        {% if kf.key_specs %}<div><strong>Характеристики:</strong> {{ kf.key_specs | join('; ') }}</div>{% endif %}
+        {% if kf.selling_points %}<div class="text-success-emphasis"><strong>✅ Сильные:</strong> {{ kf.selling_points | join('; ') }}</div>{% endif %}
+        {% if kf.weak_points %}<div class="text-warning-emphasis"><strong>⚠️ Возражения:</strong> {{ kf.weak_points | join('; ') }}</div>{% endif %}
+        <div class="text-muted-sm mt-2">обновлён {{ brief.updated_at[:19] }}</div>
+    </div>
+</div>
+{% endif %}
+
+{% if lessons %}
+<div class="card mb-4 border-warning">
+    <div class="card-header">
+        🎓 Уроки оператора по этому объявлению ({{ lessons | length }})
+    </div>
+    <div class="list-group list-group-flush">
+        {% for ls in lessons %}
+        <div class="list-group-item">
+            {% if ls.client_situation_ru %}
+            <div class="text-muted-sm mb-1">📥 Клиент: {{ ls.client_situation_ru[:200] }}{% if ls.client_situation_ru | length > 200 %}…{% endif %}</div>
+            {% endif %}
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <div class="small text-danger-emphasis"><strong>❌ Бот предлагал:</strong></div>
+                    <pre class="bg-body-tertiary p-2 small rounded border mb-0">{{ ls.bad_draft_ru or '—' }}</pre>
+                </div>
+                <div class="col-md-6">
+                    <div class="small text-success-emphasis"><strong>✅ Оператор переписал:</strong></div>
+                    <pre class="bg-body-tertiary p-2 small rounded border mb-0">{{ ls.good_answer_ru or '—' }}</pre>
+                </div>
+            </div>
+            <div class="text-muted-sm small mt-1">{{ ls.created_at[:19] }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# Лента сообщений в чат-стиле #}
+{% for m in messages %}
+<div class="chat-row {{ 'in' if m.direction == 'in' else 'out' }}">
+    <div class="chat-bubble">
+        <div class="chat-meta">
+            {% if m.direction == 'in' %}📥 {{ m.created_at[:19] }}{% if m.buyer_name %} · {{ m.buyer_name }}{% endif %}
+            {% else %}📤 {{ m.created_at[:19] }} · <span class="badge text-bg-{{ status_color(m.status) }}">{{ m.status }}</span>{% if m.is_auto_ack %} <span class="badge text-bg-info">🤖 ack</span>{% endif %}
+            {% endif %}
+        </div>
+
+        {# Тело: для входящих — оригинал DE; для исходящих — то что отправили (de_answer) #}
+        {% if m.direction == 'in' %}
+            {{ m.de_client or '— пусто —' }}
+            {% if m.ru_client %}
+            <div class="chat-secondary">🇷🇺 {{ m.ru_client }}</div>
+            {% endif %}
+        {% else %}
+            {{ m.de_answer or '— пусто —' }}
+            {% if m.ru_answer %}
+            <div class="chat-secondary">🇷🇺 {{ m.ru_answer }}</div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">В треде нет сообщений.</div>
+{% endfor %}
+
+{# Панель действий по pending-черновику #}
+{% if pending %}
+<div class="card border-warning mt-4">
+    <div class="card-header">
+        ⏳ Ждёт твоего решения · msg_id={{ pending.id }} · status=<span class="badge text-bg-{{ status_color(pending.status) }}">{{ pending.status }}</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <h6 class="mb-1">Черновик ответа (DE)</h6>
+                <pre class="bg-body-tertiary p-2 rounded small">{{ pending.de_answer or '— пусто —' }}</pre>
+            </div>
+            <div class="col-md-6">
+                <h6 class="mb-1">RU-перевод</h6>
+                <pre class="bg-body-tertiary p-2 rounded small">{{ pending.ru_answer or '— пусто —' }}</pre>
+            </div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+            <form method="post" action="/threads/{{ head.thread_id }}/approve/{{ pending.id }}">
+                <button type="submit" class="btn btn-success">✅ Отправить</button>
+            </form>
+            <form method="post" action="/threads/{{ head.thread_id }}/skip/{{ pending.id }}">
+                <button type="submit" class="btn btn-outline-danger">❌ Пропустить</button>
+            </form>
+            <span class="text-muted-sm align-self-center ms-2">
+                Редактирование текста — через Telegram-бот, кнопка ✏️
+            </span>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

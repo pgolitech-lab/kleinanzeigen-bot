@@ -1,0 +1,25 @@
+[Unit]
+Description=Kleinanzeigen Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pg
+WorkingDirectory=/home/pg/kleinanzeigen-bot
+ExecStart=/usr/bin/python3 main.py
+
+# Автоперезапуск при любом падении (через 5 сек)
+Restart=always
+RestartSec=5
+
+# Логирование в journalctl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kleinanzeigen-bot
+
+# Не буферизовать stdout/stderr — логи появляются в journalctl сразу
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,169 @@
+{# Дашборд: счётчики по статусам сообщений + краткая сводка #}
+{% extends "base.html" %}
+
+{% block title %}Дашборд — Kleinanzeigen Bot{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Дашборд</h1>
+
+{# Карточки со счётчиками — данные приходят в context.stats #}
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-md-3">
+        <div class="card text-bg-secondary h-100">
+            <div class="card-body">
+                <div class="text-muted-sm">Активных аккаунтов</div>
+                <div class="display-6">{{ stats.active_accounts | default(0) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <div class="card text-bg-warning h-100">
+            <div class="card-body">
+                <div class="text-muted-sm">Ждут проверки</div>
+                <div class="display-6">{{ stats.pending | default(0) }}</div>
+                <a href="/messages?status=pending" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <div class="card text-bg-info h-100">
+            <div class="card-body">
+                <div class="text-muted-sm">Одобрено к отправке</div>
+                <div class="display-6">{{ stats.approved | default(0) }}</div>
+                <a href="/messages?status=approved" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <div class="card text-bg-success h-100">
+            <div class="card-body">
+                <div class="text-muted-sm">Отправлено всего</div>
+                <div class="display-6">{{ stats.sent | default(0) }}</div>
+                <a href="/messages?status=sent" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# API-расходы — суммарно по всем сообщениям. Подтягивается из /api/status #}
+<h2 class="h4 mb-3">Anthropic API — расходы</h2>
+<div class="row g-3 mb-4" id="api-cost-row">
+    <div class="col-12 text-muted">Загрузка…</div>
+</div>
+
+{# Текущие задачи scheduler-а — данные подтягиваются из /api/status каждые 5с #}
+<h2 class="h4 mb-3">Текущие задачи</h2>
+<div class="row g-3 mb-4" id="jobs-row">
+    <div class="col-12 text-muted">Загрузка статуса…</div>
+</div>
+
+{# Последние сообщения — топ-10 #}
+<h2 class="h4 mb-3">Последние сообщения</h2>
+{% if recent %}
+<div class="table-responsive">
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Когда</th>
+                <th>Объявление</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in recent %}
+            <tr>
+                <td>{{ m.id }}</td>
+                <td class="text-muted-sm">{{ m.created_at[:19] }}</td>
+                <td>{{ m.ad_title or '—' }}</td>
+                <td><span class="badge text-bg-secondary">{{ m.status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted">Сообщений пока нет.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const row = document.getElementById('jobs-row');
+
+    function escapeHtml(s) {
+        return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function jobCard(j) {
+        const cls = j.ok === true ? 'ok' : (j.ok === false ? 'fail' : 'idle');
+        const status = j.ok === true ? '✅ OK'
+                     : j.ok === false ? '❌ Ошибка'
+                     : '⏳ Ещё не запускалась';
+        const detail = j.error
+            ? '<div class="text-danger small mt-1"><strong>Ошибка:</strong> ' + escapeHtml(j.error) + '</div>'
+            : (j.result ? '<div class="text-muted-sm mt-1">' + escapeHtml(j.result) + '</div>' : '');
+        return (
+            '<div class="col-md-4">' +
+              '<div class="card job-card ' + cls + ' h-100">' +
+                '<div class="card-body">' +
+                  '<div class="d-flex justify-content-between align-items-start">' +
+                    '<strong>' + escapeHtml(j.name) + '</strong>' +
+                    '<span class="badge text-bg-' + (cls === 'ok' ? 'success' : cls === 'fail' ? 'danger' : 'secondary') + '">' + status + '</span>' +
+                  '</div>' +
+                  '<div class="text-muted-sm mt-2">' +
+                    'Последний запуск: ' + escapeHtml(j.last_run || '—') + '<br>' +
+                    'Следующий: ' + escapeHtml(j.next_run || '—') +
+                  '</div>' +
+                  detail +
+                '</div>' +
+              '</div>' +
+            '</div>'
+        );
+    }
+
+    const apiRow = document.getElementById('api-cost-row');
+    function apiCostCards(c) {
+        const fmt = (n) => '$' + Number(n).toFixed(4);
+        const tk = (n) => Number(n).toLocaleString('ru-RU');
+        return (
+            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
+              '<div class="text-muted-sm">Всего</div>' +
+              '<div class="display-6">' + fmt(c.total_usd) + '</div>' +
+              '<div class="text-muted-sm small">' + c.messages_processed + ' сообщ.</div>' +
+            '</div></div></div>' +
+            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
+              '<div class="text-muted-sm">Input tokens</div>' +
+              '<div class="h3 mt-1">' + tk(c.tokens_in) + '</div>' +
+            '</div></div></div>' +
+            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
+              '<div class="text-muted-sm">Output tokens</div>' +
+              '<div class="h3 mt-1">' + tk(c.tokens_out) + '</div>' +
+            '</div></div></div>' +
+            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
+              '<div class="text-muted-sm">Модель</div>' +
+              '<div class="h6 mt-1"><code>' + escapeHtml(c.model) + '</code></div>' +
+              '<div class="text-muted-sm small mt-2">Баланс — на <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">console.anthropic.com</a></div>' +
+            '</div></div></div>'
+        );
+    }
+
+    async function refresh() {
+        try {
+            const r = await fetch('/api/status');
+            if (!r.ok) return;
+            const data = await r.json();
+            row.innerHTML = data.jobs.length
+                ? data.jobs.map(jobCard).join('')
+                : '<div class="col-12 text-muted">Scheduler не запущен.</div>';
+            if (data.api_cost) {
+                apiRow.innerHTML = apiCostCards(data.api_cost);
+            }
+        } catch (e) {}
+    }
+    refresh();
+    setInterval(refresh, 5000);
+})();
+</script>
+{% endblock %}

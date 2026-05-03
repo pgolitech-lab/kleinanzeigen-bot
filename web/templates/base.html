@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Kleinanzeigen Bot{% endblock %}</title>
+    {# Bootstrap 5 с CDN — минимум зависимостей. data-bs-theme=dark включает встроенный тёмный режим. #}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding-top: 70px; background-color: #0d1117; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+        .text-muted-sm { font-size: 0.85em; color: #8b949e; }
+        /* Контейнер для лога — фиксированная высота, моноширина, авто-скролл */
+        .log-window {
+            background: #010409;
+            color: #c9d1d9;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12.5px;
+            line-height: 1.45;
+            padding: 0.75rem 1rem;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            height: 60vh;
+            overflow-y: auto;
+        }
+        .log-window .lvl-INFO    { color: #58a6ff; }
+        .log-window .lvl-WARNING { color: #d29922; }
+        .log-window .lvl-ERROR,
+        .log-window .lvl-CRITICAL{ color: #f85149; }
+        .log-window .lvl-DEBUG   { color: #6e7681; }
+        .log-window .ts          { color: #6e7681; }
+        .log-window .name        { color: #a371f7; }
+        /* Карточки статуса задач */
+        .job-card { border-left: 3px solid #30363d; }
+        .job-card.ok    { border-left-color: #2ea043; }
+        .job-card.fail  { border-left-color: #f85149; }
+        .job-card.idle  { border-left-color: #6e7681; }
+        /* Чат-стиль переписки */
+        .chat-row { display: flex; margin-bottom: 0.85rem; }
+        .chat-row.in  { justify-content: flex-start; }
+        .chat-row.out { justify-content: flex-end; }
+        .chat-bubble {
+            max-width: 72%;
+            padding: 0.6rem 0.85rem;
+            border-radius: 0.65rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .chat-row.in  .chat-bubble { background: #161b22; border: 1px solid #30363d; }
+        .chat-row.out .chat-bubble { background: #1f6feb; color: #fff; }
+        .chat-meta { font-size: 0.78em; color: #8b949e; margin-bottom: 0.25rem; }
+        .chat-row.out .chat-meta { color: #b8d2ff; text-align: right; }
+        .chat-secondary {
+            font-size: 0.85em;
+            margin-top: 0.45rem;
+            padding-top: 0.45rem;
+            border-top: 1px solid rgba(139,148,158,0.3);
+            opacity: 0.85;
+        }
+    </style>
+</head>
+<body>
+
+{# Навигация (фиксированная сверху) #}
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">Kleinanzeigen Bot</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="nav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link" href="/">Дашборд</a></li>
+                <li class="nav-item"><a class="nav-link" href="/clients">Клиенты</a></li>
+                <li class="nav-item"><a class="nav-link" href="/threads">Переписка</a></li>
+                <li class="nav-item"><a class="nav-link" href="/messages">Сообщения</a></li>
+                <li class="nav-item"><a class="nav-link" href="/accounts">Аккаунты</a></li>
+                <li class="nav-item"><a class="nav-link" href="/logs">Логи</a></li>
+                <li class="nav-item"><a class="nav-link" href="/settings">Настройки</a></li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<main class="container my-4">
+    {# Сюда вставляется содержимое страницы #}
+    {% block content %}{% endblock %}
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

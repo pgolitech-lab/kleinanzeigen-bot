@@ -1,0 +1,36 @@
+{# Список уникальных покупателей с агрегатами по их активности. #}
+{% extends "base.html" %}
+
+{% block title %}Клиенты — Kleinanzeigen Bot{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Клиенты</h1>
+    <span class="text-muted-sm">{{ clients | length }} уникальных</span>
+</div>
+
+{% if clients %}
+<div class="list-group">
+    {% for c in clients %}
+    <a href="/clients/{{ c.email }}" class="list-group-item list-group-item-action">
+        <div class="d-flex w-100 justify-content-between align-items-start">
+            <div class="me-3">
+                <strong>👤 {{ c.display_name or c.email.split('@')[0] }}</strong>
+                <span class="text-muted-sm"> · {{ c.email[:60] }}{% if c.email | length > 60 %}…{% endif %}</span>
+                <div class="text-muted-sm mt-1">
+                    💬 {{ c.msg_count }} сообщ. · 📦 {{ c.ad_count }} объявл. · {{ c.thread_count }} тред(ов)
+                    {% if c.total_cost %} · 💸 ${{ '%.4f' | format(c.total_cost) }}{% endif %}
+                </div>
+            </div>
+            <div class="text-end text-nowrap">
+                <span class="badge text-bg-{{ status_color(c.last_status) }}">{{ c.last_status }}</span>
+                <div class="text-muted-sm mt-1">{{ c.last_at[:19] }}</div>
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">Клиентов пока нет — как только покупатель напишет, появится здесь.</div>
+{% endif %}
+{% endblock %}

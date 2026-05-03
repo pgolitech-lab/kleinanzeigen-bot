@@ -1,0 +1,76 @@
+{# Форма создания/редактирования аккаунта.
+   В режиме edit пароли приходят замаскированными (••••XXXX) — пустое поле = не менять. #}
+{% extends "base.html" %}
+
+{% block title %}{{ 'Новый аккаунт' if mode == 'new' else 'Редактирование аккаунта' }} — Kleinanzeigen Bot{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>{{ 'Новый аккаунт' if mode == 'new' else 'Редактирование: ' ~ account.name }}</h1>
+    <a href="/accounts" class="btn btn-outline-secondary btn-sm">← К списку</a>
+</div>
+
+<form method="post" action="{{ '/accounts/new' if mode == 'new' else '/accounts/' ~ account.id ~ '/edit' }}">
+    <div class="row g-4">
+
+        <div class="col-md-6">
+            <h5>Общие</h5>
+            <div class="mb-3">
+                <label class="form-label">Название (для удобства)</label>
+                <input type="text" name="name" class="form-control" required
+                       value="{{ account.name or '' }}" placeholder="Аккаунт 1">
+            </div>
+            <div class="form-check mb-3">
+                <input type="checkbox" name="is_active" value="1" id="is_active" class="form-check-input"
+                       {% if account.is_active %}checked{% endif %}>
+                <label class="form-check-label" for="is_active">Активен — поллинг включён</label>
+            </div>
+            <div class="form-check mb-3">
+                <input type="hidden" name="auto_ack_enabled" value="0">
+                <input type="checkbox" name="auto_ack_enabled" value="1" id="auto_ack_enabled"
+                       class="form-check-input"
+                       {% if account.auto_ack_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="auto_ack_enabled">
+                    🤖 Автоответ-приветствие на первое сообщение
+                </label>
+                <div class="form-text">
+                    При первом письме в новом треде бот шлёт короткое приветствие через Haiku
+                    (≈$0.0006 за раз) на языке клиента — для накрутки метрики Kleinanzeigen
+                    «отвечает в течение X часов». Уважает <code>send_mode</code>:
+                    при <code>disabled</code> ничего не уходит.
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <h5>Gmail (приём писем по IMAP)</h5>
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" name="gmail_email" class="form-control" required
+                       value="{{ account.gmail_email or '' }}" placeholder="user@gmail.com">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">App Password</label>
+                <input type="password" name="gmail_app_password" class="form-control"
+                       {% if mode == 'new' %}required placeholder="xxxx xxxx xxxx xxxx"{% else %}placeholder="{{ account.gmail_app_password or 'оставь пустым, чтобы не менять' }}"{% endif %}>
+                <div class="form-text">
+                    Создать: <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>
+                    (нужно включённое 2FA). 16 символов, можно с пробелами.
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="alert alert-info mt-4 mb-0 small">
+        <strong>Логин в Kleinanzeigen не нужен.</strong> Парсер ходит на публичные URL объявлений,
+        ответы покупателям отправляются через Gmail SMTP — Kleinanzeigen сам ретранслирует их в чат
+        через свой <code>replyto-...@kleinanzeigen.de</code>.
+    </div>
+
+    <div class="mt-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary">{{ 'Создать' if mode == 'new' else 'Сохранить' }}</button>
+        <a href="/accounts" class="btn btn-outline-secondary">Отмена</a>
+    </div>
+</form>
+{% endblock %}

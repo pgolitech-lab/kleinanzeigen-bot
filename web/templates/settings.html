@@ -1,0 +1,269 @@
+{# Форма настроек: значения секретов приходят замаскированными — пустое поле = не менять #}
+{% extends "base.html" %}
+
+{% block title %}Настройки — Kleinanzeigen Bot{% endblock %}
+
+{% block content %}
+<h1 class="mb-3">Настройки</h1>
+
+{# Подсветка текущего режима отправки в шапке — чтобы было видно сразу #}
+{% set mode = settings.send_mode or 'disabled' %}
+<div class="alert alert-{{ {'production':'danger','redirect':'warning','disabled':'secondary'}[mode] }} d-flex justify-content-between align-items-center">
+    <div>
+        <strong>Режим отправки:</strong>
+        {% if mode == 'production' %}
+            🔴 PRODUCTION — ответы уходят реальным покупателям
+        {% elif mode == 'redirect' %}
+            🟡 REDIRECT — ответы уходят на отладочный адрес ({{ settings.debug_email or '<не задан>' }})
+        {% else %}
+            🔒 DISABLED — ничего не отправляется (предохранитель включён)
+        {% endif %}
+    </div>
+</div>
+
+{# Сообщение после сохранения (передаётся в context.flash) #}
+{% if flash %}
+<div class="alert alert-{{ flash.type | default('info') }}">{{ flash.message }}</div>
+{% endif %}
+
+<form method="post" action="/settings">
+    <div class="row g-4">
+
+        {# --- Anthropic Claude --- #}
+        <div class="col-md-6">
+            <h5>Anthropic Claude</h5>
+            <div class="mb-3">
+                <label class="form-label">API ключ</label>
+                <input type="password" name="anthropic_api_key" class="form-control"
+                       placeholder="{{ settings.anthropic_api_key or 'sk-ant-...' }}">
+                <div class="form-text">Оставь пустым, чтобы не менять.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Модель</label>
+                <input type="text" name="claude_model" class="form-control"
+                       value="{{ settings.claude_model or '' }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Системный промпт</label>
+                <textarea name="system_prompt" class="form-control" rows="6">{{ settings.system_prompt or '' }}</textarea>
+            </div>
+        </div>
+
+        {# --- Telegram --- #}
+        <div class="col-md-6">
+            <h5>Telegram</h5>
+            <div class="mb-3">
+                <label class="form-label">Bot token</label>
+                <input type="password" name="telegram_bot_token" class="form-control"
+                       placeholder="{{ settings.telegram_bot_token or '123456:ABC-...' }}">
+                <div class="form-text">Оставь пустым, чтобы не менять.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Chat ID (куда шлются нотификации)</label>
+                <input type="text" name="telegram_chat_id" class="form-control"
+                       value="{{ settings.telegram_chat_id or '' }}">
+                <div class="form-text">
+                    Личный chat_id (положительное число) или group_id (отрицательное).
+                    Для группы добавь бота в чат и выключи Group Privacy через @BotFather.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Авторизованные chat_id (allowlist для совместной работы)</label>
+                <input type="text" name="telegram_authorized" class="form-control"
+                       value="{{ settings.telegram_authorized or '' }}"
+                       placeholder="напр. 242994225,123456789">
+                <div class="form-text">
+                    Comma-separated. Кому разрешено нажимать кнопки и писать команды.
+                    Пусто = только Chat ID выше. В group-mode достаточно одного group_id.
+                </div>
+            </div>
+        </div>
+
+        {# --- Google Drive backup --- #}
+        <div class="col-md-6">
+            <h5>Google Drive (бекап)</h5>
+            <div class="mb-3">
+                <label class="form-label">Service account credentials (JSON)</label>
+                <textarea name="google_drive_credentials_json" class="form-control" rows="5"
+                          placeholder="{{ settings.google_drive_credentials_json or '{ ... }' }}"></textarea>
+                <div class="form-text">Оставь пустым, чтобы не менять.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Folder ID</label>
+                <input type="text" name="google_drive_folder_id" class="form-control"
+                       value="{{ settings.google_drive_folder_id or '' }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Интервал бекапа (часы)</label>
+                <input type="number" name="backup_interval_hours" min="1" class="form-control"
+                       value="{{ settings.backup_interval_hours or 24 }}">
+            </div>
+            <div class="d-flex gap-2">
+                {# Кнопки вне основной формы — формы submit-ятся отдельными POST-ами #}
+                <button type="button" class="btn btn-sm btn-outline-secondary"
+                        onclick="document.getElementById('backup-test-form').submit();">
+                    Проверить credentials
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        onclick="document.getElementById('backup-run-form').submit();">
+                    Сделать бэкап сейчас
+                </button>
+            </div>
+            <div class="form-text mt-2">
+                Сначала сохрани JSON и Folder ID кнопкой ниже, потом проверь credentials.
+            </div>
+        </div>
+
+        {# --- Напоминалки --- #}
+        <div class="col-md-6">
+            <h5>Напоминалки клиентам</h5>
+            <div class="form-check form-switch mb-3">
+                {# Скрытое "0" перед чекбоксом — иначе при unchecked поле не отправляется и значение не обновится #}
+                <input type="hidden" name="reminders_enabled" value="0">
+                <input type="checkbox" name="reminders_enabled" value="1" id="reminders_enabled"
+                       class="form-check-input"
+                       {% if (settings.reminders_enabled or '0') == '1' %}checked{% endif %}>
+                <label class="form-check-label" for="reminders_enabled">
+                    Включить напоминалки (пинг клиентам без ответа)
+                </label>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Через сколько дней молчания предлагать пинг</label>
+                <input type="number" name="reminder_after_days" min="1" max="30" class="form-control"
+                       value="{{ settings.reminder_after_days or 1 }}">
+                <div class="form-text">
+                    Раз в час проверяется очередь. На каждый «висящий» исходящий старше N дней
+                    приходит карточка в Telegram с кнопками <code>✉️ Сгенерить ping</code> /
+                    <code>❌ Забить</code>. Один раз на тред — повторно не предложит.
+                </div>
+            </div>
+        </div>
+
+        {# --- Безопасность отправки --- #}
+        <div class="col-md-6">
+            <h5>Безопасность отправки</h5>
+            <div class="mb-3">
+                <label class="form-label">Режим отправки</label>
+                <select name="send_mode" class="form-select">
+                    <option value="disabled"   {% if mode == 'disabled' %}selected{% endif %}>🔒 Disabled — не отправлять вообще (безопасно)</option>
+                    <option value="redirect"   {% if mode == 'redirect' %}selected{% endif %}>🟡 Redirect — слать на отладочный адрес</option>
+                    <option value="production" {% if mode == 'production' %}selected{% endif %}>🔴 Production — слать реальным покупателям</option>
+                </select>
+                <div class="form-text">
+                    В режиме <code>disabled</code> одобренные черновики получают статус
+                    <code>not_sent_disabled</code> вместо <code>sent</code>.
+                    В <code>redirect</code> в Subject добавляется <code>[DEBUG → real@…]</code>,
+                    тред с оригиналом не наследуется.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Отладочный email</label>
+                <input type="email" name="debug_email" class="form-control"
+                       value="{{ settings.debug_email or '' }}" placeholder="me@gmail.com">
+                <div class="form-text">Используется только в режиме redirect.</div>
+            </div>
+        </div>
+
+        {# --- Прочее --- #}
+        <div class="col-md-6">
+            <h5>Прочее</h5>
+            <div class="mb-3">
+                <label class="form-label">Polling Gmail (секунды)</label>
+                <input type="number" name="gmail_poll_interval_sec" min="10" class="form-control"
+                       value="{{ settings.gmail_poll_interval_sec or 60 }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">IMAP From-фильтр</label>
+                <input type="text" name="gmail_from_filter" class="form-control"
+                       value="{{ settings.gmail_from_filter | default('kleinanzeigen.de', true) }}"
+                       placeholder="kleinanzeigen.de">
+                <div class="form-text">
+                    Substring-match по заголовку From на стороне IMAP. По умолчанию
+                    <code>kleinanzeigen.de</code> — отсеивает спам, Google-нотификации
+                    и прочую не-Kleinanzeigen почту до того как она дойдёт до Claude.
+                    Очисти поле, чтобы брать всё подряд (отладка).
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Макс. возраст inquiry (дней)</label>
+                <input type="number" name="inquiry_max_age_days" min="0" class="form-control"
+                       value="{{ settings.inquiry_max_age_days | default('7', true) }}">
+                <div class="form-text">
+                    Письма старше N дней (по Date-заголовку) скипаются —
+                    защита от разгребания древнего архива (объявление уже снято/продано).
+                    <code>0</code> = без лимита.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Макс. скидка (%)</label>
+                <input type="number" name="max_discount_percent" min="0" max="100" class="form-control"
+                       value="{{ settings.max_discount_percent or 10 }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Веб-порт</label>
+                <input type="number" name="web_port" min="1" max="65535" class="form-control"
+                       value="{{ settings.web_port or 8080 }}">
+                <div class="form-text">Применяется после перезапуска сервиса.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+        <a href="/settings" class="btn btn-outline-secondary">Отмена</a>
+    </div>
+</form>
+
+{# Скрытые формы для кнопок «Проверить credentials» / «Бэкап сейчас» — лежат вне основной формы (HTML не разрешает вложенность) #}
+<form id="backup-test-form" method="post" action="/backup/test" class="d-none"></form>
+<form id="backup-run-form" method="post" action="/backup/run" class="d-none"></form>
+
+{# Отладка / Тестирование — ниже основной формы, чтобы случайно не submit-ить с настройками #}
+<hr class="my-4">
+<h5>Отладка / Тестирование</h5>
+<div class="row g-3">
+    <div class="col-md-5">
+        <form method="post" action="/debug/poll-now" class="mb-2">
+            <button type="submit" class="btn btn-outline-info w-100">🔄 Запустить poll сейчас</button>
+            <div class="form-text mt-1">
+                Эквивалент тика scheduler-а: вытянет UNSEEN письма с Kleinanzeigen и проведёт через pipeline.
+            </div>
+        </form>
+        <form method="post" action="/debug/send-approved-now" class="mb-2">
+            <button type="submit" class="btn btn-outline-success w-100">📤 Отправить approved сейчас</button>
+            <div class="form-text mt-1">
+                Берёт все сообщения со статусом <code>approved</code> и шлёт их немедленно
+                (с учётом текущего режима <code>send_mode</code>: disabled / redirect / production).
+            </div>
+        </form>
+        <form method="post" action="/debug/check-reminders-now" class="mb-2">
+            <button type="submit" class="btn btn-outline-warning w-100">⏰ Проверить напоминалки</button>
+            <div class="form-text mt-1">
+                Эквивалент ежечасного job-а: ищет «висящие» исходящие старше N дней
+                и предлагает пинг в Telegram. Только если напоминалки включены.
+            </div>
+        </form>
+        <form method="post" action="/debug/monitor-now">
+            <button type="submit" class="btn btn-outline-danger w-100">🚨 Прогон мониторинга логов</button>
+            <div class="form-text mt-1">
+                Сканирует journalctl за последний час, ищет ERROR/Traceback,
+                постит дайджест в Telegram-группу если есть новое (с дедупом).
+            </div>
+        </form>
+    </div>
+    <div class="col-md-7">
+        <form method="post" action="/debug/reprocess" class="d-flex gap-2 align-items-start">
+            <input type="number" name="count" min="1" max="20" value="1"
+                   class="form-control" style="max-width: 5rem;">
+            <button type="submit" class="btn btn-outline-warning">🔁 Тест: переобработать последние N</button>
+        </form>
+        <div class="form-text mt-1">
+            Берёт последние N писем с Kleinanzeigen независимо от UNSEEN-флага,
+            удаляет прежние DB-записи (если были) и проводит через полный pipeline
+            (parse → claude → telegram). В IMAP флаги <code>\\Seen</code> не меняет —
+            можно повторять. Используй только в режиме отправки <code>disabled</code>
+            или <code>redirect</code>!
+        </div>
+    </div>
+</div>
+{% endblock %}

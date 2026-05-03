@@ -1,0 +1,41 @@
+{# Список тредов: каждый тред = одна строка-ссылка с кратким summary. #}
+{% extends "base.html" %}
+
+{% block title %}Переписка — Kleinanzeigen Bot{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Переписка</h1>
+    <span class="text-muted-sm">{{ threads | length }} тред(ов)</span>
+</div>
+
+{% if flash %}
+<div class="alert alert-{{ flash.type | default('info') }}">{{ flash.message }}</div>
+{% endif %}
+
+{% if threads %}
+<div class="list-group">
+    {% for t in threads %}
+    <a href="/threads/{{ t.thread_id }}" class="list-group-item list-group-item-action">
+        <div class="d-flex w-100 justify-content-between align-items-start">
+            <div class="me-3">
+                <strong>📦 {{ t.ad_title or '— без объявления —' }}</strong>
+                {% if t.ad_price %}<span class="text-muted-sm"> · 💰 {{ t.ad_price }}</span>{% endif %}
+                <div class="text-muted-sm mt-1">
+                    {% if t.seller_name %}🏪 {{ t.seller_name }} · {% endif %}
+                    👤 {{ t.buyer_display_name or t.buyer_name or '—' }}
+                </div>
+            </div>
+            <div class="text-end text-nowrap">
+                <span class="badge text-bg-{{ status_color(t.last_status) }}">{{ t.last_status }}</span>
+                <div class="text-muted-sm mt-1">{{ t.last_at[:19] }}</div>
+                <div class="text-muted-sm">{{ t.msg_count }} сообщ.</div>
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">Тредов пока нет — как только клиент напишет в Kleinanzeigen, бот создаст тред автоматически.</div>
+{% endif %}
+{% endblock %}
