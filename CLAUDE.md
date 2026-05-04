@@ -37,14 +37,14 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
   - `generate_followup_ping`, `summarize_thread`
   - `classify_email_is_inquiry` (Haiku, junk filter)
   - `generate_auto_ack` (Haiku, для приветствия-заглушки)
-  - `detect_similar_buyer` (Haiku, style-similarity match)
+  - ~~`detect_similar_buyer`~~ (удалена 2026-05-04)
   - `lang_display`, `detect_lang_override` (директива «на немецком: …»)
   - `GERMAN_CLOSING_RULE` — каждое исходящее на немецком ОБЯЗАНО заканчиваться MfG/Viele Grüße
 - `modules/ad_brief.py` — генератор брифа объявления (Sonnet с json_schema, кэшируется в `ad_briefs` по `ad_id`)
 - `modules/telegram_bot.py` — основной фронт оператора (см. отдельный раздел ниже)
 - `modules/backup.py` — Google Drive backup через service account
 - `web/app.py` — FastAPI: `/`, `/clients`, `/clients/{email}`, `/threads`, `/threads/{id}`, `/messages`, `/accounts`, `/settings`, `/logs` + `/api/*` + `/debug/*`
-- `web/templates/` — Bootstrap 5.3 dark theme
+- `web/templates/` — Bootstrap 5.3 dark theme + simple-datatables 9.0.3 (CDN) для клиент-side сортировки/фильтрации в таблицах. `base.html` определяет глобальный хелпер `window.initDataTable(selector, opts)` — все табличные страницы (`/clients`, `/threads`, `/messages`, `/accounts`, dashboard «recent») используют его. Дефолт-сортировка: дата DESC (свежие сверху). Навигация — pills вместо navbar; компактная типографика (14px база)
 - `docs/superpowers/specs/` — design-спеки фич (`auto-ack-design.md`, `tg-rework-design.md`)
 
 ## БД (текущая схема, актуально 2026-05-03)
@@ -63,7 +63,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - **history_summary_ru** (Claude-summary для блока «История»)
 - **extra_notes** (NEW: лог операторских инструкций «💸 цена / 📝 свобод. инстр»)
 - **deal_brief_json** (NEW: JSON {summary_ru, expected_next, negotiated_price_eur, client_assessment} — генерится Sonnet вместе с reply)
-- **similar_buyers_json** (NEW: JSON-массив Haiku-детекта подозрительно похожих по стилю клиентов под другими именами)
+- ~~**similar_buyers_json**~~ (deprecated 2026-05-04 — фича удалена; колонка пустая, не пишется/не читается; в схеме оставлена ради старых данных)
 
 **`settings`**: KV (key, value, updated_at). Управляются через web `/settings` или `/api/settings`.
 
@@ -136,9 +136,12 @@ Sitzbank, Sitze Peugeot · 2+1 · 📦 б/у · 1000€   ← товар + ко�
 [ ⏱ 17:42 · 5мин назад ]         ← кнопка → callback pipe:N → thread-detail
 ```
 - Шапка перед карточками: `🔴 ждут нас: N · 🟢 ждём клиента: N · 📝 = есть готовый черновик от бота`
-- Сортировка: ASC по age (старые наверху — наиболее срочные)
-- Классификация цвета: 🟢 если есть ХОТЬ ОДНО наше отправленное (вкл. auto-ack), 🔴 если нет
+- **Деление**: `last_event_kind` (in/out из `db.thread_events`) — `kind='in'` → `🔴 ждут нас`, `kind='out'` → `🟢 ждём клиента`. Сортировка ВНУТРИ секции ASC по `last_event_at`.
+- **Порядок секций**: 🟢 сверху (старые завершённые), 🔴 снизу (срочные у поля ввода). Самые свежие события — внизу чата ближе к оператору.
 - 📝 sub-marker: pending Sonnet draft ждёт оператора
+- **Status_txt** (по хронологии последнего события):
+  - `last_kind='out'`: «ответили · ждём клиента» / «ack · ждём клиента» (+`+N draft` если pending)
+  - `last_kind='in'`: «draft xN · ждёт нас» / «draft · ждёт нас» / «ack · ждёт нас» / «новый · ждёт нас»
 - Состояние товара (📦 б/у / 🆕 новое / ⚠️ дефект): `_ad_condition_marker` с проверкой отрицания (`ohne Beschädigung` НЕ дефект)
 - Конфигурация (2+1, одиночное, лавка, и т.п.): `_detect_config`
 
@@ -147,18 +150,19 @@ Sitzbank, Sitze Peugeot · 2+1 · 📦 б/у · 1000€   ← товар + ко�
 - Затем удаляет всё старое: tracked-минус-новый pipeline + sweep последних 50 IDs назад от триггера
 - Использует `deleteMessages` batch API (Bot API 7.4+) для скорости
 
-При тапе на тред в pipeline (`pipe:N`): отправляет thread-detail + удаляет range `[clicked-5 .. new_detail-1]` (захватывает header + соседние карточки тредов).
+При тапе на тред в pipeline (`pipe:N`): отправляет thread-detail (один или несколько чанков для длинных тредов через `_split_for_telegram`), удаляет ВСЕ tracked-msg-id младше первого нового чанка кроме самих чанков. Так чисто уходят header + все карточки + любой residual от прошлых открытий.
 
 ### Thread-detail card
-Полный chat-стиль треда: header (#id, товар, цена, клиент, возраст), warning о related/similar клиентах если есть, потом всё переписки (📥 клиент с blockquote + 🇷🇺 перевод; 📤 наш ответ с эмодзи статуса). Auto-ack rows СКРЫТЫ из chat-вью (footer `🤖 Скрыт N авто-ack для метрики`). Кнопки `✉️ Написать клиенту`, `📋 Открыть карточку ревью`, `↩ Назад к pipeline`.
+Лента событий через `db.thread_events()` (in.created_at + out.sent_at, sorted chronologically): один row 'in' с заполненным de_answer ⇒ ДВА события. **Только sent/sent_debug** для outgoing — pending/edited/approved драфты НЕ показываются (это часть review-карточки, не лога). Auto-ack показывается как обычное наше сообщение с маркером 🤖 ack — клиент его получил, скрывать смысла нет. Header: #id, ad_title, цена, клиент, **🏪 Наш: account-name (gmail-email)**, ссылка на объявление, last_event_at. Related-warning блок (только точное совпадение `buyer_display_name`). Кнопки `✉️ Написать клиенту`, `📋 Открыть карточку ревью`, `↩ Назад к pipeline` — на ПОСЛЕДНЕМ чанке.
 
 ### Compose (operator-initiated message)
 Из thread-detail клик `✉️ Написать` → input-mode → текст оператора → `scheduler.send_manual_compose` (translate если нужно + SMTP reply на последнее incoming) → новая out-row.
 
-### Related client warning (новое)
+### Related client warning
 В review-карточке и thread-detail если найдены другие inquiries от этого же клиента — выводится жёлто-красный блок:
 - **Точное совпадение** по `buyer_display_name` (мгновенно из `db.find_related_inquiries`)
-- **Подозрение по стилю** (из `messages.similar_buyers_json` — Haiku-детект на новых incoming, score ≥ 6/10)
+
+Style-similarity (`detect_similar_buyer` через Haiku, score ≥ 6/10) РАНЬШЕ был — удалён 2026-05-04: давал шум, ел токены. Колонка `messages.similar_buyers_json` оставлена в схеме (старые данные), но не пишется и не отображается. Функция `claude.detect_similar_buyer` и `db.find_recent_other_buyer_inquiries` — удалены.
 
 ### Autopilot (полная авто-беседа с клиентом)
 - Кнопка `🚀 Полный автопилот` на review-карточке (активирует через input flow: floor цены → выбор `🤫 Silent` / `🔔 Notify` → старт)
@@ -198,10 +202,12 @@ Command-menu в Telegram очищено (`setMyCommands([])`) — нет авт�
 - `telegram_bot_token`, `telegram_chat_id`, `telegram_authorized` (CSV), **`telegram_operator_dm_ids`** (CSV — активирует DM-fanout если непуст)
 - `gmail_poll_interval_sec` (default 60), `gmail_from_filter` (default `kleinanzeigen.de`), `inquiry_max_age_days` (default 7)
 - `send_mode` (`disabled`/`redirect`/`production`), `debug_email`
-- `reminders_enabled`, `reminder_after_days`
+- `reminders_enabled`, `reminder_after_days` (**float**: 1=сутки, 0.5=12ч, 0.04≈1ч — для теста)
 - `polling_paused`, `last_daily_summary_date`
 - `google_drive_credentials_json`, `google_drive_folder_id`, `backup_interval_hours`
 - `max_discount_percent`, `web_port`, `web_host`
+- **API balance estimator**: `api_balance_snapshot_usd` (snapshot $ от console.anthropic.com), `api_balance_snapshot_at` (ISO datetime сверки). Остаток = snapshot − SUM(cost_usd) с created_at>snapshot_at. Burn-rate из last-7d-spend, days_remaining = remaining/burn_per_day. Дашборд: цветная stat-карточка (🟢 ≥ $10, 🟡 < $10, 🔴 < $2, клик → /settings).
+- **Стиль чат-пузырей в веб-морде** (см. /settings → «💬 Стиль чата»): `chat_font_em`, `chat_padding_v_rem`, `chat_padding_h_rem`, `chat_max_width_pct`, `chat_radius_rem`, `chat_row_gap_rem`, `chat_meta_font_em`, `chat_secondary_font_em`. Применяются через CSS-переменные в `base.html` через Jinja-global `chat_style()` (`web/app.py`).
 
 ## Правила
 - Комментарии в коде на русском
@@ -218,6 +224,8 @@ ssh pg@192.168.88.28 'sudo systemctl restart kleinanzeigen-bot'
 ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
 ```
 БД на сервере хранится в `/home/pg/kleinanzeigen-bot/kleinanzeigen.db`. Не редактировать руками — только через `database.py` helpers или `db.update_message`.
+
+**systemd unit** (`kleinanzeigen-bot.service`, копия в `/etc/systemd/system/`): `enabled` → стартует при загрузке. `Restart=always` + `RestartSec=5` — перезапуск через 5 сек при любом завершении. `OOMPolicy=continue` — рестартим даже после OOM-killer (по умолчанию systemd этого не делал бы). `StartLimitBurst=10` / `StartLimitIntervalSec=300` — если бот крэшится 10+ раз за 5 минут, systemd прекращает попытки и переводит в `failed` (защита от бесконечного crash-loop). `TimeoutStopSec=30` + `KillMode=mixed` — graceful 30 сек на завершение перед SIGKILL. После правок unit-файла: `sudo cp …/kleinanzeigen-bot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart kleinanzeigen-bot`.
 
 ## Что важно знать (чтобы не сломать)
 - **send_mode** имеет 3 режима в settings: `disabled` (default — ничего не шлёт), `redirect` (на debug_email с банером), `production` (реально покупателю). Перед отладкой проверь режим.
@@ -241,7 +249,24 @@ ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
 - **Haiku не поддерживает `effort`/`thinking`**: при `claude-haiku-4-5` (classifier, auto-ack, similarity) НЕ передавать эти параметры в `output_config` — bad request. Sonnet 4.6/4.7 поддерживают.
 - **Hourly мониторинг логов** (`scheduler.monitor_errors_job`): journalctl scan ERROR/Traceback → Telegram digest. Дедуп через `_REPORTED_ERROR_HASHES` (in-memory).
 - **`send_for_review` НЕ сбрасывает status в pending** если row уже не `new` (предотвращает sent → pending корраптинг pipeline-классификации). Безопасно перепосылать карточки через `/card N`.
-- **`messages.status='archived'`** — backfill-загруженные историч. inquiries (~762 шт). НЕ попадают в pipeline (фильтр SQL пропускает только active статусы), но попадают в similarity-detection candidates.
+- **`messages.status='archived'`** — backfill-загруженные историч. inquiries (~762 шт). НЕ попадают в pipeline (фильтр SQL пропускает только active статусы).
+- **Хронология событий, а не id**: `db.thread_history` сортирует по `created_at ASC, id ASC`. `db.thread_events()` строит flat-список «событий» — incoming.created_at + outgoing.sent_at — корректно для recovery/backfill (новый id, старая дата). MAX(id) больше НЕ используется в `pipeline_threads`/`find_reminder_candidates`/UI-render.
+- **`db.add_message`** принимает `created_at` от вызывающего (по умолчанию utcnow). `scheduler._process_incoming` парсит email Date-header и передаёт его — реальные таймстампы и при live-fetch, и при recovery.
+- **Бэкфилл RU для auto-ack**: `_send_auto_ack` после Haiku-генерации вызывает `claude.translate_only(target='ru')` и пишет в `ru_answer` + `ru_translation`. Если client_lang=ru — копия текста.
+- **Classifier bypass для follow-up'ов**: если в gmail_thread_id уже есть сохранённый incoming — Haiku-classifier обходится (это продолжение разговора, не системка). Защита от ложно-junk коротких follow-up'ов («Danke», «Sorry…»).
+- **Time zone в UI**: БД хранит UTC, оператор в Берлине. `modules/telegram_bot._to_berlin(iso, fmt)` + Jinja-фильтр `| berlin('%fmt')` (зарегистрирован в `web/app.py`) — везде где таймстампы видны оператору.
+- **Чекбоксы в формах** с hidden fallback `value="0"`: сравнивать со строкой `"1"` явно (`1 if value == "1" else 0`), а не truthy — иначе hidden "0" даёт truthy → галка не выключается. См. POST /accounts/{id}/edit.
+- **Telegram message limits — defense-in-depth**:
+  - Лимит 4096 chars. Превышение → `BadRequest: text is too long` или `parse entities` если разорвало тег.
+  - `_truncate_html_safe(text, limit=4000, suffix=...)` — режет по последней безопасной HTML-границе (`</blockquote>`, `</b>`, `</i>`, `</code>`, `</a>`, `</pre>`, `\n\n`, `\n`, ` `). Применён в `_safe_edit`, `_bot_edit`, `_broadcast_card`, `send_for_review`, и автоматически в `_http_post_single` для `sendMessage`/`editMessageText`.
+  - `_split_for_telegram(text, limit=4000)` — для путей где multi-message OK (thread-detail, compose). Tag-aware: режет только в позициях где depth(`<blockquote>/<pre>/<code>`) == 0. Иначе чанк[0] остаётся с открытым тегом → `can't find end tag`.
+  - **pipe-handler**: посылает thread-detail чанками (клавиатура только на последнем), затем чистит ВСЕ tracked-id младше первого нового чанка кроме самих чанков. Старая логика `range(clicked-5..new_detail-1)` была багом для длинных threads и multi-chunk send.
+  - **compose handler**: после SMTP-успеха УДАЛЯЕТ старое «⏳ перевожу…» и шлёт fresh thread-detail чанками. Раньше edit_message_text упирался в лимит и UI висел.
+  - **Auto-truncate при edit_message_text**: если контент длиннее 4000 — auto-cut. Без этого «Message_too_long» проглатывался в `_safe_edit`/`_bot_edit` (только warning в лог) → карточка зависала на промежуточном состоянии.
+- **«↩ Назад к pipeline» на финальных карточках**: после send/skip/sold/clienthist используется `_back_only_keyboard(msg_id)` чтобы оператор всегда мог вернуться. Раньше было `reply_markup=None` → клавиатура пропадала.
+- **Reminder candidate query**: `db.find_reminder_candidates(after_days: float)` использует events-CTE и берёт `kind='out'` как «последнее событие», age > after_days. Поддерживает дробные дни (0.5=12ч). Раньше была MAX(id) → ломалась после recovery.
+- **`thread_autopilot.gmail_thread_id`** — PK. UPSERT на старт. После стопа можно переактивировать с теми же floor/notify (counter сбрасывается).
+- **Style-similarity (was Haiku-based)**: УДАЛЕНА 2026-05-04 (`detect_similar_buyer`, `find_recent_other_buyer_inquiries`, schema `_SIMILAR_BUYER_SCHEMA`). Колонка `messages.similar_buyers_json` сохранена в схеме — старые данные не тронуты, но не пишется/не читается.
 
 ## История фич / спеки
 - `docs/superpowers/specs/2026-05-03-auto-ack-design.md` — auto-приветствие (Haiku, накрутка метрики Kleinanzeigen)
