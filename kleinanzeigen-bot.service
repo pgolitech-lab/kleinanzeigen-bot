@@ -2,6 +2,10 @@
 Description=Kleinanzeigen Bot
 After=network-online.target
 Wants=network-online.target
+# Если бот стабильно крэшится 10 раз за 5 минут — systemd прекратит попытки
+# и сервис уйдёт в failed (это сигнал «что-то реально сломано — посмотри руками»)
+StartLimitBurst=10
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
@@ -9,9 +13,17 @@ User=pg
 WorkingDirectory=/home/pg/kleinanzeigen-bot
 ExecStart=/usr/bin/python3 main.py
 
-# Автоперезапуск при любом падении (через 5 сек)
+# Автоперезапуск при любом завершении (signal, exit code, watchdog, oom)
 Restart=always
 RestartSec=5
+
+# OOM-killer убил процесс — всё равно перезапускаемся (по умолчанию systemd не рестартит после OOM)
+OOMPolicy=continue
+
+# Граceful-стоп: SIGTERM → 30с на завершение → SIGKILL
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
 
 # Логирование в journalctl
 StandardOutput=journal
