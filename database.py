@@ -270,10 +270,18 @@ def delete_account(account_id: int) -> None:
 # --- MESSAGES ---
 
 def add_message(account_id: int, direction: str, **fields: Any) -> int:
-    """Создать запись сообщения. direction = 'in' (входящее) или 'out' (исходящее)."""
-    fields = {**fields, "account_id": account_id, "direction": direction,
-              "created_at": datetime.utcnow().isoformat(),
-              "status": fields.get("status", "new")}
+    """Создать запись сообщения. direction = 'in' (входящее) или 'out' (исходящее).
+
+    `created_at` берётся из fields если задан явно (используется для входящих с
+    реальной email Date), иначе текущее UTC.
+    """
+    fields = {
+        "created_at": datetime.utcnow().isoformat(),
+        **fields,
+        "account_id": account_id,
+        "direction": direction,
+        "status": fields.get("status", "new"),
+    }
     cols = ", ".join(fields.keys())
     placeholders = ", ".join("?" * len(fields))
     with get_conn() as conn:
@@ -454,51 +462,127 @@ def find_by_gmail_message_id(gmail_message_id: str) -> Optional[sqlite3.Row]:
         ).fetchone()
 
 
-def find_reminder_candidates(after_days: int) -> list[sqlite3.Row]:
-    """Найти треды, в которых:
-      - Последнее сообщение треда — это «отправленный нами ответ» (status sent/sent_debug)
-        Прим.: в нашей схеме исходящий ответ хранится в той же строке что и
-        входящий вопрос (direction='in', но status='sent'/'sent_debug'). Поэтому
-        фильтра по direction нет — учитываем оба варианта.
-      - Старше after_days дней (sent_at)
-      - Нет входящего после него (по id MAX)
-      - reminder_state не задан (или 'none') — то есть мы ещё не предлагали пинг
-      - Само это сообщение НЕ было пингом (is_reminder=0/null)
+def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
+    """Найти треды, в которых последнее по ВРЕМЕНИ событие — наш отправленный ответ.
 
-    Возвращает строки messages для «висящих» исходящих, по которым нужно пингануть.
+    Раскладываем сообщения на события:
+      - incoming: row с de_client ⇒ event at created_at
+      - outgoing: row с de_answer + status sent/sent_debug ⇒ event at sent_at
+    Берём последнее событие в каждом треде по `at_time`. Если оно outgoing и старше
+    after_days — тред нуждается в пинге (если ещё не предлагали и не auto-ack).
+
+    Эта схема корректно работает после recovery/backfill (ID может быть высоким,
+    а реальное время — старым) и на dual-purpose row'ах (в одной строке incoming
+    + наш sent-ответ имеют разные таймстампы и должны учитываться как 2 события).
     """
-    cutoff = (datetime.utcnow() - timedelta(days=after_days)).isoformat()
+    cutoff = (datetime.utcnow() - timedelta(days=float(after_days))).isoformat()
     now_iso = datetime.utcnow().isoformat()
     sql = """
-        WITH last_per_thread AS (
-            SELECT m.* FROM messages m
-            WHERE m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
-              AND m.id = (
-                SELECT MAX(id) FROM messages m2
-                WHERE m2.gmail_thread_id = m.gmail_thread_id
-              )
+        WITH events AS (
+            -- incoming-события: строки с письмом клиента
+            SELECT id, gmail_thread_id, created_at AS at_time, 'in' AS kind
+              FROM messages
+             WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+               AND de_client IS NOT NULL
+            UNION ALL
+            -- outgoing-события: строки с реально отправленным ответом
+            SELECT id, gmail_thread_id, sent_at AS at_time, 'out' AS kind
+              FROM messages
+             WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+               AND de_answer IS NOT NULL
+               AND status IN ('sent', 'sent_debug')
+               AND sent_at IS NOT NULL
+        ),
+        last_event AS (
+            SELECT e1.* FROM events e1
+             WHERE e1.at_time = (
+                SELECT MAX(e2.at_time) FROM events e2
+                 WHERE e2.gmail_thread_id = e1.gmail_thread_id
+             )
         )
-        SELECT * FROM last_per_thread
-        WHERE status IN ('sent', 'sent_debug')
-          AND sent_at IS NOT NULL
-          AND sent_at < ?
-          AND (reminder_state IS NULL OR reminder_state = 'none')
-          AND COALESCE(is_reminder, 0) = 0
-          AND COALESCE(is_auto_ack, 0) = 0
-          AND (reminder_snooze_until IS NULL OR reminder_snooze_until < ?)
-        ORDER BY id ASC
+        SELECT m.* FROM messages m
+        JOIN last_event le ON m.id = le.id
+        WHERE le.kind = 'out'
+          AND le.at_time < ?
+          AND (m.reminder_state IS NULL OR m.reminder_state = 'none')
+          AND COALESCE(m.is_reminder, 0) = 0
+          AND COALESCE(m.is_auto_ack, 0) = 0
+          AND (m.reminder_snooze_until IS NULL OR m.reminder_snooze_until < ?)
+        ORDER BY le.at_time ASC
     """
     with get_conn() as conn:
         return conn.execute(sql, (cutoff, now_iso)).fetchall()
 
 
 def thread_history(gmail_thread_id: str) -> list[sqlite3.Row]:
-    """Все сообщения треда в хронологическом порядке (для контекста Claude)."""
+    """Все сообщения треда в хронологическом порядке (для контекста Claude и UI).
+
+    Сортировка по `created_at` (реальная дата письма из Date-header), id — tiebreaker.
+    Это важно для recovery/backfill: подобранные задним числом письма получают
+    высокий id, но их created_at может быть старее уже сохранённых ответов.
+    """
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM messages WHERE gmail_thread_id = ? ORDER BY id ASC",
+            "SELECT * FROM messages WHERE gmail_thread_id = ? "
+            "ORDER BY created_at ASC, id ASC",
             (gmail_thread_id,),
         ).fetchall()
+
+
+def thread_events(gmail_thread_id: str) -> list[dict[str, Any]]:
+    """Развернуть row'ы треда в плоский список событий с реальными таймстампами.
+
+    Одна row 'in' с заполненным de_answer = ДВА события: клиент написал (created_at),
+    мы ответили (sent_at). Это даёт правильный порядок когда клиент отправил
+    follow-up между нашим draft-ом и его реальной отправкой.
+
+    Каждое событие: {ts, kind, row, text, ru_text, status, is_auto_ack}.
+    """
+    rows = thread_history(gmail_thread_id)
+    events: list[dict[str, Any]] = []
+    SENT_LIKE = {"sent", "sent_debug", "edited", "approved", "pending", "new"}
+
+    for r in rows:
+        # Входящее
+        if r["de_client"]:
+            events.append({
+                "ts": r["created_at"] or "",
+                "kind": "in",
+                "row": r,
+                "text": r["de_client"],
+                "ru_text": r["ru_client"],
+                "status": r["status"],
+                "is_auto_ack": False,
+            })
+        # Исходящее (для direction=out — это сама row; для direction=in — наш ответ
+        # на этот клиентский inquiry, ушёл позже клиентского письма).
+        # Показываем только если уже отправлено / готово (исключаем новые draft'ы).
+        de_ans = r["de_answer"]
+        status = r["status"] or ""
+        if de_ans and status in SENT_LIKE:
+            ts = r["sent_at"] or r["created_at"] or ""
+            try:
+                is_ack = bool(r["is_auto_ack"])
+            except (IndexError, KeyError):
+                is_ack = False
+            ru_text = r["ru_answer"]
+            try:
+                if not ru_text:
+                    ru_text = r["ru_translation"]
+            except (IndexError, KeyError):
+                pass
+            events.append({
+                "ts": ts,
+                "kind": "out",
+                "row": r,
+                "text": de_ans,
+                "ru_text": ru_text,
+                "status": status,
+                "is_auto_ack": is_ack,
+            })
+
+    events.sort(key=lambda e: (e["ts"] or "", e["row"]["id"]))
+    return events
 
 
 def list_clients() -> list[sqlite3.Row]:
@@ -528,39 +612,6 @@ def list_clients() -> list[sqlite3.Row]:
     """
     with get_conn() as conn:
         return conn.execute(sql).fetchall()
-
-
-def find_recent_other_buyer_inquiries(
-    exclude_display_name: Optional[str],
-    exclude_thread_id: Optional[str] = None,
-    limit: int = 20,
-    days: int = 30,
-) -> list[sqlite3.Row]:
-    """Последние incoming от ДРУГИХ buyer'ов (display_name != exclude_display_name).
-
-    Используется для style-similarity детекта: сравниваем новое сообщение с recent-ы
-    от других имён, чтобы найти «один человек под разными именами».
-    """
-    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    sql = """
-    SELECT id, buyer_display_name, buyer_name, ad_id, ad_title, gmail_thread_id,
-           de_client, ru_client, created_at
-    FROM messages
-    WHERE direction = 'in'
-      AND de_client IS NOT NULL AND de_client != ''
-      AND created_at >= ?
-    """
-    params: list[Any] = [cutoff]
-    if exclude_display_name and exclude_display_name.strip():
-        sql += " AND COALESCE(buyer_display_name, '') != ?"
-        params.append(exclude_display_name.strip())
-    if exclude_thread_id:
-        sql += " AND gmail_thread_id != ?"
-        params.append(exclude_thread_id)
-    sql += " ORDER BY id DESC LIMIT ?"
-    params.append(limit)
-    with get_conn() as conn:
-        return conn.execute(sql, params).fetchall()
 
 
 def find_related_inquiries(
@@ -640,53 +691,83 @@ def list_threads_for_client(buyer_email: str) -> list[sqlite3.Row]:
 def pipeline_threads() -> list[sqlite3.Row]:
     """Все треды в активной фазе для команды /pipeline.
 
-    Возвращает по одной row на тред — последний incoming-record + дополнительные
-    aggregate-колонки:
-      - has_any_sent: 1 если в треде есть хоть одно наше отправленное сообщение
-        (любое — auto-ack out-row sent, follow-up ping, или in-row.status=sent — где
-        Sonnet-ответ был одобрен и ушёл клиенту). 0 если ничего ещё не уходило.
-      - has_pending_draft: 1 если последний in-row имеет status в pending/new/edited/approved
-        (Sonnet-draft ждёт ревью оператора).
+    Возвращает по одной row на тред — последний incoming + aggregate-колонки.
+    Используется ХРОНОЛОГИЯ событий (created_at для in, sent_at для out), а не
+    MAX(id) — так корректно отражается ход переписки после recovery/backfill.
 
-    State pipeline:
-      - 🟢 ждём клиента: has_any_sent = 1
-      - 🔴 ждёт нас:    has_any_sent = 0
+    Колонки:
+      - has_any_sent: есть хоть одно отправленное (sent/sent_debug) в треде
+      - has_real_reply: есть отправленное НЕ auto-ack (in-row.sent или out-row не-ack)
+      - has_pending_draft: в треде есть in-row с status pending/new/edited/approved
+      - last_event_at: время последнего события (in.created_at или out.sent_at)
+      - last_event_kind: 'in' или 'out' — кто говорил последним по времени
+      - pending_drafts_count: сколько in-row ждут ревью оператора
 
-    Терминальные (skipped/skipped_sold/not_sent_disabled/error_*) исключаются.
-    Сортировка: по «когда state started» (sent_at если есть, иначе created_at) DESC.
+    Сортировка по last_event_at ASC — самые старые наверху (дольше висят, выше срочность).
     """
     sql = """
-    WITH last_in AS (
-        SELECT m.* FROM messages m
-        WHERE m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
-          AND m.direction = 'in'
-          AND m.id = (
-              SELECT MAX(m2.id) FROM messages m2
-              WHERE m2.gmail_thread_id = m.gmail_thread_id
-                AND m2.direction = 'in'
-          )
+    WITH events AS (
+        SELECT gmail_thread_id, created_at AS at_time, 'in' AS kind FROM messages
+         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+           AND de_client IS NOT NULL
+        UNION ALL
+        SELECT gmail_thread_id, sent_at AS at_time, 'out' AS kind FROM messages
+         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+           AND de_answer IS NOT NULL
+           AND status IN ('sent', 'sent_debug')
+           AND sent_at IS NOT NULL
     ),
-    thread_sent_counts AS (
+    last_event AS (
+        SELECT e1.gmail_thread_id, e1.at_time AS last_event_at, e1.kind AS last_event_kind
+          FROM events e1
+         WHERE e1.at_time = (
+            SELECT MAX(e2.at_time) FROM events e2
+             WHERE e2.gmail_thread_id = e1.gmail_thread_id
+         )
+        GROUP BY e1.gmail_thread_id
+    ),
+    counts AS (
         SELECT gmail_thread_id,
                SUM(CASE WHEN status IN ('sent', 'sent_debug') THEN 1 ELSE 0 END) AS any_sent_count,
-               -- "Реальный" sent: либо in-row.status=sent (Sonnet-ответ ушёл),
-               -- либо outgoing-row БЕЗ is_auto_ack (follow-up ping, manual compose).
+               -- Реальный sent: либо in-row.status=sent (наш Sonnet-ответ),
+               -- либо outgoing-row не-auto-ack (manual compose/ping).
                SUM(CASE WHEN status IN ('sent', 'sent_debug')
                          AND (direction = 'in' OR COALESCE(is_auto_ack, 0) = 0)
-                        THEN 1 ELSE 0 END) AS real_sent_count
+                        THEN 1 ELSE 0 END) AS real_sent_count,
+               SUM(CASE WHEN direction = 'in'
+                         AND status IN ('pending', 'new', 'edited', 'approved')
+                        THEN 1 ELSE 0 END) AS pending_drafts_count
         FROM messages
         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
         GROUP BY gmail_thread_id
+    ),
+    last_in AS (
+        SELECT m.* FROM messages m
+        WHERE m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
+          AND m.direction = 'in'
+          AND m.created_at = (
+              SELECT MAX(m2.created_at) FROM messages m2
+              WHERE m2.gmail_thread_id = m.gmail_thread_id
+                AND m2.direction = 'in'
+          )
+        GROUP BY m.gmail_thread_id  -- в случае tie по created_at оставит одну
     )
     SELECT li.*,
-           CASE WHEN tsc.any_sent_count > 0 THEN 1 ELSE 0 END AS has_any_sent,
-           CASE WHEN tsc.real_sent_count > 0 THEN 1 ELSE 0 END AS has_real_reply,
-           CASE WHEN li.status IN ('pending', 'new', 'edited', 'approved') THEN 1 ELSE 0 END AS has_pending_draft
+           le.last_event_at,
+           le.last_event_kind,
+           COALESCE(c.any_sent_count, 0)         AS any_sent_count,
+           COALESCE(c.real_sent_count, 0)        AS real_sent_count,
+           COALESCE(c.pending_drafts_count, 0)   AS pending_drafts_count,
+           CASE WHEN COALESCE(c.any_sent_count, 0) > 0 THEN 1 ELSE 0 END   AS has_any_sent,
+           CASE WHEN COALESCE(c.real_sent_count, 0) > 0 THEN 1 ELSE 0 END  AS has_real_reply,
+           CASE WHEN COALESCE(c.pending_drafts_count, 0) > 0 THEN 1 ELSE 0 END AS has_pending_draft
     FROM last_in li
-    LEFT JOIN thread_sent_counts tsc ON tsc.gmail_thread_id = li.gmail_thread_id
-    WHERE li.status IN ('sent', 'sent_debug', 'pending', 'new', 'edited', 'approved')
-    -- ASC: самые СТАРЫЕ первыми (дольше висят → выше срочность)
-    ORDER BY COALESCE(li.sent_at, li.created_at) ASC
+    LEFT JOIN counts c ON c.gmail_thread_id = li.gmail_thread_id
+    LEFT JOIN last_event le ON le.gmail_thread_id = li.gmail_thread_id
+    WHERE COALESCE(c.any_sent_count, 0) > 0
+       OR COALESCE(c.pending_drafts_count, 0) > 0
+       OR li.status IN ('pending', 'new', 'edited', 'approved')
+    ORDER BY le.last_event_at ASC
     """
     with get_conn() as conn:
         return conn.execute(sql).fetchall()

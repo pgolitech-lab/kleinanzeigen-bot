@@ -1076,34 +1076,6 @@ def generate_auto_ack(
     }
 
 
-_SIMILAR_BUYER_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "matches": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "candidate_msg_id": {"type": "integer"},
-                    "suspicion_score": {
-                        "type": "integer",
-                        "description": "1-10: 1=точно разные, 10=почти точно один и тот же человек",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Короткое объяснение на русском (≤80 chars) почему похоже",
-                    },
-                },
-                "required": ["candidate_msg_id", "suspicion_score", "reason"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["matches"],
-    "additionalProperties": False,
-}
-
-
 _DETECT_TRANSLATE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -1148,72 +1120,6 @@ def detect_and_translate_to_ru(text: str) -> dict[str, Any]:
         "cost_usd": cost,
         "tokens_in": in_t,
         "tokens_out": out_t,
-    }
-
-
-def detect_similar_buyer(
-    current_text: str,
-    candidates: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Найти среди candidates те что подозрительно похожи по стилю на current_text.
-
-    Использует Haiku — дёшево (~$0.001-0.003).
-    candidates: list of {id, buyer_display_name, de_client (или ru_client)}.
-    Возвращает {matches: [{candidate_msg_id, suspicion_score, reason}], cost_usd, ...}.
-    """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
-    if not candidates:
-        return {"matches": [], "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
-
-    parts = [
-        "=== НОВОЕ СООБЩЕНИЕ ===",
-        f"Текст: «{current_text[:600]}»",
-        "",
-        "=== КАНДИДАТЫ (другие incoming от ДРУГИХ имён) ===",
-    ]
-    for c in candidates[:15]:  # ограничим количество
-        cid = c["id"]
-        cname = c.get("buyer_display_name") or "?"
-        ctext = (c.get("de_client") or c.get("ru_client") or "")[:300]
-        parts.append(f"[#{cid} «{cname}»]: {ctext}")
-    parts.append("")
-    parts.append(
-        "Найди среди КАНДИДАТОВ тех, кто СТИЛИСТИЧЕСКИ похож на нового автора и может быть тем же "
-        "человеком под другим именем (или с другого relay-адреса). Признаки: похожие фразы, опечатки, "
-        "пунктуация, формальность/неформальность, длина, типичные вопросы (цена/доставка/торг). "
-        "Имя НЕ совпадает (это разные display-name) — ищем именно стилевое сходство.\n\n"
-        "Выдай matches: только тех у кого suspicion_score >= 6. Для каждого: "
-        "candidate_msg_id, suspicion_score (1-10), reason (≤80 chars на русском). "
-        "Если никого подозрительного нет — пустой список."
-    )
-
-    client = anthropic.Anthropic(api_key=api_key)
-    classifier_model = "claude-haiku-4-5"
-    response = client.messages.create(
-        model=classifier_model,
-        max_tokens=600,
-        system=(
-            "Ты помощник продавца, детектишь повторных покупателей под разными именами. "
-            "Анализируешь стиль письма, не имена."
-        ),
-        output_config={
-            "format": {"type": "json_schema", "schema": _SIMILAR_BUYER_SCHEMA},
-        },
-        messages=[{"role": "user", "content": "\n".join(parts)}],
-    )
-    raw = next((b.text for b in response.content if b.type == "text"), "")
-    if not raw:
-        return {"matches": [], "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
-    data = json.loads(raw)
-    in_t, out_t, cost = _calc_cost(classifier_model, response.usage)
-    matches = [m for m in (data.get("matches") or []) if m.get("suspicion_score", 0) >= 6]
-    return {
-        "matches": matches,
-        "tokens_in": in_t,
-        "tokens_out": out_t,
-        "cost_usd": cost,
     }
 
 

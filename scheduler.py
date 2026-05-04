@@ -151,6 +151,24 @@ def _send_auto_ack(
         logger.exception("auto-ack: Haiku упал, пропускаю in_msg=%s", in_row["id"])
         return None
 
+    # RU-перевод текста ack для отображения в веб/тг (Haiku ~$0.0003).
+    # Если клиент уже на русском — просто копируем текст.
+    ack_lang = ack.get("client_lang") or "de"
+    ru_translation = ""
+    if ack_lang == "ru":
+        ru_translation = ack["ack_text"]
+    else:
+        try:
+            tr = claude.translate_only(
+                ack["ack_text"], source_lang=ack_lang, target_lang="ru",
+            )
+            ru_translation = tr.get("translation", "") or ""
+        except Exception:
+            logger.warning(
+                "auto-ack: translate_only fail для in_msg=%s, RU перевод пуст",
+                in_row["id"],
+            )
+
     # Вставляем ack-row перед отправкой — чтобы _send_reply мог обновить status.
     ack_id = db.add_message(
         account_id=account["id"],
@@ -164,9 +182,11 @@ def _send_auto_ack(
         buyer_name=in_row["buyer_name"],
         buyer_display_name=buyer_display_name,
         email_subject=_row_get(in_row, "email_subject"),
-        client_lang=ack["client_lang"],
-        answer_lang=ack["client_lang"],
+        client_lang=ack_lang,
+        answer_lang=ack_lang,
         de_answer=ack["ack_text"],
+        ru_answer=ru_translation,
+        ru_translation=ru_translation,
         tokens_in=ack["tokens_in"],
         tokens_out=ack["tokens_out"],
         cost_usd=ack["cost_usd"],
@@ -297,27 +317,48 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # AI-классификатор (Haiku): финальный gate перед дорогими операциями.
     # Дешёвая модель решает «buyer-inquiry или системная рассылка».
     # Срабатывает на всё что прошло cheap-фильтры (noreply / age / junk-subject blacklist).
-    try:
-        classify = claude.classify_email_is_inquiry(
-            subject=subject,
-            from_name=email.get("from_name") or "",
-            from_email=email.get("from_email") or "",
-            body=body,
-        )
-        logger.info(
-            "Classifier: is_inquiry=%s ($%.5f) reason=%r account=%s subject=%r",
-            classify["is_inquiry"], classify["cost_usd"],
-            classify["reason"][:80], account["gmail_email"], subject[:60],
-        )
-        if not classify["is_inquiry"]:
-            try:
-                gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-            except Exception:
-                pass
-            return
-    except Exception:
-        logger.exception("classifier упал, пропускаю проверку")
-        # Fail-open: если classifier недоступен — продолжаем по cheap-правилам
+    #
+    # Bypass: если в этом gmail_thread_id уже есть сохранённый incoming inquiry —
+    # это follow-up клиента, не системка. Haiku ошибается на коротких follow-up-ах
+    # типа «Danke», «Sorry, Peter natürlich» — маркирует как «automatisch generierte
+    # E-Mail» из-за replyto-relay-адреса и теряет реальные сообщения клиента.
+    inbound_thread_id = (email.get("gmail_thread_id") or "").strip()
+    skip_classifier = False
+    if inbound_thread_id:
+        with db.get_conn() as conn:
+            prior = conn.execute(
+                "SELECT 1 FROM messages WHERE gmail_thread_id=? AND direction='in' LIMIT 1",
+                (inbound_thread_id,),
+            ).fetchone()
+        if prior:
+            skip_classifier = True
+            logger.info(
+                "Classifier bypass: thread %s уже имеет inquiry, follow-up принят без проверки",
+                inbound_thread_id,
+            )
+
+    if not skip_classifier:
+        try:
+            classify = claude.classify_email_is_inquiry(
+                subject=subject,
+                from_name=email.get("from_name") or "",
+                from_email=email.get("from_email") or "",
+                body=body,
+            )
+            logger.info(
+                "Classifier: is_inquiry=%s ($%.5f) reason=%r account=%s subject=%r",
+                classify["is_inquiry"], classify["cost_usd"],
+                classify["reason"][:80], account["gmail_email"], subject[:60],
+            )
+            if not classify["is_inquiry"]:
+                try:
+                    gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
+                except Exception:
+                    pass
+                return
+        except Exception:
+            logger.exception("classifier упал, пропускаю проверку")
+            # Fail-open: если classifier недоступен — продолжаем по cheap-правилам
 
     # Skip слишком старые письма (по Date-header).
     # Защита от разгребания древнего архива по уже-удалённым/проданным объявлениям.
@@ -412,9 +453,22 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     #  1) гарантирует что письмо не потеряется даже если parse упадёт
     #  2) даёт auto-ack возможность уйти за секунды (Playwright потом, ~10-30с)
     buyer_display = _clean_display_name(email.get("from_name") or "") or None
-    inserted_id = db.add_message(
-        account_id=account["id"],
-        direction="in",
+    # Реальная дата отправки письма (Date-header). При live-fetch ≈ now,
+    # при backfill/recovery — позволяет сохранить хронологический порядок в карточке.
+    real_created_at: Optional[str] = None
+    date_str = (email.get("date") or "").strip()
+    if date_str:
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(date_str)
+            if dt is not None:
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(__import__("datetime").timezone.utc).replace(tzinfo=None)
+                real_created_at = dt.isoformat()
+        except Exception:
+            real_created_at = None
+
+    add_kwargs: dict[str, Any] = dict(
         gmail_message_id=msg_id,
         gmail_thread_id=email.get("gmail_thread_id") or "",
         ad_url=ad_url,
@@ -425,6 +479,13 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         de_client=body,
         email_subject=subject,
         status="new",
+    )
+    if real_created_at:
+        add_kwargs["created_at"] = real_created_at
+    inserted_id = db.add_message(
+        account_id=account["id"],
+        direction="in",
+        **add_kwargs,
     )
 
     # ── Auto-ack (накрутка метрики «отвечает в течение X часов») ──
@@ -599,37 +660,6 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 
     deal_brief_json = json.dumps(reply["deal_brief"], ensure_ascii=False) if reply.get("deal_brief") else None
 
-    # Style-similarity детект: поищем подозрительно похожих по стилю клиентов под другими именами.
-    # Cheap Haiku-вызов (~$0.001-0.003), fail-safe (если упадёт — не блокирует основной flow).
-    similar_json = None
-    similar_cost = 0.0
-    try:
-        candidates_rows = db.find_recent_other_buyer_inquiries(
-            exclude_display_name=buyer_display,
-            exclude_thread_id=email.get("gmail_thread_id"),
-            limit=20, days=30,
-        )
-        if candidates_rows:
-            candidates = [
-                {
-                    "id": cr["id"],
-                    "buyer_display_name": cr["buyer_display_name"],
-                    "de_client": cr["de_client"],
-                    "ru_client": cr["ru_client"],
-                }
-                for cr in candidates_rows
-            ]
-            sim = claude.detect_similar_buyer(body, candidates)
-            similar_cost = sim.get("cost_usd", 0.0)
-            if sim.get("matches"):
-                similar_json = json.dumps(sim["matches"], ensure_ascii=False)
-                logger.info(
-                    "similar-buyer detect: %d matches for in_msg=%s ($%.4f)",
-                    len(sim["matches"]), inserted_id, similar_cost,
-                )
-    except Exception:
-        logger.exception("similar-buyer detect упал, пропускаю")
-
     db.update_message(
         inserted_id,
         ru_client=reply["ru_client"],
@@ -639,10 +669,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         client_lang=reply.get("client_lang"),
         tokens_in=reply.get("tokens_in"),
         tokens_out=reply.get("tokens_out"),
-        cost_usd=(reply.get("cost_usd", 0.0) or 0.0) + extra_cost + similar_cost,
+        cost_usd=(reply.get("cost_usd", 0.0) or 0.0) + extra_cost,
         history_summary_ru=summary_ru,
         deal_brief_json=deal_brief_json,
-        similar_buyers_json=similar_json,
     )
 
     # ── Dispatch: автопилот или обычная карточка ──
