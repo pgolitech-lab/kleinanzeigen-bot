@@ -47,6 +47,29 @@
                 <label class="form-label">Системный промпт</label>
                 <textarea name="system_prompt" class="form-control" rows="6">{{ settings.system_prompt or '' }}</textarea>
             </div>
+
+            {# --- Snapshot баланса API. Используется чтобы примерно понимать сколько осталось на счёте.
+                  При сверке с console.anthropic.com вводи актуальную сумму — момент фиксируется автоматически. --- #}
+            <div class="mb-2">
+                <label class="form-label">💰 Остаток на счёте API ($)</label>
+                <div class="input-group">
+                    <input type="number" step="0.01" min="0" name="api_balance_snapshot_usd" class="form-control"
+                           value="{{ settings.api_balance_snapshot_usd or '' }}" placeholder="напр. 17.92">
+                    <button type="button" class="btn btn-outline-secondary"
+                            onclick="document.querySelector('[name=api_balance_snapshot_at]').value=new Date().toISOString().slice(0,19).replace('T',' ');"
+                            title="Установить текущее время сверки">
+                        ⟳ now
+                    </button>
+                </div>
+                <input type="text" name="api_balance_snapshot_at" class="form-control mt-1 form-control-sm"
+                       value="{{ settings.api_balance_snapshot_at or '' }}"
+                       placeholder="YYYY-MM-DD HH:MM:SS — момент сверки">
+                <div class="form-text">
+                    Введи актуальный остаток с <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">console.anthropic.com</a>
+                    и нажми <code>⟳ now</code>. На дашборде покажется примерный остаток
+                    (snapshot минус сумма расходов с этого момента).
+                </div>
+            </div>
         </div>
 
         {# --- Telegram --- #}
@@ -129,9 +152,11 @@
             </div>
             <div class="mb-3">
                 <label class="form-label">Через сколько дней молчания предлагать пинг</label>
-                <input type="number" name="reminder_after_days" min="1" max="30" class="form-control"
+                <input type="number" name="reminder_after_days" min="0.04" max="30" step="0.01" class="form-control"
                        value="{{ settings.reminder_after_days or 1 }}">
                 <div class="form-text">
+                    Поддерживается дробное значение: <code>1</code> = сутки, <code>0.5</code> = 12 ч,
+                    <code>0.04</code> ≈ 1 ч (для тестов).
                     Раз в час проверяется очередь. На каждый «висящий» исходящий старше N дней
                     приходит карточка в Telegram с кнопками <code>✉️ Сгенерить ping</code> /
                     <code>❌ Забить</code>. Один раз на тред — повторно не предложит.
@@ -161,6 +186,59 @@
                 <input type="email" name="debug_email" class="form-control"
                        value="{{ settings.debug_email or '' }}" placeholder="me@gmail.com">
                 <div class="form-text">Используется только в режиме redirect.</div>
+            </div>
+        </div>
+
+        {# --- Стиль чата (только веб-морда). Подбираешь и нажимаешь Сохранить — на /threads/{id}
+              и /clients/{email} применяются мгновенно после refresh. --- #}
+        <div class="col-md-6">
+            <h5>💬 Стиль чата (веб)</h5>
+            <div class="row g-2">
+                <div class="col-6">
+                    <label class="form-label">Шрифт пузыря (em)</label>
+                    <input type="number" step="0.05" min="0.5" max="3" name="chat_font_em" class="form-control form-control-sm"
+                           value="{{ settings.chat_font_em or '1.0' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Макс. ширина пузыря (%)</label>
+                    <input type="number" step="1" min="20" max="100" name="chat_max_width_pct" class="form-control form-control-sm"
+                           value="{{ settings.chat_max_width_pct or '62' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Padding верт. (rem)</label>
+                    <input type="number" step="0.05" min="0" max="2" name="chat_padding_v_rem" class="form-control form-control-sm"
+                           value="{{ settings.chat_padding_v_rem or '0.25' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Padding гор. (rem)</label>
+                    <input type="number" step="0.05" min="0" max="2" name="chat_padding_h_rem" class="form-control form-control-sm"
+                           value="{{ settings.chat_padding_h_rem or '0.55' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Скругление (rem)</label>
+                    <input type="number" step="0.05" min="0" max="2" name="chat_radius_rem" class="form-control form-control-sm"
+                           value="{{ settings.chat_radius_rem or '0.5' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Промежуток рядов (rem)</label>
+                    <input type="number" step="0.05" min="0" max="2" name="chat_row_gap_rem" class="form-control form-control-sm"
+                           value="{{ settings.chat_row_gap_rem or '0.35' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Шрифт meta (em)</label>
+                    <input type="number" step="0.05" min="0.4" max="2" name="chat_meta_font_em" class="form-control form-control-sm"
+                           value="{{ settings.chat_meta_font_em or '0.78' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Шрифт RU-перевода (em)</label>
+                    <input type="number" step="0.05" min="0.5" max="2" name="chat_secondary_font_em" class="form-control form-control-sm"
+                           value="{{ settings.chat_secondary_font_em or '0.92' }}">
+                </div>
+            </div>
+            <div class="form-text mt-2">
+                Примечание: значения в <code>em</code> — относительно базового шрифта страницы (14px).
+                Пузырь хаггит текст до <code>max-width</code>; на mobile ширина 92%.
+                Изменения применяются сразу после сохранения и обновления страницы.
             </div>
         </div>
 

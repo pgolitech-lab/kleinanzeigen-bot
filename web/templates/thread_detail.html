@@ -15,7 +15,10 @@
         <h2 class="h4 mb-2">📦 {{ head.ad_title or '— без объявления —' }}</h2>
         <div class="d-flex flex-wrap gap-3 text-muted-sm">
             {% if head.ad_price %}<span>💰 {{ head.ad_price }}</span>{% endif %}
-            {% if head.seller %}<span>🏪 Наш: {{ head.seller }}</span>{% endif %}
+            {% set seller_label = head.seller or head.our_account_name %}
+            {% if seller_label or head.our_account_email %}
+            <span>🏪 Наш: {{ seller_label or '' }}{% if head.our_account_email %} <code>{{ head.our_account_email }}</code>{% endif %}</span>
+            {% endif %}
             {% if head.buyer_display or head.buyer_email %}
             <span>👤 Клиент: {{ head.buyer_display or head.buyer_email }}</span>
             {% endif %}
@@ -45,7 +48,7 @@
         {% if kf.key_specs %}<div><strong>Характеристики:</strong> {{ kf.key_specs | join('; ') }}</div>{% endif %}
         {% if kf.selling_points %}<div class="text-success-emphasis"><strong>✅ Сильные:</strong> {{ kf.selling_points | join('; ') }}</div>{% endif %}
         {% if kf.weak_points %}<div class="text-warning-emphasis"><strong>⚠️ Возражения:</strong> {{ kf.weak_points | join('; ') }}</div>{% endif %}
-        <div class="text-muted-sm mt-2">обновлён {{ brief.updated_at[:19] }}</div>
+        <div class="text-muted-sm mt-2">обновлён {{ brief.updated_at | berlin('%Y-%m-%d %H:%M:%S') }}</div>
     </div>
 </div>
 {% endif %}
@@ -71,34 +74,29 @@
                     <pre class="bg-body-tertiary p-2 small rounded border mb-0">{{ ls.good_answer_ru or '—' }}</pre>
                 </div>
             </div>
-            <div class="text-muted-sm small mt-1">{{ ls.created_at[:19] }}</div>
+            <div class="text-muted-sm small mt-1">{{ ls.created_at | berlin('%Y-%m-%d %H:%M:%S') }}</div>
         </div>
         {% endfor %}
     </div>
 </div>
 {% endif %}
 
-{# Лента сообщений в чат-стиле #}
-{% for m in messages %}
-<div class="chat-row {{ 'in' if m.direction == 'in' else 'out' }}">
+{# Лента сообщений в чат-стиле — flat events с реальными таймстампами.
+   Один row 'in' с заполненным de_answer = два события: клиент написал (created_at)
+   и мы ответили (sent_at). Порядок соответствует тому что видно в Kleinanzeigen-мессенджере. #}
+{% for e in events %}
+<div class="chat-row {{ e.kind }}">
     <div class="chat-bubble">
         <div class="chat-meta">
-            {% if m.direction == 'in' %}📥 {{ m.created_at[:19] }}{% if m.buyer_name %} · {{ m.buyer_name }}{% endif %}
-            {% else %}📤 {{ m.created_at[:19] }} · <span class="badge text-bg-{{ status_color(m.status) }}">{{ m.status }}</span>{% if m.is_auto_ack %} <span class="badge text-bg-info">🤖 ack</span>{% endif %}
+            {% if e.kind == 'in' %}
+                📥 {{ e.ts | berlin('%Y-%m-%d %H:%M:%S') }}{% if e.buyer_display_name or e.buyer_name %} · {{ e.buyer_display_name or e.buyer_name }}{% endif %}
+            {% else %}
+                📤 {{ e.ts | berlin('%Y-%m-%d %H:%M:%S') }} · <span class="badge text-bg-{{ status_color(e.status) }}">{{ e.status }}</span>{% if e.is_auto_ack %} <span class="badge text-bg-info">🤖 ack</span>{% endif %}
             {% endif %}
         </div>
-
-        {# Тело: для входящих — оригинал DE; для исходящих — то что отправили (de_answer) #}
-        {% if m.direction == 'in' %}
-            {{ m.de_client or '— пусто —' }}
-            {% if m.ru_client %}
-            <div class="chat-secondary">🇷🇺 {{ m.ru_client }}</div>
-            {% endif %}
-        {% else %}
-            {{ m.de_answer or '— пусто —' }}
-            {% if m.ru_answer %}
-            <div class="chat-secondary">🇷🇺 {{ m.ru_answer }}</div>
-            {% endif %}
+        {{ e.text or '— пусто —' }}
+        {% if e.ru_text %}
+        <div class="chat-secondary">🇷🇺 {{ e.ru_text }}</div>
         {% endif %}
     </div>
 </div>

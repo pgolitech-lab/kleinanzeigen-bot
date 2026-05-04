@@ -1,11 +1,11 @@
-{# Список Kleinanzeigen + Gmail аккаунтов #}
+{# Список Kleinanzeigen + Gmail аккаунтов в виде сортируемой таблицы. #}
 {% extends "base.html" %}
 
 {% block title %}Аккаунты — Kleinanzeigen Bot{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1>Аккаунты</h1>
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h1 class="mb-0">Аккаунты <span class="text-muted-sm">· {{ accounts | length }}</span></h1>
     <a href="/accounts/new" class="btn btn-primary btn-sm">+ Добавить аккаунт</a>
 </div>
 
@@ -14,63 +14,80 @@
 {% endif %}
 
 {% if accounts %}
-<div class="table-responsive">
-    <table class="table table-hover align-middle">
-        <thead class="table-light">
-            <tr>
-                <th>#</th>
-                <th>Название</th>
-                <th>Gmail</th>
-                <th>Активен</th>
-                <th>🤖 Auto-ack</th>
-                <th>Создан</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for a in accounts %}
-            <tr>
-                <td>{{ a.id }}</td>
-                <td><strong>{{ a.name }}</strong></td>
-                <td>{{ a.gmail_email }}</td>
-                <td>
-                    {% if a.is_active %}
-                    <span class="badge text-bg-success">да</span>
-                    {% else %}
-                    <span class="badge text-bg-secondary">нет</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if a.auto_ack_enabled %}
-                    <span class="badge text-bg-info">вкл</span>
-                    {% else %}
-                    <span class="text-muted-sm">—</span>
-                    {% endif %}
-                </td>
-                <td class="text-muted-sm">{{ a.created_at[:10] }}</td>
-                <td class="text-nowrap">
-                    <form method="post" action="/accounts/{{ a.id }}/test-imap" class="d-inline">
-                        <button type="submit" class="btn btn-sm btn-outline-info" title="Проверить логин IMAP">Test IMAP</button>
-                    </form>
-                    <a href="/accounts/{{ a.id }}/edit" class="btn btn-sm btn-outline-secondary">Изменить</a>
-                    <form method="post" action="/accounts/{{ a.id }}/toggle" class="d-inline">
-                        <button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if a.is_active else 'success' }}">
-                            {{ 'Выкл' if a.is_active else 'Вкл' }}
-                        </button>
-                    </form>
-                    <form method="post" action="/accounts/{{ a.id }}/delete" class="d-inline"
-                          onsubmit="return confirm('Удалить аккаунт «{{ a.name }}» и всю переписку по нему?');">
-                        <button type="submit" class="btn btn-sm btn-outline-danger">Удалить</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="card">
+    <div class="card-body p-2">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" id="accounts-table">
+                <thead>
+                    <tr>
+                        <th class="text-end">#</th>
+                        <th>Название</th>
+                        <th>Gmail</th>
+                        <th>Активен</th>
+                        <th>🤖 Auto-ack</th>
+                        <th data-type="date" data-format="YYYY-MM-DD">Создан</th>
+                        <th data-sortable="false">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in accounts %}
+                    <tr>
+                        <td class="text-end">{{ a.id }}</td>
+                        <td><strong>{{ a.name }}</strong></td>
+                        <td class="text-muted-sm">{{ a.gmail_email }}</td>
+                        <td>
+                            {% if a.is_active %}
+                            <span class="badge text-bg-success">да</span>
+                            {% else %}
+                            <span class="badge text-bg-secondary">нет</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.auto_ack_enabled %}
+                            <span class="badge text-bg-info">вкл</span>
+                            {% else %}
+                            <span class="text-muted-sm">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted-sm text-nowrap">{{ a.created_at | berlin('%Y-%m-%d') }}</td>
+                        <td class="text-nowrap">
+                            <form method="post" action="/accounts/{{ a.id }}/test-imap" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-info" title="Проверить логин IMAP">IMAP</button>
+                            </form>
+                            <a href="/accounts/{{ a.id }}/edit" class="btn btn-sm btn-outline-secondary">✏️</a>
+                            <form method="post" action="/accounts/{{ a.id }}/toggle" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if a.is_active else 'success' }}">
+                                    {{ 'Выкл' if a.is_active else 'Вкл' }}
+                                </button>
+                            </form>
+                            <form method="post" action="/accounts/{{ a.id }}/delete" class="d-inline"
+                                  onsubmit="return confirm('Удалить аккаунт «{{ a.name }}» и всю переписку по нему?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">🗑</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% else %}
 <div class="alert alert-info">
     Аккаунтов пока нет. Добавь первый, чтобы бот начал поллить почту.
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+    initDataTable('#accounts-table', {
+        columns: [
+            // Свежие сверху — колонка «Создан» (5) DESC
+            { select: 5, sort: 'desc' },
+        ],
+    });
+});
+</script>
 {% endblock %}

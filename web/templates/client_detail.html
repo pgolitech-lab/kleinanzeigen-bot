@@ -16,8 +16,8 @@
             <span>💬 Всего сообщений: {{ info.total_msgs }}</span>
             <span>📦 Тредов: {{ threads | length }}</span>
             {% if info.total_cost %}<span>💸 ${{ '%.4f' | format(info.total_cost) }}</span>{% endif %}
-            {% if info.first_at %}<span>Первый контакт: {{ info.first_at[:10] }}</span>{% endif %}
-            {% if info.last_at %}<span>Последняя активность: {{ info.last_at[:19] }}</span>{% endif %}
+            {% if info.first_at %}<span>Первый контакт: {{ info.first_at | berlin('%Y-%m-%d') }}</span>{% endif %}
+            {% if info.last_at %}<span>Последняя активность: {{ info.last_at | berlin('%Y-%m-%d %H:%M:%S') }}</span>{% endif %}
         </div>
     </div>
 </div>
@@ -41,7 +41,7 @@
                     </span>
                     <span class="text-nowrap">
                         <span class="badge text-bg-{{ status_color(t.last_status) }}">{{ t.last_status }}</span>
-                        <span class="text-muted-sm ms-2">{{ t.msg_count }} сообщ. · {{ t.last_at[:10] }}</span>
+                        <span class="text-muted-sm ms-2">{{ t.msg_count }} сообщ. · {{ t.last_at | berlin('%Y-%m-%d') }}</span>
                     </span>
                 </div>
             </button>
@@ -68,7 +68,7 @@
                 {% if m.de_client %}
                 <div class="chat-row in">
                     <div class="chat-bubble">
-                        <div class="chat-meta">📥 {{ m.created_at[:19] }}{% if m.buyer_display_name or m.buyer_name %} · {{ m.buyer_display_name or m.buyer_name[:30] }}{% endif %}</div>
+                        <div class="chat-meta">📥 {{ m.created_at | berlin('%Y-%m-%d %H:%M:%S') }}{% if m.buyer_display_name or m.buyer_name %} · {{ m.buyer_display_name or m.buyer_name[:30] }}{% endif %}</div>
                         {{ m.de_client }}
                         {% if m.ru_client and m.client_lang != 'ru' %}
                         <div class="chat-secondary">🇷🇺 {{ m.ru_client }}</div>
@@ -79,10 +79,11 @@
                 {% if m.de_answer and m.status in ('sent', 'sent_debug', 'edited', 'approved', 'pending', 'new') %}
                 <div class="chat-row out">
                     <div class="chat-bubble">
-                        <div class="chat-meta">📤 {{ m.created_at[:19] }} · <span class="badge text-bg-{{ status_color(m.status) }}">{{ m.status }}</span>{% if m.is_reminder %} · 🔔 ping{% endif %}{% if m.is_auto_ack %} · <span class="badge text-bg-info">🤖 ack</span>{% endif %}</div>
+                        <div class="chat-meta">📤 {{ (m.sent_at or m.created_at) | berlin('%Y-%m-%d %H:%M:%S') }} · <span class="badge text-bg-{{ status_color(m.status) }}">{{ m.status }}</span>{% if m.is_reminder %} · 🔔 ping{% endif %}{% if m.is_auto_ack %} · <span class="badge text-bg-info">🤖 ack</span>{% endif %}</div>
                         {{ m.de_answer }}
-                        {% if m.ru_answer %}
-                        <div class="chat-secondary">🇷🇺 {{ m.ru_answer }}</div>
+                        {% set ru_text = m.ru_answer or m.ru_translation %}
+                        {% if ru_text %}
+                        <div class="chat-secondary">🇷🇺 {{ ru_text }}</div>
                         {% endif %}
                     </div>
                 </div>

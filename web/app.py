@@ -21,6 +21,45 @@ app = FastAPI(title="Kleinanzeigen Bot")
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+
+def _chat_style() -> dict[str, str]:
+    """Параметры стиля чата для base.html. Каждый GET-запрос дёргает свежие значения."""
+    keys = (
+        "chat_font_em", "chat_padding_v_rem", "chat_padding_h_rem",
+        "chat_max_width_pct", "chat_radius_rem", "chat_row_gap_rem",
+        "chat_meta_font_em", "chat_secondary_font_em",
+    )
+    out: dict[str, str] = {}
+    for k in keys:
+        v = config.get(k) or ""
+        if not v.strip():
+            v = config.DEFAULTS.get(k, "")
+        out[k] = v
+    return out
+
+
+# Доступ к стилю чата из любого шаблона: {% set cs = chat_style() %}
+templates.env.globals["chat_style"] = _chat_style
+
+
+def _berlin_filter(iso_str: Optional[str], fmt: str = "%H:%M") -> str:
+    """Jinja-фильтр: UTC ISO → Europe/Berlin local time. БД хранит UTC, оператор в CEST."""
+    if not iso_str:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        import zoneinfo
+        s = str(iso_str).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime(fmt)
+    except Exception:
+        return str(iso_str)[:16].replace("T", " ")
+
+
+templates.env.filters["berlin"] = _berlin_filter
+
 # Секретные ключи — маскируем в GET, не затираем при пустой строке в POST
 SENSITIVE_KEYS = {
     "anthropic_api_key",
@@ -76,6 +115,7 @@ def page_messages(request: Request, status: Optional[str] = None):
         {
             "messages": [dict(r) for r in rows],
             "status_filter": status or "",
+            "status_color": _status_color,
         },
     )
 
@@ -145,8 +185,8 @@ async def post_account_new(
     )
     db.update_account(
         new_id,
-        is_active=1 if is_active else 0,
-        auto_ack_enabled=1 if auto_ack_enabled else 0,
+        is_active=1 if is_active == "1" else 0,
+        auto_ack_enabled=1 if auto_ack_enabled == "1" else 0,
     )
     return RedirectResponse(url="/accounts?saved=1", status_code=303)
 
@@ -181,8 +221,10 @@ async def post_account_edit(
         "name": name.strip(),
         "gmail_email": gmail_email.strip(),
         "kleinanzeigen_email": kleinanzeigen_email.strip() or None,
-        "is_active": 1 if is_active else 0,
-        "auto_ack_enabled": 1 if auto_ack_enabled else 0,
+        # Чекбоксы: при unchecked форма отправляет hidden "0", при checked — "1".
+        # Сравнение через truthy ловит "0" (непустая строка) → бажит. Сравниваем строку явно.
+        "is_active": 1 if is_active == "1" else 0,
+        "auto_ack_enabled": 1 if auto_ack_enabled == "1" else 0,
     }
     if gmail_app_password.strip():
         fields["gmail_app_password"] = gmail_app_password.strip()
@@ -491,10 +533,42 @@ def page_thread_detail(request: Request, thread_id: str):
     # Уроки по этому объявлению
     lessons = [dict(r) for r in db.list_lessons_for_ad(ad_id_val or "", limit=10)]
 
+    # Хронологический flat-список событий: каждое событие = одно сообщение
+    # (in от клиента ИЛИ out от нас) с реальным таймстампом (created_at или sent_at).
+    # Pending/edited/approved драфты НЕ показываем в ленте — это не часть истории,
+    # они отрисовываются отдельной панелью «Ждёт твоего решения» внизу. Auto-ack
+    # показываем как обычное сообщение (клиент его получил, скрывать нет смысла).
+    SENT_OUT = {"sent", "sent_debug"}
+    events_raw = db.thread_events(thread_id)
+    events = []
+    for e in events_raw:
+        if e["kind"] == "out" and e["status"] not in SENT_OUT:
+            continue
+        r = e["row"]
+        events.append({
+            "ts": e["ts"],
+            "kind": e["kind"],
+            "text": e["text"],
+            "ru_text": e["ru_text"],
+            "status": e["status"],
+            "is_auto_ack": e["is_auto_ack"],
+            "msg_id": r["id"],
+            "buyer_display_name": r["buyer_display_name"] if "buyer_display_name" in r.keys() else None,
+            "buyer_name": r["buyer_name"],
+            "client_lang": r["client_lang"] if "client_lang" in r.keys() else None,
+        })
+
+    # Наш аккаунт (кому пишет клиент)
+    first_acc_id = next((r["account_id"] for r in rows if r["account_id"]), None)
+    if first_acc_id:
+        acc_row = db.get_account(first_acc_id)
+        head["our_account_email"] = acc_row["gmail_email"] if acc_row else ""
+        head["our_account_name"] = acc_row["name"] if acc_row else ""
+
     return templates.TemplateResponse(
         request, "thread_detail.html",
         {
-            "head": head, "messages": messages, "pending": pending,
+            "head": head, "messages": messages, "events": events, "pending": pending,
             "brief": brief, "lessons": lessons,
             "status_color": _status_color,
         },
@@ -552,7 +626,7 @@ def api_logs(since: Optional[int] = None, limit: int = 500) -> dict[str, Any]:
 
 @app.get("/api/status")
 def api_status() -> dict[str, Any]:
-    """Снимок: scheduler-задачи + быстрые счётчики + стоимость API."""
+    """Снимок: scheduler-задачи + быстрые счётчики + стоимость API + оценка баланса."""
     accs = db.list_accounts()
     counts = {
         "active_accounts": sum(1 for a in accs if a["is_active"]),
@@ -562,7 +636,7 @@ def api_status() -> dict[str, Any]:
         "messages_sent": len(db.list_messages(status="sent", limit=10000)),
         "messages_sent_debug": len(db.list_messages(status="sent_debug", limit=10000)),
     }
-    # Суммарная стоимость API за всё время
+    # Суммарная стоимость API за всё время + burn-rate за последние 7 дней
     with db.get_conn() as conn:
         row = conn.execute(
             "SELECT COALESCE(SUM(cost_usd),0) AS total_usd, "
@@ -571,6 +645,11 @@ def api_status() -> dict[str, Any]:
             "COUNT(*) AS msg_count "
             "FROM messages WHERE cost_usd IS NOT NULL"
         ).fetchone()
+        burn_row = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) AS spent_7d "
+            "FROM messages WHERE cost_usd IS NOT NULL "
+            "AND created_at >= datetime('now','-7 days')"
+        ).fetchone()
     api_cost = {
         "total_usd": round(row["total_usd"] or 0.0, 6),
         "tokens_in": row["tin"] or 0,
@@ -578,7 +657,48 @@ def api_status() -> dict[str, Any]:
         "messages_processed": row["msg_count"] or 0,
         "model": config.claude_model(),
     }
-    return {"jobs": sched_mod.get_jobs_info(), "counts": counts, "api_cost": api_cost}
+
+    # --- Оценка баланса API ---
+    # Snapshot вводится оператором в /settings когда он сверяется с console.anthropic.com.
+    # Остаток = snapshot - сумма cost_usd по messages, созданным позже snapshot_at.
+    snapshot_raw = config.get("api_balance_snapshot_usd") or ""
+    snapshot_at = config.get("api_balance_snapshot_at") or ""
+    try:
+        snapshot_usd = float(snapshot_raw) if snapshot_raw else None
+    except ValueError:
+        snapshot_usd = None
+
+    spent_since = 0.0
+    remaining = None
+    if snapshot_usd is not None and snapshot_at:
+        with db.get_conn() as conn:
+            srow = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd),0) AS s "
+                "FROM messages WHERE cost_usd IS NOT NULL AND created_at > ?",
+                (snapshot_at,),
+            ).fetchone()
+        spent_since = float(srow["s"] or 0.0)
+        remaining = round(snapshot_usd - spent_since, 4)
+
+    burn_per_day = round(float(burn_row["spent_7d"] or 0.0) / 7.0, 6)
+    days_remaining = None
+    if remaining is not None and burn_per_day > 0 and remaining > 0:
+        days_remaining = round(remaining / burn_per_day, 1)
+
+    api_balance = {
+        "snapshot_usd": snapshot_usd,
+        "snapshot_at": snapshot_at or None,
+        "spent_since_snapshot_usd": round(spent_since, 4),
+        "remaining_estimated_usd": remaining,
+        "burn_per_day_usd": burn_per_day,
+        "days_remaining": days_remaining,
+    }
+    return {
+        "jobs": sched_mod.get_jobs_info(),
+        "counts": counts,
+        "api_cost": api_cost,
+        "api_balance": api_balance,
+    }
 
 
 @app.get("/api/accounts")

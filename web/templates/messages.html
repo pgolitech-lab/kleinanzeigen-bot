@@ -1,17 +1,17 @@
-{# Список сообщений с фильтром по статусу #}
+{# Список сообщений в виде сортируемой/фильтруемой таблицы. Раскрытие тела — modal по клику. #}
 {% extends "base.html" %}
 
 {% block title %}Сообщения — Kleinanzeigen Bot{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1>Сообщения</h1>
+<div class="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
+    <h1 class="mb-0">Сообщения <span class="text-muted-sm">· {{ messages | length }}</span></h1>
 
-    {# Фильтр по статусу через GET-параметр #}
+    {# Server-side фильтр по статусу — оставляем для глубокой фильтрации (limit=200) #}
     <form method="get" class="d-flex gap-2">
-        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width: 180px;">
             <option value="">Все статусы</option>
-            {% for s in ['new', 'pending', 'approved', 'sent', 'skipped', 'edited'] %}
+            {% for s in ['new', 'pending', 'approved', 'sent', 'sent_debug', 'skipped', 'edited', 'archived'] %}
             <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
             {% endfor %}
         </select>
@@ -19,57 +19,115 @@
 </div>
 
 {% if messages %}
-<div class="accordion" id="msgAccordion">
-    {% for m in messages %}
-    <div class="accordion-item">
-        <h2 class="accordion-header">
-            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                    data-bs-target="#msg{{ m.id }}">
-                <div class="d-flex w-100 justify-content-between align-items-center pe-3">
-                    <span>
-                        <strong>#{{ m.id }}</strong>
-                        {{ m.ad_title or '—' }}
-                        {% if m.ad_price %}<span class="text-muted">· {{ m.ad_price }}</span>{% endif %}
-                    </span>
-                    <span>
-                        <span class="badge text-bg-secondary">{{ m.status }}</span>
-                        <span class="text-muted-sm ms-2">{{ m.created_at[:19] }}</span>
-                    </span>
-                </div>
-            </button>
-        </h2>
-        <div id="msg{{ m.id }}" class="accordion-collapse collapse" data-bs-parent="#msgAccordion">
-            <div class="accordion-body">
-                {% if m.ad_url %}
-                <p><a href="{{ m.ad_url }}" target="_blank" rel="noopener">Открыть объявление ↗</a></p>
-                {% endif %}
+<div class="card">
+    <div class="card-body p-2">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" id="messages-table">
+                <thead>
+                    <tr>
+                        <th class="text-end">#</th>
+                        <th data-type="date" data-format="YYYY-MM-DD HH:mm:ss">Когда</th>
+                        <th>Объявление</th>
+                        <th>Цена</th>
+                        <th>Клиент</th>
+                        <th>Статус</th>
+                        <th data-sortable="false">Тело</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in messages %}
+                    <tr>
+                        <td class="text-end"><strong>{{ m.id }}</strong></td>
+                        <td class="text-muted-sm text-nowrap">{{ m.created_at | berlin('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>
+                            {% if m.ad_url %}
+                            <a href="{{ m.ad_url }}" target="_blank" rel="noopener" class="row-link">{{ m.ad_title or '—' }}</a>
+                            {% else %}
+                            {{ m.ad_title or '—' }}
+                            {% endif %}
+                        </td>
+                        <td class="text-muted-sm text-nowrap">{{ m.ad_price or '—' }}</td>
+                        <td>
+                            {% if m.gmail_thread_id %}
+                            <a href="/threads/{{ m.gmail_thread_id }}" class="row-link">{{ m.buyer_display_name or m.buyer_name or '—' }}</a>
+                            {% else %}
+                            {{ m.buyer_display_name or m.buyer_name or '—' }}
+                            {% endif %}
+                        </td>
+                        <td><span class="badge text-bg-{{ status_color(m.status) if status_color is defined else 'secondary' }}">{{ m.status }}</span></td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    data-bs-toggle="modal" data-bs-target="#msgModal-{{ m.id }}">
+                                открыть
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 
+{# Modal-ы с телом каждого сообщения #}
+{% for m in messages %}
+<div class="modal fade" id="msgModal-{{ m.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title">
+                    #{{ m.id }} · {{ m.ad_title or '—' }}
+                    {% if m.ad_price %}<span class="text-muted-sm"> · {{ m.ad_price }}</span>{% endif %}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-muted-sm mb-3">
+                    {{ m.created_at | berlin('%Y-%m-%d %H:%M:%S') }} ·
+                    <span class="badge text-bg-{{ status_color(m.status) if status_color is defined else 'secondary' }}">{{ m.status }}</span>
+                    {% if m.ad_url %} · <a href="{{ m.ad_url }}" target="_blank" rel="noopener">↗ Объявление</a>{% endif %}
+                </div>
                 {% if m.de_client %}
-                <h6 class="mt-3">📥 Письмо клиента (DE):</h6>
+                <h6 class="mt-2">📥 Письмо клиента:</h6>
                 <pre class="bg-body-tertiary p-2 small rounded border">{{ m.de_client }}</pre>
                 {% endif %}
-
                 {% if m.ru_client %}
-                <h6 class="mt-3">📥 Перевод (RU):</h6>
+                <h6 class="mt-2">🇷🇺 Перевод входящего:</h6>
                 <pre class="bg-body-tertiary p-2 small rounded border">{{ m.ru_client }}</pre>
                 {% endif %}
-
                 {% if m.ru_answer %}
-                <h6 class="mt-3">✍️ Черновик ответа (RU):</h6>
+                <h6 class="mt-2">✍️ Черновик ответа (RU):</h6>
                 <pre class="bg-body-tertiary p-2 small rounded border">{{ m.ru_answer }}</pre>
                 {% endif %}
-
                 {% if m.de_answer %}
-                <h6 class="mt-3">📤 Ответ (DE):</h6>
+                <h6 class="mt-2">📤 Ответ ({{ m.client_lang or 'lang?' }}):</h6>
                 <pre class="bg-body-tertiary p-2 small rounded border">{{ m.de_answer }}</pre>
+                {% endif %}
+                {% if m.ru_translation %}
+                <h6 class="mt-2">🇷🇺 Обратный перевод:</h6>
+                <pre class="bg-body-tertiary p-2 small rounded border">{{ m.ru_translation }}</pre>
                 {% endif %}
             </div>
         </div>
     </div>
-    {% endfor %}
 </div>
+{% endfor %}
+
 {% else %}
 <p class="text-muted">Сообщений нет
 {%- if status_filter %} (фильтр: {{ status_filter }}){% endif %}.</p>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+    initDataTable('#messages-table', {
+        // По умолчанию свежие сверху — колонка «Когда» (1) DESC
+        columns: [
+            { select: 1, sort: 'desc' },
+        ],
+    });
+});
+</script>
 {% endblock %}

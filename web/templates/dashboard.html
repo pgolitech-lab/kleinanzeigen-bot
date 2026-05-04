@@ -1,89 +1,93 @@
-{# Дашборд: счётчики по статусам сообщений + краткая сводка #}
+{# Дашборд: компактные счётчики + статус задач + последние сообщения (sortable). #}
 {% extends "base.html" %}
 
 {% block title %}Дашборд — Kleinanzeigen Bot{% endblock %}
 
 {% block content %}
-<h1 class="mb-4">Дашборд</h1>
+<h1 class="mb-3">Дашборд</h1>
 
-{# Карточки со счётчиками — данные приходят в context.stats #}
-<div class="row g-3 mb-4">
-    <div class="col-sm-6 col-md-3">
-        <div class="card text-bg-secondary h-100">
+{# Карточки со счётчиками #}
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-bg-secondary h-100">
             <div class="card-body">
-                <div class="text-muted-sm">Активных аккаунтов</div>
-                <div class="display-6">{{ stats.active_accounts | default(0) }}</div>
+                <div class="stat-label">Активных аккаунтов</div>
+                <div class="stat-value">{{ stats.active_accounts | default(0) }}</div>
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-md-3">
-        <div class="card text-bg-warning h-100">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-bg-warning h-100 position-relative">
             <div class="card-body">
-                <div class="text-muted-sm">Ждут проверки</div>
-                <div class="display-6">{{ stats.pending | default(0) }}</div>
+                <div class="stat-label">Ждут проверки</div>
+                <div class="stat-value">{{ stats.pending | default(0) }}</div>
                 <a href="/messages?status=pending" class="stretched-link"></a>
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-md-3">
-        <div class="card text-bg-info h-100">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-bg-info h-100 position-relative">
             <div class="card-body">
-                <div class="text-muted-sm">Одобрено к отправке</div>
-                <div class="display-6">{{ stats.approved | default(0) }}</div>
+                <div class="stat-label">Одобрено к отправке</div>
+                <div class="stat-value">{{ stats.approved | default(0) }}</div>
                 <a href="/messages?status=approved" class="stretched-link"></a>
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-md-3">
-        <div class="card text-bg-success h-100">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-bg-success h-100 position-relative">
             <div class="card-body">
-                <div class="text-muted-sm">Отправлено всего</div>
-                <div class="display-6">{{ stats.sent | default(0) }}</div>
+                <div class="stat-label">Отправлено всего</div>
+                <div class="stat-value">{{ stats.sent | default(0) }}</div>
                 <a href="/messages?status=sent" class="stretched-link"></a>
             </div>
         </div>
     </div>
 </div>
 
-{# API-расходы — суммарно по всем сообщениям. Подтягивается из /api/status #}
-<h2 class="h4 mb-3">Anthropic API — расходы</h2>
-<div class="row g-3 mb-4" id="api-cost-row">
-    <div class="col-12 text-muted">Загрузка…</div>
+{# API-расходы #}
+<h2 class="mb-2">Anthropic API — расходы</h2>
+<div class="row g-2 mb-3" id="api-cost-row">
+    <div class="col-12 text-muted-sm">Загрузка…</div>
 </div>
 
-{# Текущие задачи scheduler-а — данные подтягиваются из /api/status каждые 5с #}
-<h2 class="h4 mb-3">Текущие задачи</h2>
-<div class="row g-3 mb-4" id="jobs-row">
-    <div class="col-12 text-muted">Загрузка статуса…</div>
+{# Текущие задачи scheduler #}
+<h2 class="mb-2">Текущие задачи</h2>
+<div class="row g-2 mb-3" id="jobs-row">
+    <div class="col-12 text-muted-sm">Загрузка статуса…</div>
 </div>
 
-{# Последние сообщения — топ-10 #}
-<h2 class="h4 mb-3">Последние сообщения</h2>
+{# Последние сообщения — сортируемая таблица #}
+<h2 class="mb-2">Последние сообщения</h2>
 {% if recent %}
-<div class="table-responsive">
-    <table class="table table-sm table-hover">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Когда</th>
-                <th>Объявление</th>
-                <th>Статус</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for m in recent %}
-            <tr>
-                <td>{{ m.id }}</td>
-                <td class="text-muted-sm">{{ m.created_at[:19] }}</td>
-                <td>{{ m.ad_title or '—' }}</td>
-                <td><span class="badge text-bg-secondary">{{ m.status }}</span></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="card">
+    <div class="card-body p-2">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" id="recent-table">
+                <thead>
+                    <tr>
+                        <th class="text-end">#</th>
+                        <th data-type="date" data-format="YYYY-MM-DD HH:mm:ss">Когда</th>
+                        <th>Объявление</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in recent %}
+                    <tr>
+                        <td class="text-end">{{ m.id }}</td>
+                        <td class="text-muted-sm text-nowrap">{{ m.created_at | berlin('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ m.ad_title or '—' }}</td>
+                        <td><span class="badge text-bg-secondary">{{ m.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% else %}
-<p class="text-muted">Сообщений пока нет.</p>
+<p class="text-muted-sm">Сообщений пока нет.</p>
 {% endif %}
 {% endblock %}
 
@@ -124,27 +128,57 @@
     }
 
     const apiRow = document.getElementById('api-cost-row');
-    function apiCostCards(c) {
+    function apiCostCards(c, b) {
         const fmt = (n) => '$' + Number(n).toFixed(4);
+        const fmt2 = (n) => '$' + Number(n).toFixed(2);
         const tk = (n) => Number(n).toLocaleString('ru-RU');
+
+        // Балансовая карточка: цвет зависит от уровня (low <$2, mid <$10, ok >=$10)
+        let balanceCard;
+        if (b && b.remaining_estimated_usd !== null && b.remaining_estimated_usd !== undefined) {
+            const rem = Number(b.remaining_estimated_usd);
+            const cls = rem < 2 ? 'text-bg-danger' : rem < 10 ? 'text-bg-warning' : 'text-bg-success';
+            const days = (b.days_remaining !== null && b.days_remaining !== undefined)
+                ? '<div class="text-muted-sm">~' + b.days_remaining + ' дн. при ' + fmt2(b.burn_per_day_usd) + '/день</div>'
+                : '<div class="text-muted-sm">burn: ' + fmt2(b.burn_per_day_usd) + '/день</div>';
+            const snapInfo = b.snapshot_at
+                ? '<div class="text-muted-sm small">snap ' + fmt2(b.snapshot_usd) + ' от ' + escapeHtml(b.snapshot_at.slice(0,16)) + ', потрачено ' + fmt2(b.spent_since_snapshot_usd) + '</div>'
+                : '';
+            balanceCard =
+                '<div class="col-6 col-md-3"><div class="card stat-card ' + cls + ' h-100 position-relative">' +
+                  '<div class="card-body">' +
+                    '<div class="stat-label">💰 Остаток API (примерно)</div>' +
+                    '<div class="stat-value">' + fmt2(rem) + '</div>' +
+                    days +
+                    snapInfo +
+                    '<a href="/settings" class="stretched-link" title="Сверить с console.anthropic.com"></a>' +
+                  '</div>' +
+                '</div></div>';
+        } else {
+            balanceCard =
+                '<div class="col-6 col-md-3"><div class="card stat-card h-100 position-relative">' +
+                  '<div class="card-body">' +
+                    '<div class="stat-label">💰 Остаток API</div>' +
+                    '<div class="mt-2 text-muted-sm">Введи snapshot в <a href="/settings">/settings</a> чтобы видеть остаток.</div>' +
+                  '</div>' +
+                '</div></div>';
+        }
+
         return (
-            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
-              '<div class="text-muted-sm">Всего</div>' +
-              '<div class="display-6">' + fmt(c.total_usd) + '</div>' +
-              '<div class="text-muted-sm small">' + c.messages_processed + ' сообщ.</div>' +
+            balanceCard +
+            '<div class="col-6 col-md-3"><div class="card stat-card h-100"><div class="card-body">' +
+              '<div class="stat-label">Всего потрачено (за всё)</div>' +
+              '<div class="stat-value">' + fmt(c.total_usd) + '</div>' +
+              '<div class="text-muted-sm">' + c.messages_processed + ' сообщ.</div>' +
             '</div></div></div>' +
-            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
-              '<div class="text-muted-sm">Input tokens</div>' +
-              '<div class="h3 mt-1">' + tk(c.tokens_in) + '</div>' +
+            '<div class="col-6 col-md-3"><div class="card stat-card h-100"><div class="card-body">' +
+              '<div class="stat-label">Tokens in / out</div>' +
+              '<div class="stat-value" style="font-size:1.2rem;">' + tk(c.tokens_in) + ' / ' + tk(c.tokens_out) + '</div>' +
             '</div></div></div>' +
-            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
-              '<div class="text-muted-sm">Output tokens</div>' +
-              '<div class="h3 mt-1">' + tk(c.tokens_out) + '</div>' +
-            '</div></div></div>' +
-            '<div class="col-md-3"><div class="card h-100"><div class="card-body">' +
-              '<div class="text-muted-sm">Модель</div>' +
-              '<div class="h6 mt-1"><code>' + escapeHtml(c.model) + '</code></div>' +
-              '<div class="text-muted-sm small mt-2">Баланс — на <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">console.anthropic.com</a></div>' +
+            '<div class="col-6 col-md-3"><div class="card stat-card h-100"><div class="card-body">' +
+              '<div class="stat-label">Модель</div>' +
+              '<div class="mt-1"><code>' + escapeHtml(c.model) + '</code></div>' +
+              '<div class="text-muted-sm mt-1"><a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">console.anthropic.com ↗</a></div>' +
             '</div></div></div>'
         );
     }
@@ -156,14 +190,24 @@
             const data = await r.json();
             row.innerHTML = data.jobs.length
                 ? data.jobs.map(jobCard).join('')
-                : '<div class="col-12 text-muted">Scheduler не запущен.</div>';
+                : '<div class="col-12 text-muted-sm">Scheduler не запущен.</div>';
             if (data.api_cost) {
-                apiRow.innerHTML = apiCostCards(data.api_cost);
+                apiRow.innerHTML = apiCostCards(data.api_cost, data.api_balance);
             }
         } catch (e) {}
     }
     refresh();
     setInterval(refresh, 5000);
+
+    // Datatable для свежих сообщений — по умолчанию свежие сверху (col 1)
+    if (document.getElementById('recent-table')) {
+        initDataTable('#recent-table', {
+            perPage: 10,
+            columns: [
+                { select: 1, sort: 'desc' },
+            ],
+        });
+    }
 })();
 </script>
 {% endblock %}

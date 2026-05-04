@@ -59,6 +59,22 @@ DEFAULTS: dict[str, str] = {
     "polling_paused": "0",
     # Дата последней daily summary (ISO). Используется для дедупа.
     "last_daily_summary_date": "",
+    # Snapshot баланса Anthropic API (вводится оператором в /settings когда сверяет с
+    # console.anthropic.com). Текущий остаток оценивается как snapshot - SUM(cost_usd)
+    # по всем messages с created_at > snapshot_at.
+    "api_balance_snapshot_usd": "",  # напр. "17.92"
+    "api_balance_snapshot_at": "",   # ISO datetime, напр. "2026-05-04 00:00:00"
+
+    # --- Параметры стиля чат-пузырей в веб-морде (/threads/{id}, /clients/{email}) ---
+    # Все значения числовые, единицы — в комментариях. Меняются через /settings → секция «💬 Стиль чата»
+    "chat_font_em": "1.0",            # размер шрифта пузыря (em от родителя)
+    "chat_padding_v_rem": "0.25",     # верт. padding пузыря (rem)
+    "chat_padding_h_rem": "0.55",     # гор. padding пузыря (rem)
+    "chat_max_width_pct": "62",       # макс. ширина пузыря (%)
+    "chat_radius_rem": "0.5",         # border-radius пузыря (rem)
+    "chat_row_gap_rem": "0.35",       # промежуток между рядами (rem)
+    "chat_meta_font_em": "0.78",      # шрифт мета-строки (📤 timestamp · sent)
+    "chat_secondary_font_em": "0.92", # шрифт RU-перевода (от шрифта пузыря)
 }
 
 
@@ -202,8 +218,14 @@ def reminders_enabled() -> bool:
     return (get("reminders_enabled") or "0").strip() == "1"
 
 
-def reminder_after_days() -> int:
-    return get_int("reminder_after_days", 1)
+def reminder_after_days() -> float:
+    """Через сколько дней молчания предлагать ping. Поддерживается дробное значение
+    (0.5 = 12ч, 0.04 ≈ 1ч) для оперативной настройки порога без изменения единицы."""
+    raw = (get("reminder_after_days") or "1").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 1.0
 
 
 def polling_paused() -> bool:
