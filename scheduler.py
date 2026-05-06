@@ -161,6 +161,7 @@ def _send_auto_ack(
         try:
             tr = claude.translate_only(
                 ack["ack_text"], source_lang=ack_lang, target_lang="ru",
+                context=in_row["ad_title"] or "",
             )
             ru_translation = tr.get("translation", "") or ""
         except Exception:
@@ -308,6 +309,24 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             "Skip junk system email: account=%s, subject=%r",
             account["gmail_email"], subject[:80],
         )
+        try:
+            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
+        except Exception:
+            pass
+        return
+
+    # Skip переписку где МЫ покупатель (наша покупка, не продажа).
+    # Subject `Anfrage zu Ihrer Anzeige` (формальное «Ihrer» = «Вашему», т.к. мы
+    # обращаемся к продавцу). Seller-side incoming всегда `Nutzer-Anfrage zu deiner
+    # Anzeige` (du-Form, т.к. KZ адресует нас как seller'а). Маркируем тред closed
+    # чтобы не попадал в pipeline и больше не предлагал ответ.
+    if re.search(r"\bAnfrage zu Ihrer Anzeige\b", subject, re.IGNORECASE):
+        logger.info(
+            "Skip purchase-side thread (we are buyer): account=%s, subject=%r",
+            account["gmail_email"], subject[:80],
+        )
+        if inbound_thread_id := (email.get("gmail_thread_id") or "").strip():
+            db.close_thread(inbound_thread_id, closed_by="auto:purchase-side")
         try:
             gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
         except Exception:
@@ -488,6 +507,24 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         **add_kwargs,
     )
 
+    # Реактивация: если оператор раньше нажал «🏁 Завершить» — снимаем флаг,
+    # тред снова появится в pipeline (клиент написал ещё раз).
+    inbound_thread = email.get("gmail_thread_id") or ""
+    if inbound_thread and db.is_thread_closed(inbound_thread):
+        db.reopen_thread(inbound_thread)
+        logger.info(
+            "Reopened closed thread %s — клиент написал в архивный тред",
+            inbound_thread,
+        )
+    # Аналогично — снимаем «⏳ Ждать ответа»: клиент ответил, секцию пайплайна
+    # должно пересчитать заново (last_event_kind='in' → 🔴).
+    if inbound_thread and db.is_thread_waiting(inbound_thread):
+        db.unmark_thread_waiting(inbound_thread)
+        logger.info(
+            "Unmarked waiting thread %s — клиент прислал ответ",
+            inbound_thread,
+        )
+
     # ── Auto-ack (накрутка метрики «отвечает в течение X часов») ──
     # Триггер: account.auto_ack_enabled=1 AND это первое incoming в треде
     # AND ack ещё не слался для этого треда (защита от reprocess).
@@ -590,14 +627,15 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     )
     lessons_payload = [dict(r) for r in lessons_rows]
 
-    # Проверим autopilot для треда — если активен, используем generate_autopilot_reply
+    # Проверим autopilot для треда — если активен, генерим Sonnet-ответ автоматически.
+    # Иначе (manual flow) — Sonnet НЕ дёргаем, дешёво переводим incoming на RU
+    # для читабельности и показываем state-0 карточку с кнопкой «🤖 Предложить ответ».
     ap_thread_id = email.get("gmail_thread_id") or ""
     autopilot = db.get_thread_autopilot(ap_thread_id) if ap_thread_id else None
     is_autopilot = bool(autopilot and autopilot["active"])
 
-    try:
-        if is_autopilot:
-            # last_our_price_eur — из deal_brief последнего outgoing-row в треде
+    if is_autopilot:
+        try:
             last_price = None
             for r in reversed(db.thread_history(ap_thread_id)):
                 bj = _row_get(r, "deal_brief_json")
@@ -620,71 +658,57 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 floor_eur=autopilot["floor_price_eur"],
                 last_our_price_eur=last_price,
             )
-        else:
-            reply = claude.generate_reply(
-                de_client_text=body,
-                ad_title=ad.get("title", ""),
-                ad_price=ad.get("price", ""),
-                ad_description=ad.get("description", ""),
-                seller_name=ad.get("seller_name", ""),
-                history=history,
-                brief_text=brief_text,
-                lessons=lessons_payload,
-            )
-    except Exception as e:
-        logger.exception("Claude упал для msg=%s: %s", inserted_id, e)
-        return  # оставим в status='new', оператор увидит в веб-морде
+        except Exception as e:
+            logger.exception("Autopilot Claude упал для msg=%s: %s", inserted_id, e)
+            return
 
-    # Сохраняем основные результаты Claude
-    extra_cost = brief_extra_cost
-    summary_ru = None
-    if history:  # есть прошлые turn-ы → генерим краткое резюме на русском
-        # Передаём ПОЛНЫЕ rows из БД (с status, ru_client, ru_answer и т.д.),
-        # потому что history (history_for) даёт усечённый view без status —
-        # без него summarize_thread не различит «ответили / не ответили».
-        # Исключаем ack-rows: «продавец отправил автоответ "скоро отвечу"» —
-        # бесполезное summary, лишние токены.
-        full_history = [
-            dict(r) for r in db.thread_history(email.get("gmail_thread_id") or "")
-            if r["id"] != inserted_id and not _row_get(r, "is_auto_ack")
-        ]
-        if full_history:
-            try:
-                sm = claude.summarize_thread(full_history)
-                summary_ru = sm["summary_ru"]
-                extra_cost += sm["cost_usd"]
-                logger.info("History summary сгенерён для msg=%s (%d chars, $%.4f)",
-                            inserted_id, len(summary_ru), sm["cost_usd"])
-            except Exception:
-                logger.exception("summarize_thread упал для msg=%s", inserted_id)
-
-    deal_brief_json = json.dumps(reply["deal_brief"], ensure_ascii=False) if reply.get("deal_brief") else None
-
-    db.update_message(
-        inserted_id,
-        ru_client=reply["ru_client"],
-        ru_answer=reply["ru_answer"],
-        de_answer=reply["de_answer"],
-        ru_translation=reply.get("ru_translation"),
-        client_lang=reply.get("client_lang"),
-        tokens_in=reply.get("tokens_in"),
-        tokens_out=reply.get("tokens_out"),
-        cost_usd=(reply.get("cost_usd", 0.0) or 0.0) + extra_cost,
-        history_summary_ru=summary_ru,
-        deal_brief_json=deal_brief_json,
-    )
-
-    # ── Dispatch: автопилот или обычная карточка ──
-    if is_autopilot:
+        deal_brief_json = json.dumps(reply["deal_brief"], ensure_ascii=False) if reply.get("deal_brief") else None
+        db.update_message(
+            inserted_id,
+            ru_client=reply["ru_client"],
+            ru_answer=reply["ru_answer"],
+            de_answer=reply["de_answer"],
+            ru_translation=reply.get("ru_translation"),
+            client_lang=reply.get("client_lang"),
+            tokens_in=reply.get("tokens_in"),
+            tokens_out=reply.get("tokens_out"),
+            cost_usd=(reply.get("cost_usd", 0.0) or 0.0) + brief_extra_cost,
+            deal_brief_json=deal_brief_json,
+        )
         try:
             _autopilot_dispatch(inserted_id, autopilot, reply)
         except Exception:
             logger.exception("autopilot dispatch упал для msg=%s", inserted_id)
-            # На fallback — пошлём обычную карточку, чтоб не потерять
             try:
                 telegram_bot.send_for_review(inserted_id)
             except Exception:
                 pass
+        return
+
+    # ───── Manual flow: дешёвый Haiku-перевод incoming → ru_client (для оператора).
+    # Sonnet draft (de_answer / ru_answer / deal_brief) НЕ генерим — оператор сам
+    # тапнет «🤖 Предложить ответ» когда захочет (см. handler `propose`).
+    try:
+        tr = claude.detect_and_translate_to_ru(body)
+        db.update_message(
+            inserted_id,
+            ru_client=tr.get("translation_ru") or "",
+            client_lang=tr.get("lang") or "de",
+            cost_usd=tr.get("cost_usd", 0.0),
+        )
+    except Exception:
+        logger.exception("incoming RU-translation fail msg=%s", inserted_id)
+
+    # Если тред занят (оператор работает с любой row или идёт SMTP) —
+    # откладываем review-карточку. Drain поднимет её при release_lock или
+    # после завершения SMTP. Sonnet draft уже сохранён — оператор увидит
+    # карточку как только освободится.
+    if not force and telegram_bot.thread_is_busy(thread_id):
+        db.update_message(inserted_id, status="deferred")
+        logger.info(
+            "Deferred review-card for msg=%s — thread %s busy",
+            inserted_id, thread_id,
+        )
         return
 
     try:
@@ -739,12 +763,204 @@ def poll_all_accounts() -> str:
 # Отправка одобренных оператором ответов
 # ============================================================
 
+def generate_draft_for_msg(message_id: int) -> dict[str, Any]:
+    """Sonnet-генерация ответа для уже сохранённой row (триггер «🤖 Предложить ответ»).
+
+    Откладывается из `_process_incoming` чтобы оператор сначала видел тред целиком
+    и решал вручную нужен ли draft (vs. ⏳ Ждать / 🏁 Завершить / 🚀 Автопилот).
+    Делает то же что раньше делалось upfront в _process_incoming для manual flow:
+      — собирает history / brief / lessons
+      — вызывает claude.generate_reply (RU + DE + ru_translation + deal_brief)
+      — генерит cheap Haiku-summary (если есть история)
+      — обновляет row, status='pending'
+    Возвращает {kind: 'generated' | 'error', message, cost_usd}.
+    """
+    msg = db.get_message(message_id)
+    if not msg:
+        return {"kind": "error", "message": f"msg #{message_id} не найден"}
+    if msg["status"] in ("sent", "sent_debug", "skipped", "skipped_sold", "not_sent_disabled"):
+        return {"kind": "error",
+                "message": f"msg #{message_id} в финальном состоянии ({msg['status']}), draft не нужен"}
+
+    account = db.get_account(msg["account_id"])
+    if not account:
+        return {"kind": "error", "message": f"msg #{message_id}: аккаунт удалён"}
+
+    thread_id = msg["gmail_thread_id"] or ""
+    body = msg["de_client"] or ""
+    ad_title = msg["ad_title"] or ""
+    ad_price = msg["ad_price"] or ""
+    ad_description = msg["ad_description"] or ""
+    seller_name = msg["seller_name"] or ""
+    ad_id_val = msg["ad_id"] if "ad_id" in msg.keys() else None
+
+    # История (без текущего incoming)
+    history = [
+        h for h in claude.history_for(thread_id)
+        if h.get("de_client") != body
+    ]
+
+    # Бриф объявления
+    brief_text = ""
+    if ad_id_val:
+        cached = db.get_ad_brief(ad_id_val)
+        if cached:
+            try:
+                key_facts = json.loads(cached["key_facts_json"] or "{}")
+            except json.JSONDecodeError:
+                key_facts = {}
+            brief_text = ad_brief.format_brief_for_claude(cached["brief_md"], key_facts)
+
+    lessons_rows = db.find_relevant_lessons(
+        ad_id=ad_id_val, account_id=account["id"], limit=5,
+    )
+    lessons_payload = [dict(r) for r in lessons_rows]
+
+    try:
+        reply = claude.generate_reply(
+            de_client_text=body,
+            ad_title=ad_title,
+            ad_price=ad_price,
+            ad_description=ad_description,
+            seller_name=seller_name,
+            history=history,
+            brief_text=brief_text,
+            lessons=lessons_payload,
+        )
+    except Exception as e:
+        logger.exception("generate_draft Sonnet упал для msg=%s: %s", message_id, e)
+        return {"kind": "error", "message": f"Sonnet упал: {e}"}
+
+    extra_cost = 0.0
+    summary_ru = None
+    if history:
+        full_history = [
+            dict(r) for r in db.thread_history(thread_id)
+            if r["id"] != message_id and not _row_get(r, "is_auto_ack")
+        ]
+        if full_history:
+            try:
+                sm = claude.summarize_thread(full_history)
+                summary_ru = sm["summary_ru"]
+                extra_cost += sm["cost_usd"]
+            except Exception:
+                logger.exception("summarize_thread fail msg=%s", message_id)
+
+    deal_brief_json = (
+        json.dumps(reply["deal_brief"], ensure_ascii=False) if reply.get("deal_brief") else None
+    )
+
+    prior_cost = msg["cost_usd"] or 0.0
+    db.update_message(
+        message_id,
+        ru_answer=reply["ru_answer"],
+        de_answer=reply["de_answer"],
+        ru_translation=reply.get("ru_translation"),
+        client_lang=reply.get("client_lang") or msg["client_lang"],
+        tokens_in=(msg["tokens_in"] or 0) + (reply.get("tokens_in") or 0),
+        tokens_out=(msg["tokens_out"] or 0) + (reply.get("tokens_out") or 0),
+        cost_usd=prior_cost + (reply.get("cost_usd", 0.0) or 0.0) + extra_cost,
+        history_summary_ru=summary_ru,
+        deal_brief_json=deal_brief_json,
+        status="pending",
+    )
+    total_cost = (reply.get("cost_usd", 0.0) or 0.0) + extra_cost
+    logger.info(
+        "Draft сгенерён для msg=%s (cost=$%.4f, status='pending')",
+        message_id, total_cost,
+    )
+    return {"kind": "generated", "cost_usd": total_cost,
+            "message": f"✅ Draft готов (стоило ${total_cost:.4f})"}
+
+
+def drain_deferred_thread(thread_id: str) -> int:
+    """Поднять отложенные review-карточки треда.
+
+    Зовётся из telegram_bot._release_lock и после завершения SMTP в _send_reply.
+    Если тред всё ещё `thread_is_busy` (другой kind не очищен) — пропускаем.
+    Возвращает кол-во поднятых карточек.
+    """
+    if not thread_id:
+        return 0
+    if telegram_bot.thread_is_busy(thread_id):
+        logger.debug("drain_deferred: thread %s ещё busy, skip", thread_id)
+        return 0
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM messages WHERE gmail_thread_id=? AND direction='in' "
+            "AND status='deferred' ORDER BY created_at ASC, id ASC",
+            (thread_id,),
+        ).fetchall()
+    raised = 0
+    for r in rows:
+        try:
+            db.update_message(r["id"], status="pending")
+            telegram_bot.send_for_review(r["id"])
+            raised += 1
+        except Exception:
+            logger.exception("drain_deferred: send_for_review fail msg=%s", r["id"])
+    if raised:
+        logger.info(
+            "drain_deferred: подняли %d отложенных карточек в треде %s",
+            raised, thread_id,
+        )
+    return raised
+
+
+def drain_all_deferred() -> int:
+    """Поднять ВСЕ отложенные карточки (все треды). Зовётся при старте бота —
+    защита от перезапуска во время оператор-lock'а: in-memory busy-флаги
+    теряются, но deferred-rows остаются в БД."""
+    with db.get_conn() as conn:
+        thread_ids = [
+            r["gmail_thread_id"] for r in conn.execute(
+                "SELECT DISTINCT gmail_thread_id FROM messages "
+                "WHERE direction='in' AND status='deferred' AND gmail_thread_id != ''"
+            ).fetchall()
+        ]
+    total = 0
+    for tid in thread_ids:
+        total += drain_deferred_thread(tid)
+    return total
+
+
 def _send_reply(msg: Any) -> dict[str, Any]:
     """Отправить одобренный черновик через SMTP с сохранением threading.
 
     Возвращает dict с подробным результатом для отображения оператору:
         {kind: "sent"|"skipped"|"error", mode, to, real_to, subject, message, ...}
+
+    Атомарный claim: транзишн status → 'sending' через UPDATE с WHERE-фильтром по
+    разрешённым исходным статусам. Защита от дублирования когда:
+      - оператор дважды тапнул «✅ Отправить» (или confirm)
+      - параллельно периодический job `send_approved_replies` подхватил тот же row
+      - повторный вызов send_one из веб-морды
+    Если rowcount=0 — кто-то уже отправил/отправляет → skip.
     """
+    SENDABLE = ("approved", "new", "pending", "edited", "error_send_failed")
+    with db.get_conn() as _claim_conn:
+        cur = _claim_conn.execute(
+            "UPDATE messages SET status='sending' "
+            "WHERE id = ? AND status IN (" + ",".join("?" * len(SENDABLE)) + ")",
+            (msg["id"], *SENDABLE),
+        )
+        if cur.rowcount == 0:
+            fresh = db.get_message(msg["id"])
+            cur_status = fresh["status"] if fresh else "?"
+            logger.warning(
+                "Duplicate-send guard: msg=%s уже в state=%s, skip",
+                msg["id"], cur_status,
+            )
+            return {
+                "kind": "skipped", "mode": config.send_mode(),
+                "message": (
+                    f"⚠️ msg={msg['id']}: уже {cur_status} (другой воркер/тап). "
+                    "Повторная отправка заблокирована."
+                ),
+            }
+    # Перечитываем row после claim — теперь status='sending', все поля свежие.
+    msg = db.get_message(msg["id"]) or msg
+
     account = db.get_account(msg["account_id"])
     if not account:
         db.update_message(msg["id"], status="error_no_account")
@@ -828,24 +1044,36 @@ def _send_reply(msg: Any) -> dict[str, Any]:
         # не попадали в твою исходную переписку.
         actual_in_reply_to = None
 
+    # Помечаем тред «sending» — параллельные incoming в этот же тред будут
+    # отложены (status='deferred') и поднимутся после release.
+    send_thread_id = msg["gmail_thread_id"] or ""
+    telegram_bot.mark_thread_busy(send_thread_id, "sending", by="smtp")
     try:
-        sent_message_id = gmail.send_reply(
-            gmail_email=account["gmail_email"],
-            gmail_password=account["gmail_app_password"],
-            from_name=account["name"] or "",
-            to_email=actual_to,
-            subject=actual_subject,
-            body=actual_body,
-            in_reply_to=actual_in_reply_to,
-            references=None,
-        )
-    except Exception as e:
-        logger.exception("SMTP отправка упала для msg=%s: %s", msg["id"], e)
-        db.update_message(msg["id"], status="error_send_failed")
-        return {
-            "kind": "error", "mode": mode,
-            "message": f"❌ msg={msg['id']}: SMTP упал — {e}",
-        }
+        try:
+            sent_message_id = gmail.send_reply(
+                gmail_email=account["gmail_email"],
+                gmail_password=account["gmail_app_password"],
+                from_name=account["name"] or "",
+                to_email=actual_to,
+                subject=actual_subject,
+                body=actual_body,
+                in_reply_to=actual_in_reply_to,
+                references=None,
+            )
+        except Exception as e:
+            logger.exception("SMTP отправка упала для msg=%s: %s", msg["id"], e)
+            db.update_message(msg["id"], status="error_send_failed")
+            return {
+                "kind": "error", "mode": mode,
+                "message": f"❌ msg={msg['id']}: SMTP упал — {e}",
+            }
+    finally:
+        telegram_bot.clear_thread_busy(send_thread_id, "sending")
+        # После завершения отправки — поднять отложенные карточки треда.
+        try:
+            drain_deferred_thread(send_thread_id)
+        except Exception:
+            logger.exception("drain_deferred_thread fail после SMTP")
 
     sent_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     db.update_message(
@@ -1064,7 +1292,8 @@ def send_manual_compose(source_msg_id: int, operator_text: str) -> dict[str, Any
         in_t = out_t = 0
     else:
         try:
-            r = claude.translate_only(ru_text, target_lang=target_lang)
+            ad_ctx = (last_in["ad_title"] if last_in else None) or src["ad_title"] or ""
+            r = claude.translate_only(ru_text, target_lang=target_lang, context=ad_ctx)
             translated = r["translation"]
             cost = r["cost_usd"]
             in_t = r["tokens_in"]
@@ -1203,6 +1432,14 @@ def start() -> BackgroundScheduler:
     _active_sched = sched
     logger.info("Scheduler запущен: poll=%ds, send=60s, backup=%dh",
                 config.gmail_poll_interval_sec(), config.backup_interval_hours())
+    # Поднимаем deferred-rows которые могли остаться от прошлого процесса —
+    # in-memory busy-флаги теряются при рестарте, но БД помнит.
+    try:
+        drained = drain_all_deferred()
+        if drained:
+            logger.info("Startup: подняли %d deferred-карточек", drained)
+    except Exception:
+        logger.exception("Startup drain_all_deferred fail")
     return sched
 
 

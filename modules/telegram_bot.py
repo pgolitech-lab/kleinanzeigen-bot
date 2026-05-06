@@ -138,8 +138,9 @@ def _truncate(s: Optional[str], max_len: int = 220) -> str:
 def _format_client_history(buyer_email: str) -> str:
     """Полная история переписки с клиентом — все треды по всем объявлениям.
 
-    Используется callback-action `clienthist:N` — присылает оператору в чат
-    краткую сводку всех взаимодействий с конкретным buyer-email.
+    Подробный chat-style формат: для каждого треда — все события в хронологии,
+    bubbles с DE/RU переводом, как в thread-detail. Без обрезаний на 4 turn-а.
+    Используется callback-action `clienthist:N` — длинный текст шлётся chunks-ами.
     """
     if not buyer_email:
         return "❓ Нет email клиента"
@@ -174,12 +175,29 @@ def _format_client_history(buyer_email: str) -> str:
     lines.append("")
 
     for i, t in enumerate(threads, 1):
-        msgs = list(db.thread_history(t["thread_id"]))
-        ad_title = (t["ad_title"] or "— без объявления —")[:60]
+        ad_title = (t["ad_title"] or "— без объявления —")[:80]
+        ad_id_val = t["ad_id"] if "ad_id" in t.keys() else None
+        ad_price = t["ad_price"] if "ad_price" in t.keys() else None
+        seller = t["seller_name"] if "seller_name" in t.keys() else None
+        events = db.thread_events(t["thread_id"])
+
+        lines.append("─────────────────")
         lines.append(
-            f"<b>━ Тред {i}/{len(threads)}: 📦 {_html(ad_title)} [{t['last_status']}] ━</b>"
+            f"<b>━ Тред {i}/{len(threads)}: 📦 {_html(ad_title)}</b>"
         )
-        # Если есть Claude-summary в последнем сообщении треда — показываем
+        meta_parts = []
+        if ad_price:
+            meta_parts.append(f"💰 {_html(str(ad_price))}")
+        if ad_id_val:
+            meta_parts.append(f"#{_html(str(ad_id_val))}")
+        if seller:
+            meta_parts.append(f"🏪 {_html(seller)}")
+        meta_parts.append(f"<code>{_html(t['last_status'] or '')}</code>")
+        meta_parts.append(f"{len(events)} событ.")
+        lines.append(" · ".join(meta_parts))
+
+        # Sonnet-summary этого треда (если был сгенерирован)
+        msgs = list(db.thread_history(t["thread_id"]))
         last_with_summary = next(
             (m for m in reversed(msgs) if _safe_get(m, "history_summary_ru")),
             None,
@@ -188,21 +206,32 @@ def _format_client_history(buyer_email: str) -> str:
             sm = _safe_get(last_with_summary, "history_summary_ru")
             if sm:
                 lines.append(f"<i>🤖 {_html(sm)}</i>")
-        # Последние 4 turn-а компактно (RU only с fallback на оригинал)
-        recent = msgs[-4:]
-        if len(msgs) > len(recent):
-            lines.append(f"<i>(показано последних {len(recent)} из {len(msgs)})</i>")
-        for m in recent:
-            ts = _to_berlin(m["created_at"], "%Y-%m-%d %H:%M")
-            if m["de_client"]:
-                client_text = m["ru_client"] or m["de_client"] or ""
-                lines.append(f"● {ts}: {_html(_truncate(client_text, 180))}")
-            if m["de_answer"] and m["status"] in ("sent", "sent_debug", "edited", "approved"):
-                is_ack = _safe_get(m, "is_auto_ack")
-                label = "🤖 Auto-ack" if is_ack else "Мы"
-                our_text = m["ru_answer"] or m["de_answer"] or ""
-                lines.append(f"○ {label} [{m['status']}]: {_html(_truncate(our_text, 180))}")
         lines.append("")
+
+        # Полная лента событий: только реально-произошедшее (in + sent_out).
+        SENT_OUT = {"sent", "sent_debug"}
+        visible = [e for e in events if e["kind"] == "in" or e["status"] in SENT_OUT]
+        if not visible:
+            lines.append("<i>(пока нет реально-отправленного / полученного)</i>")
+            lines.append("")
+            continue
+        for e in visible:
+            r = e["row"]
+            ts = _to_berlin(e["ts"], "%Y-%m-%d %H:%M")
+            if e["kind"] == "in":
+                cl = _safe_get(r, "client_lang") or "?"
+                cflag = claude.lang_display(cl)[1]
+                lines.append(f"<b>📥 {ts} · {cflag}:</b>")
+                lines.append(f"<blockquote>{_html(e['text'] or '')}</blockquote>")
+                if e["ru_text"] and cl != "ru":
+                    lines.append(f"<i>🇷🇺 {_html(e['ru_text'])}</i>")
+            else:
+                ack = " 🤖 ack" if e["is_auto_ack"] else ""
+                lines.append(f"<b>📤 Мы{ack} · {ts}:</b>")
+                lines.append(f"<blockquote>{_html(e['text'] or '')}</blockquote>")
+                if e["ru_text"]:
+                    lines.append(f"<i>🇷🇺 {_html(e['ru_text'])}</i>")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -259,12 +288,12 @@ def _format_thread_history(thread_id: str, current_msg: sqlite3.Row, limit: int 
             buyer = _safe_get(r, "buyer_display_name") or r["buyer_name"] or "?"
             buyer_short = (buyer.split("@")[0] if "@" in buyer else buyer)[:30]
             lines.append(
-                f"● <b>{ts} {_html(buyer_short)}:</b> {_html(_truncate(text, 250))}"
+                f"● <b>{ts} {_html(buyer_short)}:</b> {_html(text)}"
             )
         else:
             label = "🤖 Auto-ack" if e["is_auto_ack"] else "Мы"
             lines.append(
-                f"○ <b>{ts} {label} [{e['status']}]:</b> {_html(_truncate(text, 250))}"
+                f"○ <b>{ts} {label} [{e['status']}]:</b> {_html(text)}"
             )
     lines.append("")
     return "\n".join(lines)
@@ -393,6 +422,51 @@ def _format_related_warning(msg: sqlite3.Row) -> str:
     return "\n".join(lines)
 
 
+def _format_thread_chat(thread_id: str, current_msg: Optional[sqlite3.Row] = None,
+                        limit: int = 12) -> str:
+    """Отрендерить ленту событий треда для блока «История» в review-карточке.
+
+    Использует `db.thread_events` (хронологически: in.created_at + out.sent_at).
+    Только реально-произошедшее: incoming + outgoing с status sent/sent_debug.
+    Pending драфты НЕ показываем — это часть текущей review-карточки. Auto-ack
+    показываем (клиент его получил, нужен контекст).
+    """
+    if not thread_id:
+        return ""
+    events = db.thread_events(thread_id)
+    SENT_OUT = {"sent", "sent_debug"}
+    visible = [
+        e for e in events
+        if e["kind"] == "in" or e["status"] in SENT_OUT
+    ]
+    # Если current_msg ещё не сохранён как sent/skipped и его in-event есть в visible —
+    # оставляем (это incoming клиента). Сам draft current_msg из ленты исключён фильтром.
+    if not visible:
+        return ""
+    out_lines: list[str] = []
+    out_lines.append(f"<b>━━━ Переписка ({len(visible)}) ━━━</b>")
+    if len(visible) > limit:
+        out_lines.append(f"<i>(показаны последние {limit} из {len(visible)})</i>")
+        visible = visible[-limit:]
+    for e in visible:
+        r = e["row"]
+        ts = _to_berlin(e["ts"], "%H:%M")
+        if e["kind"] == "in":
+            cl = _safe_get(r, "client_lang") or "?"
+            cflag = claude.lang_display(cl)[1]
+            sender = (_safe_get(r, "buyer_display_name") or r["buyer_name"] or "?").split("@")[0][:20]
+            text = e["ru_text"] or e["text"] or ""
+            out_lines.append(f"<b>📥 {_html(sender)} · {ts} · {cflag}:</b>")
+            out_lines.append(f"<blockquote>{_html(text)}</blockquote>")
+        else:
+            ack_marker = " 🤖 ack" if e["is_auto_ack"] else ""
+            text = e["ru_text"] or e["text"] or ""
+            out_lines.append(f"<b>📤 Мы{ack_marker} · {ts}:</b>")
+            out_lines.append(f"<blockquote>{_html(text)}</blockquote>")
+    out_lines.append("")
+    return "\n".join(out_lines)
+
+
 def _format_review_text(msg: sqlite3.Row) -> str:
     """Собрать форматированное сообщение для оператора (HTML)."""
     # Шапка: режим + msg_id (для отладки/поиска карточки) + status
@@ -490,10 +564,17 @@ def _format_review_text(msg: sqlite3.Row) -> str:
                 lines.append(f"• {_html(ln)}")
         lines.append("")
 
-    # Прошлая переписка треда (если есть)
-    history_block = _format_thread_history(msg["gmail_thread_id"] or "", msg)
-    if history_block:
-        lines.append(history_block)
+    # Полная хронологическая лента треда (как в thread-detail) — даёт оператору
+    # контекст переписки прежде чем тапать «🤖 Предложить ответ».
+    chat_block = _format_thread_chat(msg["gmail_thread_id"] or "", current_msg=msg)
+    if chat_block:
+        lines.append(chat_block)
+    # Краткая сводка переписки внизу (если есть кэш Sonnet-summary)
+    summary = _safe_get(msg, "history_summary_ru")
+    if summary:
+        lines.append(f"<b>📝 Сводка по переписке:</b>")
+        lines.append(f"<i>{_html(summary)}</i>")
+        lines.append("")
 
     # ── Статус-aware шапка для секций ответа ──
     # Для sent/sent_debug — "✅ ОТПРАВЛЕНО (RU/DE) в HH:MM:SS"
@@ -538,7 +619,7 @@ def _format_review_text(msg: sqlite3.Row) -> str:
 
     # ── Входящее сообщение клиента — всегда в blockquote (визуальный левый бордер) ──
     if msg["de_client"]:
-        header_lbl = "Новое сообщение клиента" if history_block else "Клиент пишет"
+        header_lbl = "Новое сообщение клиента" if chat_block else "Клиент пишет"
         lines.append(f"<b>📥 {header_lbl} ({c_flag} {_html(c_name)}):</b>")
         lines.append(f"<blockquote>{_html(msg['de_client'])}</blockquote>")
         lines.append("")
@@ -558,12 +639,8 @@ def _format_review_text(msg: sqlite3.Row) -> str:
     if msg["de_answer"]:
         lines.append(ans_xx_label)
         lines.append(_fmt_body(msg["de_answer"]))
-        # Точный перевод того что уйдёт клиенту — для верификации оператором
-        ru_trans = _safe_get(msg, "ru_translation")
-        if ru_trans and ru_trans.strip() and (_safe_get(msg, "client_lang") or "") != "ru":
-            lines.append("")
-            lines.append("<b>🇷🇺 Перевод (что значит):</b>")
-            lines.append(_fmt_body(ru_trans))
+        # «Перевод (что значит)» убран — RU уже показан выше как «Черновик RU» /
+        # «ОТПРАВЛЕНО RU», дублирование избыточно.
 
     # Стоимость генерации
     cost = _safe_get(msg, "cost_usd") or 0
@@ -576,53 +653,105 @@ def _format_review_text(msg: sqlite3.Row) -> str:
     return "\n".join(lines)
 
 
-def _review_keyboard(message_id: int) -> dict[str, Any]:
-    """Inline-клавиатура: 7 рядов × 2 столбца, ✅ Отправить full-width в центре.
+def _review_keyboard(message_id: int, status: Optional[str] = None) -> dict[str, Any]:
+    """Status-aware inline-клавиатура для review-карточки.
 
-    Финальный layout (см. spec docs/superpowers/specs/2026-05-03-tg-rework-design.md):
-        ✏️ Правка RU       │ ✏️ Правка DE
-        💎 Без торга        │ 💸 Своя цена
-        📝 Своя инструкция │ ❌ Пропустить
-        ✅ ОТПРАВИТЬ (full-width)
-        👊 Жёстче           │ ☺️ Мягче
-        ✂️ Короче           │ 🔁 Переформулировать
-        💰 Товар продан    │ 📋 История клиента
+    Состояния:
+      - 'new': черновика нет, оператор сам триггерит Sonnet через «🤖 Предложить
+        ответ». Также видны фоновые действия (autopilot/wait/close/sold/clienthist).
+      - 'pending': RU-черновик есть, DE может быть STALE после правки. Кнопка
+        «✅ Перевести и подтвердить» переводит RU→DE, статус → 'edited'.
+      - 'edited': DE-перевод подтверждён. Кнопка «✅ ОТПРАВИТЬ» — финальная.
+      - sent/sent_debug/skipped*: финал, только «↩ Назад» (управляется снаружи).
+
+    Sonnet генерируется только при тапе «🤖 Предложить ответ». Перевод —
+    только при тапе «✅ Перевести и подтвердить». Send — только когда DE
+    подтверждён. Каждый шаг через confirm-gate (NEEDS_CONFIRM).
     """
+    if status is None:
+        status = "new"
+
+    common_secondary = [
+        [
+            {"text": "✉️ Написать клиенту", "callback_data": f"compose:{message_id}"},
+        ],
+        [
+            {"text": "🚀 Полный автопилот", "callback_data": f"apstart:{message_id}"},
+            {"text": "⏳ Ждать ответа", "callback_data": f"waitclient:{message_id}"},
+        ],
+        [
+            {"text": "💰 Товар продан", "callback_data": f"sold:{message_id}"},
+            {"text": "📋 История клиента", "callback_data": f"clienthist:{message_id}"},
+        ],
+        [
+            {"text": "🏁 Завершить беседу", "callback_data": f"closethread:{message_id}"},
+        ],
+        [
+            {"text": "↩ Назад к pipeline", "callback_data": f"back:{message_id}"},
+        ],
+    ]
+
+    if status == "new":
+        return {
+            "inline_keyboard": [
+                [{"text": "🤖 Предложить ответ", "callback_data": f"propose:{message_id}"}],
+                *common_secondary,
+            ]
+        }
+
+    if status == "pending":
+        # RU-draft есть, DE отсутствует или устарел. Translate-on-confirm.
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "✏️ Правка RU", "callback_data": f"editru:{message_id}"},
+                    {"text": "❌ Пропустить", "callback_data": f"skip:{message_id}"},
+                ],
+                [
+                    {"text": "💎 Без торга", "callback_data": f"q:fest:{message_id}"},
+                    {"text": "💸 Своя цена", "callback_data": f"price:{message_id}"},
+                ],
+                [
+                    {"text": "👊 Жёстче", "callback_data": f"t:harsh:{message_id}"},
+                    {"text": "☺️ Мягче", "callback_data": f"t:friend:{message_id}"},
+                ],
+                [
+                    {"text": "✂️ Короче", "callback_data": f"t:short:{message_id}"},
+                    {"text": "🔁 Переформулировать", "callback_data": f"t:regen:{message_id}"},
+                ],
+                [
+                    {"text": "📝 Своя инструкция", "callback_data": f"instr:{message_id}"},
+                ],
+                [
+                    {"text": "✅ Перевести и подтвердить", "callback_data": f"translate_confirm:{message_id}"},
+                ],
+                *common_secondary,
+            ]
+        }
+
+    if status == "edited":
+        # DE подтверждён, ready to send. Финальная кнопка отправки.
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "✏️ Правка DE", "callback_data": f"editde:{message_id}"},
+                    {"text": "🇷🇺 Назад к RU", "callback_data": f"back_to_ru:{message_id}"},
+                ],
+                [
+                    {"text": "✅  О Т П Р А В И Т Ь  ✅", "callback_data": f"send:{message_id}"},
+                ],
+                [
+                    {"text": "❌ Пропустить", "callback_data": f"skip:{message_id}"},
+                ],
+                *common_secondary,
+            ]
+        }
+
+    # finals (sent / skipped / error_*) — основные actions недоступны (уже отправлено
+    # или пропущено), но secondary остаются для управления тредом.
     return {
         "inline_keyboard": [
-            [
-                {"text": "✏️ Правка RU", "callback_data": f"editru:{message_id}"},
-                {"text": "✏️ Правка DE", "callback_data": f"editde:{message_id}"},
-            ],
-            [
-                {"text": "💎 Без торга", "callback_data": f"q:fest:{message_id}"},
-                {"text": "💸 Своя цена", "callback_data": f"price:{message_id}"},
-            ],
-            [
-                {"text": "📝 Своя инструкция", "callback_data": f"instr:{message_id}"},
-                {"text": "❌ Пропустить", "callback_data": f"skip:{message_id}"},
-            ],
-            [
-                {"text": "✅  О Т П Р А В И Т Ь  ✅", "callback_data": f"send:{message_id}"},
-            ],
-            [
-                {"text": "👊 Жёстче", "callback_data": f"t:harsh:{message_id}"},
-                {"text": "☺️ Мягче", "callback_data": f"t:friend:{message_id}"},
-            ],
-            [
-                {"text": "✂️ Короче", "callback_data": f"t:short:{message_id}"},
-                {"text": "🔁 Переформулировать", "callback_data": f"t:regen:{message_id}"},
-            ],
-            [
-                {"text": "💰 Товар продан", "callback_data": f"sold:{message_id}"},
-                {"text": "📋 История клиента", "callback_data": f"clienthist:{message_id}"},
-            ],
-            [
-                {"text": "🚀 Полный автопилот", "callback_data": f"apstart:{message_id}"},
-            ],
-            [
-                {"text": "↩ Назад к pipeline", "callback_data": f"back:{message_id}"},
-            ],
+            *common_secondary,
         ]
     }
 
@@ -641,30 +770,38 @@ def _autopilot_mode_choice_keyboard(message_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔔 Notify (start/inbound/stop)", callback_data=f"apconfirm:notify:{message_id}")],
         [InlineKeyboardButton("🤫 Silent (только при стопе)", callback_data=f"apconfirm:silent:{message_id}")],
         [InlineKeyboardButton("❌ Отменить", callback_data=f"inputcancel:{message_id}")],
+        [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
     ])
 
 
-def _review_keyboard_obj(message_id: int) -> InlineKeyboardMarkup:
+def _review_keyboard_obj(message_id: int, status: Optional[str] = None) -> InlineKeyboardMarkup:
     """Тот же набор что _review_keyboard, но как InlineKeyboardMarkup для PTB-async."""
-    rows = _review_keyboard(message_id)["inline_keyboard"]
+    rows = _review_keyboard(message_id, status)["inline_keyboard"]
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(b["text"], callback_data=b["callback_data"]) for b in row]
         for row in rows
     ])
 
 
+def _review_keyboard_for_msg(msg: sqlite3.Row) -> InlineKeyboardMarkup:
+    """Удобный shortcut: подобрать клавиатуру по статусу row."""
+    return _review_keyboard_obj(msg["id"], msg["status"])
+
+
 def _input_cancel_keyboard(message_id: int) -> InlineKeyboardMarkup:
-    """Одна кнопка «Отменить» — для режима ожидания текста (правка/цена/инструкция)."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("❌ Отменить", callback_data=f"inputcancel:{message_id}")
-    ]])
+    """Кнопки для input-режима ожидания текста: «❌ Отменить» + «↩ Назад к pipeline»."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Отменить", callback_data=f"inputcancel:{message_id}")],
+        [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
+    ])
 
 
 def _confirmation_keyboard(original_callback: str, message_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура подтверждения: ▶️ Продолжить (выполняет оригинальный callback) | ❌ Отменить."""
+    """Клавиатура подтверждения: ▶️ Продолжить | ❌ Отменить | ↩ Назад."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️  П Р О Д О Л Ж И Т Ь", callback_data=f"confirm:{original_callback}")],
         [InlineKeyboardButton("❌ Отменить", callback_data=f"cancel:{message_id}")],
+        [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
     ])
 
 
@@ -676,7 +813,8 @@ def _confirmation_keyboard(original_callback: str, message_id: int) -> InlineKey
 # Ключи — либо `action` (для 2-частных callback типа send/skip),
 # либо `action:sub` (для 3-частных типа q:fest, t:harsh).
 NEEDS_CONFIRM: set[str] = {
-    "send", "skip", "sold", "clienthist",
+    "send", "skip", "sold", "clienthist", "closethread", "waitclient",
+    "propose", "translate_confirm", "back_to_ru",
     "price", "instr",  # эти открывают input-режим — но всё равно через confirm
     "q:fest",
     "t:harsh", "t:friend", "t:short", "t:regen",
@@ -695,6 +833,11 @@ ACTION_EXPLANATIONS: dict[str, str] = {
     "t:friend": "<b>☺️ Мягче</b> — Claude перепишет тон мягче (теплее, человечнее). ~$0.005",
     "t:short": "<b>✂️ Короче</b> — Claude сократит ответ в 2 раза. ~$0.005",
     "t:regen": "<b>🔁 Переформулировать</b> — Claude напишет тот же смысл другими словами. ~$0.005",
+    "closethread": "<b>🏁 Завершить беседу</b> — уберёт тред из «Состояние переговоров» и из reminder-очереди. Все pending-драфты помечаются <code>skipped</code>. Если клиент напишет снова — тред автоматически вернётся.",
+    "waitclient": "<b>⏳ Ждать ответа</b> — мы ничего не отправляем, ждём действия клиента. Pending-драфты помечаются <code>skipped</code>, тред переходит в 🟢 секцию pipeline. Авто-сброс при новом сообщении от клиента.",
+    "propose": "<b>🤖 Предложить ответ</b> — Sonnet сгенерирует RU-черновик с учётом всей переписки, объявления и уроков оператора. Стоит ~$0.005-0.01. После — оператор может править и затем тапнуть «✅ Перевести и подтвердить».",
+    "translate_confirm": "<b>✅ Перевести и подтвердить</b> — переведу твой RU-черновик на язык клиента. Стоит ~$0.001-0.005. Потом увидишь финальный текст и сможешь тапнуть «✏️ Правка DE» если что-то не так, или «✅ ОТПРАВИТЬ».",
+    "back_to_ru": "<b>🇷🇺 Назад к RU</b> — вернуться к RU-черновику для правки. DE-перевод останется как был, но не будет отправлен (потребуется заново «✅ Перевести и подтвердить»).",
 }
 
 
@@ -718,6 +861,52 @@ def _confirmation_addendum(action_key: str) -> str:
 _THREAD_LOCKS: dict[int, tuple[str, datetime]] = {}
 LOCK_TIMEOUT_SEC = 300  # 5 минут
 
+# Per-thread «занят» флаг — синхронизация с входящим polling: пока оператор
+# работает с каким-либо row треда (любой active lock) ИЛИ пока идёт SMTP-отправка
+# ответа в этом треде, новые incoming для того же thread_id откладываются (status
+# 'deferred'). После очистки флага — drain_deferred_thread в scheduler-е поднимает
+# отложенные карточки. kinds: {'operator', 'sending'}.
+_THREAD_BUSY: dict[str, dict[str, Any]] = {}
+
+
+def thread_is_busy(thread_id: Optional[str]) -> bool:
+    """True если тред в работе у оператора или идёт SMTP-отправка."""
+    if not thread_id:
+        return False
+    entry = _THREAD_BUSY.get(thread_id)
+    return bool(entry and entry.get("kinds"))
+
+
+def mark_thread_busy(thread_id: Optional[str], kind: str, by: str = "?") -> None:
+    """Пометить thread занятым. kind ∈ {'operator', 'sending'}."""
+    if not thread_id:
+        return
+    entry = _THREAD_BUSY.setdefault(
+        thread_id, {"kinds": set(), "by": by, "since": datetime.utcnow().isoformat()},
+    )
+    entry["kinds"].add(kind)
+    entry["by"] = by
+
+
+def clear_thread_busy(thread_id: Optional[str], kind: str) -> None:
+    """Снять конкретный busy-flag. Если других kind-ов нет — удалить entry."""
+    if not thread_id:
+        return
+    entry = _THREAD_BUSY.get(thread_id)
+    if not entry:
+        return
+    entry["kinds"].discard(kind)
+    if not entry["kinds"]:
+        _THREAD_BUSY.pop(thread_id, None)
+
+
+def _msg_thread_id(msg_id: int) -> Optional[str]:
+    """Лукап thread_id по msg_id (для bridge'a между msg-id-locks и thread-busy)."""
+    msg = db.get_message(msg_id)
+    if not msg:
+        return None
+    return msg["gmail_thread_id"] or None
+
 
 def _check_lock(msg_id: int, actor: str) -> Optional[str]:
     """Возвращает имя текущего владельца если лок занят ДРУГИМ. None если свободно/мой."""
@@ -732,15 +921,27 @@ def _check_lock(msg_id: int, actor: str) -> Optional[str]:
         return owner
     # Auto-expire
     del _THREAD_LOCKS[msg_id]
+    clear_thread_busy(_msg_thread_id(msg_id), "operator")
     return None
 
 
 def _acquire_lock(msg_id: int, actor: str) -> None:
     _THREAD_LOCKS[msg_id] = (actor, datetime.utcnow())
+    mark_thread_busy(_msg_thread_id(msg_id), "operator", actor)
 
 
 def _release_lock(msg_id: int) -> None:
     _THREAD_LOCKS.pop(msg_id, None)
+    thread_id = _msg_thread_id(msg_id)
+    clear_thread_busy(thread_id, "operator")
+    # После освобождения — попробуем поднять отложенные карточки.
+    # Импортируем лениво чтоб не было circular-import (telegram_bot ↔ scheduler).
+    if thread_id:
+        try:
+            import scheduler as _sched
+            _sched.drain_deferred_thread(thread_id)
+        except Exception:
+            logger.exception("drain_deferred_thread fail")
 
 
 def _lock_remaining_min(msg_id: int) -> int:
@@ -883,7 +1084,7 @@ def _format_reminder_offer(msg: sqlite3.Row, days_silent: int) -> str:
 
 
 def _reminder_keyboard(message_id: int) -> dict[str, Any]:
-    """Кнопки на карточке-предложении пинга: ping/skip + snooze."""
+    """Кнопки на карточке-предложении пинга: ping/skip + snooze + назад."""
     return {
         "inline_keyboard": [
             [
@@ -894,6 +1095,9 @@ def _reminder_keyboard(message_id: int) -> dict[str, Any]:
                 {"text": "⏰ +1 день", "callback_data": f"snooze:1:{message_id}"},
                 {"text": "⏰ +3 дня", "callback_data": f"snooze:3:{message_id}"},
                 {"text": "⏰ +7 дней", "callback_data": f"snooze:7:{message_id}"},
+            ],
+            [
+                {"text": "↩ Назад к pipeline", "callback_data": f"back:{message_id}"},
             ],
         ]
     }
@@ -947,9 +1151,10 @@ def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
         "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨"
     )
     kb = {
-        "inline_keyboard": [[
-            {"text": "📋 Открыть карточку треда", "callback_data": f"pipe:{msg_id}"},
-        ]]
+        "inline_keyboard": [
+            [{"text": "📋 Открыть карточку треда", "callback_data": f"pipe:{msg_id}"}],
+            [{"text": "↩ Назад к pipeline", "callback_data": f"back:{msg_id}"}],
+        ]
     }
     _http_post("sendMessage", {
         "chat_id": config.telegram_chat_id(),
@@ -1011,7 +1216,7 @@ def send_for_review(message_id: int) -> Optional[int]:
             for row in kb_obj.inline_keyboard
         ]}
     else:
-        kb = _review_keyboard(message_id)
+        kb = _review_keyboard(message_id, msg["status"])
     dm_ids = config.telegram_operator_dm_ids()
     targets = dm_ids if dm_ids else [config.telegram_chat_id()]
 
@@ -1038,10 +1243,11 @@ def send_for_review(message_id: int) -> Optional[int]:
             logger.exception("send_for_review fanout: send to %s failed", chat_id)
 
     if first_tg_msg_id:
-        update_fields: dict[str, Any] = {"telegram_message_id": first_tg_msg_id}
-        if msg["status"] == "new":
-            update_fields["status"] = "pending"
-        db.update_message(message_id, **update_fields)
+        # status НЕ меняем при send_for_review — состояние теперь отражает
+        # реальный этап flow ('new'=без драфта, 'pending'=есть RU, 'edited'=DE
+        # подтверждён). Раньше делали new→pending как маркер «карточка показана
+        # оператору», но с lazy-Sonnet flow status='new' значит «нет ещё драфта».
+        db.update_message(message_id, telegram_message_id=first_tg_msg_id)
     return first_tg_msg_id
 
 
@@ -1814,10 +2020,14 @@ def _format_thread_detail(msg: sqlite3.Row) -> str:
 
 
 def _thread_detail_keyboard(msg_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура thread-detail карточки: Compose + ещё опции + Назад."""
+    """Клавиатура thread-detail карточки: Compose + быстрые действия + Назад."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✉️ Написать клиенту сообщение", callback_data=f"compose:{msg_id}")],
         [InlineKeyboardButton("📋 Открыть карточку ревью", callback_data=f"opencard:{msg_id}")],
+        [
+            InlineKeyboardButton("⏳ Ждать ответа", callback_data=f"waitclient:{msg_id}"),
+            InlineKeyboardButton("🏁 Завершить", callback_data=f"closethread:{msg_id}"),
+        ],
         [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{msg_id}")],
     ])
 
@@ -1895,6 +2105,23 @@ def _split_for_telegram(text: str, limit: int = 4000) -> list[str]:
     if rest:
         chunks.append(rest)
     return chunks
+
+
+def _locked_keyboard(msg_id: int, actor: str) -> dict[str, Any]:
+    """Soft-lock клавиатура: показывает «🔒 В работе у X» вместо реальных кнопок.
+
+    Тап → noop-callback → popup-toast. Используется для broadcast не-актору в
+    DM-fanout — op2 видит «затенённое» состояние пока op1 что-то делает.
+    Внизу — обязательное «↩ Назад к pipeline» (правило: на любом экране бота).
+    """
+    short_actor = actor[:30] if actor else "оператор"
+    return {
+        "inline_keyboard": [
+            [{"text": f"🔒 В работе у {short_actor}",
+              "callback_data": f"locked_noop:{msg_id}"}],
+            [{"text": "↩ Назад к pipeline", "callback_data": f"back:{msg_id}"}],
+        ]
+    }
 
 
 def _back_only_keyboard(msg_id: int) -> dict[str, Any]:
@@ -2058,9 +2285,10 @@ async def _enter_input_mode(
     locked_text = _format_review_text(msg) + (
         "\n\n🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨\n"
         f"⚠️ <b>КАРТОЧКА В РАБОТЕ У {_html(actor).upper()}</b> ⚠️\n"
-        f"<i>Input-режим · до 5 мин · кнопки скрыты для тебя</i>\n"
+        f"<i>Input-режим · до 5 мин</i>\n"
         "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨"
     )
+    locked_kb = _locked_keyboard(msg["id"], actor)
     for d in db.list_card_dispatches(msg["id"]):
         if str(d["chat_id"]) == str(chat_id) and d["tg_msg_id"] == tg_msg_id:
             continue  # skip A's copy — она уже обновлена выше
@@ -2071,7 +2299,7 @@ async def _enter_input_mode(
                 text=locked_text,
                 parse_mode="HTML",
                 disable_web_page_preview=True,
-                reply_markup=None,
+                reply_markup=locked_kb,
             )
         except BadRequest as e:
             if "not modified" not in str(e).lower():
@@ -2197,6 +2425,7 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"<i>Подожди завершения или отмены</i>\n"
             "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨"
         )
+        locked_kb = _locked_keyboard(msg_id, actor)
         for d in db.list_card_dispatches(msg_id):
             if str(d["chat_id"]) == str(query.message.chat_id) and d["tg_msg_id"] == query.message.message_id:
                 continue
@@ -2207,7 +2436,7 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     text=locked_text,
                     parse_mode="HTML",
                     disable_web_page_preview=True,
-                    reply_markup=None,
+                    reply_markup=locked_kb,
                 )
             except BadRequest as e:
                 if "not modified" not in str(e).lower():
@@ -2233,6 +2462,14 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # ── noop: сепараторная кнопка в pipeline — ничего не делает ──
     if action == "noop":
         return  # query.answer() уже сработал в начале
+
+    # ── locked_noop: тап по «🔒 В работе у X» — popup-toast, ничего не меняем ──
+    if action == "locked_noop":
+        await query.answer(
+            "🔒 Карточка в работе у другого оператора. Жди освобождения.",
+            show_alert=False,
+        )
+        return
 
     # ── back: назад к pipeline (то же что тап «🔄 Обновить») ──
     # Send-first → delete-after pattern, чтобы chat не пустел.
@@ -2371,8 +2608,9 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # ── Lock-check: actions меняющие state треда требуют монопольного доступа ──
     # Если другой оператор уже работает с тредом — popup, return.
-    LOCKABLE_ACTIONS = {"send", "skip", "sold", "editru", "editde", "price", "instr",
-                        "q", "t"}
+    LOCKABLE_ACTIONS = {"send", "skip", "sold", "closethread", "waitclient",
+                        "propose", "translate_confirm", "back_to_ru",
+                        "editru", "editde", "price", "instr", "q", "t"}
     if action in LOCKABLE_ACTIONS:
         owner = _check_lock(msg_id, actor)
         if owner:
@@ -2430,7 +2668,10 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 _CHAT_TRACKED_MSGS[chat_id] = sent_set
         return
 
-    # ── opencard: переслать карточку ревью (с удалением предыдущей detail-карточки) ──
+    # ── opencard: переслать карточку ревью с per-DM раскладкой keyboard ──
+    # actor получает full review-keyboard. Остальные операторы (DM-fanout) видят
+    # ту же карточку, но с soft-lock keyboard «🔒 В работе у X» — индикатор что
+    # коллега работает, тапы блокируются popup'ом.
     if action == "opencard":
         try:
             await context.bot.delete_message(
@@ -2439,12 +2680,47 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         except Exception:
             pass
-        new_tg = send_for_review(msg_id)
-        if not new_tg:
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=f"Не удалось переслать #{msg_id}",
-            )
+
+        actor_chat_id = query.message.chat_id
+        full_text = _truncate_html_safe(_format_review_text(msg))
+        ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
+        if ap and ap["active"]:
+            full_kb = {"inline_keyboard": [
+                [{"text": btn.text, "callback_data": btn.callback_data} for btn in row]
+                for row in _autopilot_active_keyboard(msg_id).inline_keyboard
+            ]}
+        else:
+            full_kb = _review_keyboard(msg_id, msg["status"])
+        locked_text = full_text + (
+            "\n\n🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨\n"
+            f"⚠️ <b>{_html(actor).upper()} ОТКРЫЛ КАРТОЧКУ</b>\n"
+            "<i>Если возьмёт действие — увидишь lock. Пока просто индикатор.</i>\n"
+            "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨"
+        )
+        locked_kb = _locked_keyboard(msg_id, actor)
+
+        dm_ids = config.telegram_operator_dm_ids()
+        targets = dm_ids if dm_ids else [config.telegram_chat_id()]
+        # Чистим прошлые dispatches перед свежим fanout
+        db.clear_card_dispatches(msg_id)
+        for chat_id in targets:
+            is_actor = str(chat_id) == str(actor_chat_id)
+            text = full_text if is_actor else locked_text
+            kb = full_kb if is_actor else locked_kb
+            try:
+                r = _http_post_single("sendMessage", {
+                    "chat_id": chat_id,
+                    "text": text,
+                    "reply_markup": kb,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                })
+                tg_msg_id = r.get("message_id") if isinstance(r, dict) else None
+                if tg_msg_id:
+                    _track_msg(chat_id, tg_msg_id)
+                    db.add_card_dispatch(msg_id, chat_id, tg_msg_id)
+            except Exception:
+                logger.exception("opencard fanout: send to %s failed", chat_id)
         return
 
     # ── compose: писать клиенту произвольное сообщение (operator-initiated) ──
@@ -2505,6 +2781,23 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # ── Send / Skip / Sold / Clienthist / Quick / Tweak — выполнить ──
     if action == "send":
+        # Защита: send доступен только из status='edited' (DE подтверждён) или с
+        # уже-готовым de_answer. На 'new' нет драфта вообще; на 'pending' оператор
+        # ещё не одобрил перевод.
+        if msg["status"] == "new" or not msg["de_answer"]:
+            await query.answer(
+                "Нет черновика. Сначала «🤖 Предложить ответ».",
+                show_alert=True,
+            )
+            _release_lock(msg_id)
+            return
+        if msg["status"] == "pending":
+            await query.answer(
+                "Сначала «✅ Перевести и подтвердить» — операция требует подтверждённого перевода.",
+                show_alert=True,
+            )
+            _release_lock(msg_id)
+            return
         db.update_message(msg_id, status="approved")
         await _broadcast_card(context, msg_id, _format_review_text(msg) + f"\n\n⏳ <i>{_html(actor)} → отправляю…</i>", reply_markup=None)
         import scheduler
@@ -2548,6 +2841,62 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         _release_lock(msg_id)
         return
 
+    if action == "waitclient":
+        thread_id = msg["gmail_thread_id"] or ""
+        if not thread_id:
+            await query.message.reply_text("⚠️ У сообщения нет gmail_thread_id.")
+            _release_lock(msg_id)
+            return
+        # Все pending in-rows этого треда → skipped (не висят как «есть драфт»).
+        with db.get_conn() as _conn:
+            _conn.execute(
+                "UPDATE messages SET status='skipped' "
+                "WHERE gmail_thread_id = ? AND direction='in' "
+                "AND status IN ('pending', 'new', 'edited', 'approved')",
+                (thread_id,),
+            )
+        db.mark_thread_waiting(thread_id, marked_by=actor)
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(db.get_message(msg_id)) + (
+                "\n\n🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢\n"
+                f"⏳ <b>{_html(actor).upper()}: ЖДЁМ ОТВЕТА КЛИЕНТА</b>\n"
+                "<i>Тред в 🟢 секции pipeline. Авто-сброс при новом сообщении от клиента.</i>\n"
+                "🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢"
+            ),
+            reply_markup=_back_only_keyboard(msg_id),
+        )
+        _release_lock(msg_id)
+        return
+
+    if action == "closethread":
+        thread_id = msg["gmail_thread_id"] or ""
+        if not thread_id:
+            await query.message.reply_text("⚠️ У сообщения нет gmail_thread_id — нечего закрывать.")
+            _release_lock(msg_id)
+            return
+        # Все pending in-rows этого треда → skipped (чтоб не висели как «есть драфт»).
+        with db.get_conn() as _conn:
+            _conn.execute(
+                "UPDATE messages SET status='skipped' "
+                "WHERE gmail_thread_id = ? AND direction='in' "
+                "AND status IN ('pending', 'new', 'edited', 'approved')",
+                (thread_id,),
+            )
+        db.close_thread(thread_id, closed_by=actor)
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(db.get_message(msg_id)) + (
+                "\n\n🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢\n"
+                f"🏁 <b>{_html(actor).upper()} ЗАВЕРШИЛ БЕСЕДУ</b>\n"
+                "<i>Тред убран из «Состояние переговоров». Если клиент напишет — вернётся автоматически.</i>\n"
+                "🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢"
+            ),
+            reply_markup=_back_only_keyboard(msg_id),
+        )
+        _release_lock(msg_id)
+        return
+
     if action == "sold":
         ad_id = _safe_get(msg, "ad_id")
         if not ad_id:
@@ -2572,24 +2921,27 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if action == "clienthist":
         buyer_email = msg["buyer_name"] or ""
         history_text = _format_client_history(buyer_email)
-        if len(history_text) > 4000:
-            history_text = history_text[:3990] + "\n\n<i>...(обрезано)</i>"
         # Восстановим карточку в нормальный вид (она была в confirm-state)
         await _safe_edit(
             query, _format_review_text(msg),
-            reply_markup=_review_keyboard_obj(msg_id),
+            reply_markup=_review_keyboard_for_msg(msg),
         )
-        # Карточка истории клиента — отдельное сообщение, добавляем «↩ Назад»
-        # чтобы оператор мог вернуться к pipeline без ручного скролла.
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=history_text,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{msg_id}")],
-            ]),
-        )
+        # Длинный history может превышать 4096 — рубим на чанки. Клавиатура
+        # «↩ Назад к pipeline» только на ПОСЛЕДНЕМ чанке.
+        chunks = _split_for_telegram(history_text, limit=4000)
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            sent = await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=chunk,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{msg_id}")],
+                ]) if is_last else None,
+            )
+            if sent and sent.message_id:
+                _track_msg(query.message.chat_id, sent.message_id)
         return
 
     # Quick (q:fest) или Tweak (t:harsh/friend/short/regen) — preset-регенерация
@@ -2623,7 +2975,9 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         _release_lock(msg_id)
         return
 
-    # ── Reminder-карточки (без изменений) ──
+    # ── Reminder-карточки ──
+    # Финальные состояния (после действия) ВСЕГДА с _back_only_keyboard —
+    # правило: на любом экране бота должна быть кнопка возврата к pipeline.
     if action == "remind":
         await _safe_edit(query, (query.message.text_html or "") + f"\n\n⏳ <i>{_html(actor)} → генерирую follow-up...</i>", reply_markup=None)
         import scheduler
@@ -2631,7 +2985,7 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _safe_edit(
             query,
             (query.message.text_html or "") + f"\n\n<b>👤 {_html(actor)}:</b>\n{_html(result['message'])}",
-            reply_markup=None,
+            reply_markup=_back_only_keyboard(msg_id),
         )
         return
 
@@ -2640,7 +2994,7 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _safe_edit(
             query,
             (query.message.text_html or "") + f"\n\n❌ <i>{_html(actor)} забил на пинг.</i>",
-            reply_markup=None,
+            reply_markup=_back_only_keyboard(msg_id),
         )
         return
 
@@ -2656,8 +3010,96 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _safe_edit(
             query,
             (query.message.text_html or "") + f"\n\n⏰ <i>{_html(actor)} отложил на {days} дн. — напомню {_to_berlin(snooze_until, '%Y-%m-%d')}</i>",
+            reply_markup=_back_only_keyboard(msg_id),
+        )
+        return
+
+    if action == "propose":
+        # Триггер Sonnet draft. До этого момента row была status='new' без de/ru_answer.
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(msg) + f"\n\n⏳ <i>{_html(actor)} → генерирую черновик ответа Sonnet…</i>",
             reply_markup=None,
         )
+        import scheduler as _sched
+        result = await asyncio.to_thread(_sched.generate_draft_for_msg, msg_id)
+        updated = db.get_message(msg_id) or msg
+        if result["kind"] == "generated":
+            footer = f"\n\n<i>🤖 Черновик готов (стоило ${result['cost_usd']:.4f}). Проверь и нажми «✅ Перевести и подтвердить».</i>"
+        else:
+            footer = f"\n\n❌ <i>Не удалось: {_html(result.get('message') or 'unknown')}</i>"
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(updated) + footer,
+            reply_markup=_review_keyboard_for_msg(updated),
+        )
+        _release_lock(msg_id)
+        return
+
+    if action == "translate_confirm":
+        # RU черновик → DE-перевод. Status pending → edited.
+        if not msg["ru_answer"]:
+            await query.answer("Сначала сгенерируй RU-черновик.", show_alert=True)
+            _release_lock(msg_id)
+            return
+        target_lang = msg["client_lang"] or "de"
+        ad_ctx = msg["ad_title"] or _safe_get(msg, "email_subject") or ""
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(msg) + f"\n\n⏳ <i>{_html(actor)} → перевожу RU → {target_lang}…</i>",
+            reply_markup=None,
+        )
+        try:
+            tr = await asyncio.to_thread(
+                claude.translate_only,
+                msg["ru_answer"], target_lang=target_lang, context=ad_ctx,
+            )
+        except Exception as e:
+            logger.exception("translate_confirm fail msg=%s", msg_id)
+            await _broadcast_card(
+                context, msg_id,
+                _format_review_text(msg) + f"\n\n❌ <i>Перевод упал: {_html(str(e))}</i>",
+                reply_markup=_review_keyboard_for_msg(msg),
+            )
+            _release_lock(msg_id)
+            return
+        new_de = tr["translation"]
+        prior_cost = msg["cost_usd"] or 0.0
+        prior_in = msg["tokens_in"] or 0
+        prior_out = msg["tokens_out"] or 0
+        db.update_message(
+            msg_id,
+            de_answer=new_de,
+            ru_translation=msg["ru_answer"],  # back-translation = исходный RU
+            answer_lang=target_lang,
+            status="edited",
+            tokens_in=prior_in + tr.get("tokens_in", 0),
+            tokens_out=prior_out + tr.get("tokens_out", 0),
+            cost_usd=prior_cost + tr.get("cost_usd", 0.0),
+        )
+        updated = db.get_message(msg_id)
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(updated) + (
+                f"\n\n<i>🌐 Перевёл (стоило ${tr.get('cost_usd', 0.0):.4f}). "
+                "Проверь DE и нажми «✅ ОТПРАВИТЬ».</i>"
+            ),
+            reply_markup=_review_keyboard_for_msg(updated),
+        )
+        _release_lock(msg_id)
+        return
+
+    if action == "back_to_ru":
+        # Откатить статус из 'edited' обратно в 'pending' — оператор хочет
+        # переделать RU. DE остаётся как есть до следующего translate_confirm.
+        db.update_message(msg_id, status="pending")
+        updated = db.get_message(msg_id)
+        await _broadcast_card(
+            context, msg_id,
+            _format_review_text(updated) + f"\n\n<i>↩ {_html(actor)} вернулся к редактированию RU. Тапни «✅ Перевести и подтвердить» когда будешь готов.</i>",
+            reply_markup=_review_keyboard_for_msg(updated),
+        )
+        _release_lock(msg_id)
         return
 
     await query.message.reply_text(f"Неизвестное действие: {action}")
@@ -2711,7 +3153,9 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # ============================================================
-    # edit_ru — оператор написал по-русски, Claude переводит на client_lang
+    # edit_ru — оператор переписал RU-черновик. Перевод НЕ делаем здесь —
+    # status остаётся 'pending', отдельная кнопка «✅ Перевести и подтвердить»
+    # запустит translate_only когда оператор будет готов.
     # ============================================================
     if action == "edit_ru":
         default_lang = _safe_get(msg_row, "client_lang") or "de"
@@ -2720,37 +3164,18 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         override_lang, ru_text = claude.detect_lang_override(text)
         target_lang = override_lang or default_lang
-        lang_name, lang_flag = claude.lang_display(target_lang)
-        progress = (
-            f"🎯 Распознал директиву: перевожу на {lang_flag} {lang_name} (вместо авто-{default_lang})..."
-            if override_lang else f"⏳ Перевожу на {lang_flag} {lang_name}..."
-        )
-        await _bot_edit(context, chat_id, tg_msg_id,
-                        _format_review_text(msg_row) + f"\n\n<i>{progress}</i>")
-        try:
-            result = claude.translate_only(ru_text, target_lang=target_lang)
-        except Exception as e:
-            _PENDING_INPUTS[(chat_id, user_id)] = pending  # возвращаем state — пусть пробует ещё
-            await _bot_edit(context, chat_id, tg_msg_id,
-                            _format_review_text(msg_row) + f"\n\n❌ <i>Ошибка перевода: {e}. Пришли текст ещё раз.</i>",
-                            reply_markup=_input_cancel_keyboard(msg_id))
-            return
-        new_de = result["translation"]
-        prior_cost = _safe_get(msg_row, "cost_usd") or 0.0
-        prior_in = _safe_get(msg_row, "tokens_in") or 0
-        prior_out = _safe_get(msg_row, "tokens_out") or 0
-        # ru_translation = «что значит DE» — после ручного RU→DE равен ru_text оператора.
-        # Без обновления карточка показывала бы старый back-translation от прошлого DE.
+        # answer_lang меняется только если оператор дал директиву «на немецком: …»
+        # (в стандартном edit_ru просто переписываем RU без смены целевого языка).
+
         db.update_message(
             msg_id,
-            ru_answer=ru_text, de_answer=new_de,
-            ru_translation=ru_text,
-            status="edited",
+            ru_answer=ru_text,
             answer_lang=target_lang,
-            tokens_in=prior_in + result["tokens_in"],
-            tokens_out=prior_out + result["tokens_out"],
-            cost_usd=prior_cost + result["cost_usd"],
+            status="pending",
+            # de_answer / ru_translation специально НЕ обнуляем — пусть оператор
+            # увидит «старый» DE для сравнения. Translate-confirm перезапишет.
         )
+        # Lesson: пара (старый bot-draft RU, исправленный operator RU) — для in-context
         if prior_ru and ru_text and prior_ru.strip() != ru_text.strip():
             try:
                 db.add_lesson(
@@ -2759,7 +3184,7 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     client_lang=_safe_get(msg_row, "client_lang"),
                     client_situation_ru=_safe_get(msg_row, "ru_client"),
                     bad_draft_ru=prior_ru, bad_draft_de=prior_de,
-                    good_answer_ru=ru_text, good_answer_de=new_de,
+                    good_answer_ru=ru_text, good_answer_de=prior_de,
                 )
                 logger.info("Урок сохранён (edit_ru) по msg=%s", msg_id)
             except Exception:
@@ -2767,8 +3192,11 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         updated = db.get_message(msg_id)
         await _broadcast_card(
             context, msg_id,
-            _format_review_text(updated) + f"\n\n<i>✏️ переписал {_html(actor)} (RU)</i>",
-            reply_markup=_review_keyboard_obj(msg_id),
+            _format_review_text(updated) + (
+                f"\n\n<i>✏️ {_html(actor)} переписал RU. "
+                "Тапни «✅ Перевести и подтвердить» когда будешь готов.</i>"
+            ),
+            reply_markup=_review_keyboard_for_msg(updated),
         )
         _release_lock(msg_id)
         return
@@ -2777,44 +3205,26 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # edit_de — оператор написал на языке клиента; back-translate в RU для зеркала
     # ============================================================
     if action == "edit_de":
+        # Оператор переписал DE напрямую. Back-translate НЕ делаем (по запросу
+        # — лишний раз не переводим). Status остаётся 'edited' (готов к send).
+        # ru_translation специально оставляем как есть — это back-translate
+        # ПРОШЛОГО автоматического перевода, оператор знает что DE он подправил
+        # руками. Если хочет свежий ru_translation — пройдёт «🇷🇺 Назад к RU»
+        # → правка RU → «✅ Перевести и подтвердить».
         client_lang = _safe_get(msg_row, "client_lang") or "de"
         prior_ru = _safe_get(msg_row, "ru_answer")
         prior_de = _safe_get(msg_row, "de_answer")
-        lang_name, lang_flag = claude.lang_display(client_lang)
 
-        new_de = text  # как ввёл оператор — отправится клиенту в этом виде
-        new_ru = text  # default если client_lang=ru или back-translate упадёт
-        extra_cost = 0.0
-        extra_in = 0
-        extra_out = 0
-        if client_lang != "ru":
-            await _bot_edit(context, chat_id, tg_msg_id,
-                            _format_review_text(msg_row) + f"\n\n<i>⏳ Back-translate {lang_flag} → 🇷🇺 для зеркала RU...</i>")
-            try:
-                bt = claude.translate_only(text, source_lang=client_lang, target_lang="ru")
-                new_ru = bt["translation"]
-                extra_cost = bt["cost_usd"]
-                extra_in = bt["tokens_in"]
-                extra_out = bt["tokens_out"]
-            except Exception as e:
-                logger.warning("back-translate упал: %s, оставлю ru_answer = de_answer", e)
-                # не валим всё — просто RU = DE текст (хуже но без потери)
-
-        prior_cost = _safe_get(msg_row, "cost_usd") or 0.0
-        prior_in = _safe_get(msg_row, "tokens_in") or 0
-        prior_out = _safe_get(msg_row, "tokens_out") or 0
-        # ru_translation отражает то же что ru_answer (back-translation нового de_answer).
+        new_de = text
+        # new_ru = current ru_answer (без изменений)
+        new_ru = prior_ru or text  # если ru_answer не было — копируем DE как fallback
         db.update_message(
             msg_id,
-            ru_answer=new_ru, de_answer=new_de,
-            ru_translation=new_ru,
+            de_answer=new_de,
             status="edited",
             answer_lang=client_lang,
-            tokens_in=prior_in + extra_in,
-            tokens_out=prior_out + extra_out,
-            cost_usd=prior_cost + extra_cost,
         )
-        if prior_ru and new_ru and prior_ru.strip() != new_ru.strip():
+        if prior_de and new_de and prior_de.strip() != new_de.strip():
             try:
                 db.add_lesson(
                     message_id=msg_id, account_id=msg_row["account_id"],
@@ -2828,10 +3238,11 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception:
                 logger.exception("Не удалось сохранить урок")
         updated = db.get_message(msg_id)
+        lang_flag = claude.lang_display(client_lang)[1]
         await _broadcast_card(
             context, msg_id,
-            _format_review_text(updated) + f"\n\n<i>✏️ переписал {_html(actor)} ({lang_flag} {lang_name}, без перевода)</i>",
-            reply_markup=_review_keyboard_obj(msg_id),
+            _format_review_text(updated) + f"\n\n<i>✏️ {_html(actor)} переписал {lang_flag} вручную (без back-translate). Можно отправлять.</i>",
+            reply_markup=_review_keyboard_for_msg(updated),
         )
         _release_lock(msg_id)
         return

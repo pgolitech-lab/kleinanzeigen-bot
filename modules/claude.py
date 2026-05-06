@@ -506,12 +506,15 @@ def translate_only(
     direction: str = "ru_to_de",
     target_lang: Optional[str] = None,
     source_lang: Optional[str] = None,
+    context: Optional[str] = None,
 ) -> dict[str, Any]:
     """Перевод без генерации ответа.
 
     target_lang: ISO-код целевого языка (de/en/tr/...) — приоритетнее direction.
     source_lang: ISO-код исходного — для точности промпта (напр., back-translate из DE/FR/EN в RU).
     direction: legacy 'ru_to_de' / 'de_to_ru' (используется если target/source не заданы).
+    context: опциональная контекстная подсказка — название/описание объявления,
+        чтобы переводчик корректно выбирал терминологию (Sitze vs Plätze для сидений).
     """
     api_key = config.anthropic_api_key()
     if not api_key:
@@ -546,12 +549,27 @@ def translate_only(
         if target_is_de else ""
     )
 
+    # Контекст-блок для глоссария: даёт переводчику товарную семантику.
+    # Без него «4 сиденья» переводится как «4 Plätze» (места); с контекстом — «4 Sitze».
+    context_clause = ""
+    if context and context.strip():
+        context_clause = (
+            f"\n\nКонтекст переписки: продажа автомобильной комплектации — «{context.strip()}»."
+            "\nГлоссарий (соблюдай ТОЧНО при переводе на немецкий):"
+            "\n- сиденье / сиденья → Sitz / Sitze (НЕ «Platz/Plätze»)"
+            "\n- лавка / диван (в авто) → Sitzbank"
+            "\n- одиночное сиденье → Einzelsitz"
+            "\n- складной столик → Klapptisch"
+            "\n- крепления / направляющие → Schienen / Befestigung"
+            "\n- состояние / б/у / новое → Zustand / gebraucht / neu"
+        )
+
     response = client.messages.create(
         model=config.claude_model(),
         max_tokens=1500,
         system=(
             f"Ты профессиональный переводчик с {src} на {dst}. "
-            f"Переводишь точно и естественно, без отсебятины." + closing_clause
+            f"Переводишь точно и естественно, без отсебятины." + closing_clause + context_clause
         ),
         thinking={"type": "disabled"},
         output_config={

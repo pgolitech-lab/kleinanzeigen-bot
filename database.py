@@ -203,6 +203,30 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_card_dispatches_msg ON card_dispatches(message_id)"
         )
 
+        # closed_threads — треды завершённые оператором кнопкой «🏁 Завершить беседу».
+        # Не отображаются в pipeline/reminder. Если в закрытом треде приходит новое
+        # incoming — флаг автоматически снимается (тред реактивируется).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS closed_threads (
+                gmail_thread_id TEXT PRIMARY KEY,
+                closed_at TEXT NOT NULL,
+                closed_by TEXT
+            )
+        """)
+
+        # wait_threads — оператор пометил «⏳ Ждать ответа клиента»: pending-драфты
+        # пропущены, тред переходит в 🟢 секцию pipeline (ждём клиента) — потому что
+        # incoming клиента это не вопрос-нам, а просто инфа («друг занят»). Авто-сброс
+        # при новом incoming. В pipeline-events добавляется virtual out-event на
+        # marked_at — так last_event_kind становится 'out'.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS wait_threads (
+                gmail_thread_id TEXT PRIMARY KEY,
+                marked_at TEXT NOT NULL,
+                marked_by TEXT
+            )
+        """)
+
 
 # --- ACCOUNTS ---
 
@@ -428,6 +452,89 @@ def list_card_dispatches(message_id: int) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+# --- CLOSED THREADS ---
+
+def close_thread(gmail_thread_id: str, closed_by: Optional[str] = None) -> None:
+    """Пометить тред завершённым — не показывать в pipeline/reminder.
+
+    UPSERT: повторный вызов обновит closed_at и closed_by. Реактивация —
+    через `reopen_thread` или автоматически при новом incoming в этот thread_id.
+    """
+    if not gmail_thread_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO closed_threads (gmail_thread_id, closed_at, closed_by) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(gmail_thread_id) DO UPDATE SET "
+            "closed_at = excluded.closed_at, closed_by = excluded.closed_by",
+            (gmail_thread_id, datetime.utcnow().isoformat(), closed_by),
+        )
+
+
+def reopen_thread(gmail_thread_id: str) -> None:
+    """Снять флаг закрытия (например при новом incoming в treadе)."""
+    if not gmail_thread_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM closed_threads WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        )
+
+
+def is_thread_closed(gmail_thread_id: str) -> bool:
+    """Проверить closed-флаг."""
+    if not gmail_thread_id:
+        return False
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM closed_threads WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        ).fetchone()
+    return bool(row)
+
+
+def mark_thread_waiting(gmail_thread_id: str, marked_by: Optional[str] = None) -> None:
+    """Пометить тред «ждём клиента» — переводит pipeline в 🟢 секцию.
+
+    UPSERT: повторный вызов обновит marked_at. Авто-сброс при новом incoming.
+    """
+    if not gmail_thread_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO wait_threads (gmail_thread_id, marked_at, marked_by) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(gmail_thread_id) DO UPDATE SET "
+            "marked_at = excluded.marked_at, marked_by = excluded.marked_by",
+            (gmail_thread_id, datetime.utcnow().isoformat(), marked_by),
+        )
+
+
+def unmark_thread_waiting(gmail_thread_id: str) -> None:
+    """Снять wait-флаг (новое incoming или ручная отмена)."""
+    if not gmail_thread_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM wait_threads WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        )
+
+
+def is_thread_waiting(gmail_thread_id: str) -> bool:
+    """Проверить wait-флаг."""
+    if not gmail_thread_id:
+        return False
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM wait_threads WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        ).fetchone()
+    return bool(row)
+
+
 def append_extra_note(message_id: int, note: str) -> None:
     """Дописать строку в messages.extra_notes (с timestamp в начале).
 
@@ -508,6 +615,11 @@ def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
           AND COALESCE(m.is_reminder, 0) = 0
           AND COALESCE(m.is_auto_ack, 0) = 0
           AND (m.reminder_snooze_until IS NULL OR m.reminder_snooze_until < ?)
+          -- Закрытые оператором треды не пингуем
+          AND NOT EXISTS (
+              SELECT 1 FROM closed_threads ct
+               WHERE ct.gmail_thread_id = m.gmail_thread_id
+          )
         ORDER BY le.at_time ASC
     """
     with get_conn() as conn:
@@ -716,6 +828,11 @@ def pipeline_threads() -> list[sqlite3.Row]:
            AND de_answer IS NOT NULL
            AND status IN ('sent', 'sent_debug')
            AND sent_at IS NOT NULL
+        UNION ALL
+        -- Виртуальное «out»-событие от оператора: «ждём клиента» → ставит секцию 🟢
+        SELECT gmail_thread_id, marked_at AS at_time, 'out' AS kind
+          FROM wait_threads
+         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
     ),
     last_event AS (
         SELECT e1.gmail_thread_id, e1.at_time AS last_event_at, e1.kind AS last_event_kind
@@ -764,9 +881,14 @@ def pipeline_threads() -> list[sqlite3.Row]:
     FROM last_in li
     LEFT JOIN counts c ON c.gmail_thread_id = li.gmail_thread_id
     LEFT JOIN last_event le ON le.gmail_thread_id = li.gmail_thread_id
-    WHERE COALESCE(c.any_sent_count, 0) > 0
-       OR COALESCE(c.pending_drafts_count, 0) > 0
-       OR li.status IN ('pending', 'new', 'edited', 'approved')
+    WHERE (COALESCE(c.any_sent_count, 0) > 0
+           OR COALESCE(c.pending_drafts_count, 0) > 0
+           OR li.status IN ('pending', 'new', 'edited', 'approved'))
+      -- Исключаем закрытые оператором треды (кнопка «🏁 Завершить беседу»)
+      AND NOT EXISTS (
+          SELECT 1 FROM closed_threads ct
+           WHERE ct.gmail_thread_id = li.gmail_thread_id
+      )
     ORDER BY le.last_event_at ASC
     """
     with get_conn() as conn:
