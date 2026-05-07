@@ -16,6 +16,13 @@ IMAP_PORT = 993
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465  # SSL
 
+# Без timeout-а imaplib висит бесконечно при сетевом разрыве.
+# История: ночью 2026-05-07 IMAP завис в socket.recv → polling job не вернулся
+# 6 часов, APScheduler пропускал каждый следующий запуск (max_instances=1) →
+# письмо от Fahrig дошло, но не было обработано. 30s — компромисс между
+# защитой от hang-а и допуском медленных соединений.
+IMAP_TIMEOUT = 30
+
 
 # --- Вспомогательные функции ---
 
@@ -131,7 +138,7 @@ def fetch_new(
     после успешной обработки.
     """
     results: list[dict[str, Any]] = []
-    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as imap:
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
         imap.login(gmail_email, gmail_password)
         imap.select(mailbox, readonly=True)
 
@@ -199,17 +206,89 @@ def mark_seen(
     """Пометить письма как прочитанные (флаг \\Seen)."""
     if not uids:
         return
-    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as imap:
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
         imap.login(gmail_email, gmail_password)
         imap.select(mailbox)
         for uid in uids:
             imap.store(uid, "+FLAGS", "\\Seen")
 
 
+def find_orphan_seen_uids(
+    gmail_email: str,
+    gmail_password: str,
+    known_message_ids: set[str],
+    from_filter: Optional[str] = None,
+    since_days: int = 2,
+    mailbox: str = "INBOX",
+    limit: int = 200,
+) -> list[bytes]:
+    """Найти UID-ы SEEN писем за последние N дней которых НЕТ в known_message_ids.
+
+    Защита от race-condition: бот успел `mark_seen`, но не сохранил message-id ни
+    в `messages`, ни в `processed_messages` (например IMAP-timeout посередине
+    `_process_incoming` или crash). Возвращает список UID-ов чтобы вызывающий
+    мог снять Seen → следующий poll снова увидит их как UNSEEN и обработает.
+
+    Дёшево: только заголовок Message-ID per UID (минимум IMAP-трафика).
+    """
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(days=since_days)).strftime("%d-%b-%Y")
+    orphans: list[bytes] = []
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
+        imap.login(gmail_email, gmail_password)
+        imap.select(mailbox, readonly=True)
+        if from_filter:
+            criteria = ("SEEN", "FROM", f'"{from_filter}"', "SINCE", since)
+        else:
+            criteria = ("SEEN", "SINCE", since)
+        typ, data = imap.search(None, *criteria)
+        if typ != "OK" or not data or not data[0]:
+            return []
+        uids = data[0].split()[-limit:]
+        if not uids:
+            return []
+        for uid in uids:
+            typ, msg_data = imap.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+            if typ != "OK" or not msg_data:
+                continue
+            msg_id = ""
+            for item in msg_data:
+                if isinstance(item, tuple) and len(item) >= 2:
+                    raw = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
+                    for line in raw.splitlines():
+                        if line.lower().startswith(b"message-id:"):
+                            msg_id = line.split(b":", 1)[1].strip().decode(errors="ignore")
+                            break
+                    if msg_id:
+                        break
+            if msg_id and msg_id not in known_message_ids:
+                orphans.append(uid)
+    return orphans
+
+
+def unmark_seen(
+    gmail_email: str,
+    gmail_password: str,
+    uids: list[bytes],
+    mailbox: str = "INBOX",
+) -> None:
+    """Снять флаг \\Seen с UID-ов (orphan-recovery)."""
+    if not uids:
+        return
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
+        imap.login(gmail_email, gmail_password)
+        imap.select(mailbox)
+        for uid in uids:
+            try:
+                imap.store(uid, "-FLAGS", "\\Seen")
+            except Exception:
+                pass  # best-effort; следующий orphan-scan повторит
+
+
 def test_connection(gmail_email: str, gmail_password: str) -> tuple[bool, str]:
     """Проверка IMAP подключения. Возвращает (успех, сообщение)."""
     try:
-        with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as imap:
+        with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
             imap.login(gmail_email, gmail_password)
             imap.select("INBOX", readonly=True)
         return True, "IMAP подключение OK"

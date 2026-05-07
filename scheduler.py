@@ -84,6 +84,26 @@ def _row_get(row: Any, key: str) -> Any:
         return None
 
 
+def _skip_email(account: Any, email: dict[str, Any], reason: str) -> None:
+    """DRY: пометить письмо `\\Seen` в Gmail + записать в `processed_messages`.
+
+    Используется во всех skip-точках `_process_incoming` (noreply / junk-subject /
+    purchase-side / classifier / max-age / sold / no-ad-ref / dedup). Запись в
+    processed_messages нужна orphan-recovery — иначе recovery в цикле снимает
+    Seen с тех же junk-писем и реклассифицирует.
+    """
+    msg_id = (email.get("gmail_message_id") or "").strip()
+    if msg_id:
+        try:
+            db.mark_processed(msg_id, account["id"], reason)
+        except Exception:
+            logger.exception("mark_processed fail (msg_id=%s, reason=%s)", msg_id, reason)
+    try:
+        gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
+    except Exception as e:
+        logger.warning("mark_seen fail для UID=%s: %s", email.get("uid"), e)
+
+
 def _ack_already_sent_for_thread(thread_id: Optional[str]) -> bool:
     """Был ли уже отправлен (или хотя бы создан в БД) ack для этого треда.
 
@@ -278,7 +298,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 
     # Дедуп по Message-ID (только в обычном режиме)
     if not force and msg_id and db.find_by_gmail_message_id(msg_id):
-        gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
+        _skip_email(account, email, "skipped_dedup")
         return
 
     raw_body = email.get("body") or ""
@@ -297,10 +317,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             "Skip: noreply sender, account=%s, from=%s, subject=%r",
             account["gmail_email"], from_email_lower, subject[:80],
         )
-        try:
-            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-        except Exception:
-            pass
+        _skip_email(account, email, "skipped_noreply")
         return
 
     # Skip системные письма Kleinanzeigen (saved-search alerts, истечение объявления, отзывы)
@@ -309,10 +326,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             "Skip junk system email: account=%s, subject=%r",
             account["gmail_email"], subject[:80],
         )
-        try:
-            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-        except Exception:
-            pass
+        _skip_email(account, email, "skipped_junk")
         return
 
     # Skip переписку где МЫ покупатель (наша покупка, не продажа).
@@ -327,10 +341,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         )
         if inbound_thread_id := (email.get("gmail_thread_id") or "").strip():
             db.close_thread(inbound_thread_id, closed_by="auto:purchase-side")
-        try:
-            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-        except Exception:
-            pass
+        _skip_email(account, email, "skipped_purchase_side")
         return
 
     # AI-классификатор (Haiku): финальный gate перед дорогими операциями.
@@ -370,10 +381,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 classify["reason"][:80], account["gmail_email"], subject[:60],
             )
             if not classify["is_inquiry"]:
-                try:
-                    gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-                except Exception:
-                    pass
+                _skip_email(account, email, "skipped_classifier")
                 return
         except Exception:
             logger.exception("classifier упал, пропускаю проверку")
@@ -398,10 +406,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                             "Skip: too old (%d дн., лимит %d), account=%s, subject=%r",
                             age_days, max_age, account["gmail_email"], subject[:60],
                         )
-                        try:
-                            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-                        except Exception:
-                            pass
+                        _skip_email(account, email, "skipped_max_age")
                         return
             except (TypeError, ValueError) as e:
                 logger.debug("parsedate failed: %s", e)
@@ -423,11 +428,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             })
         except Exception:
             logger.exception("Не удалось послать notification про sold")
-        # Помечаем seen чтобы не обрабатывать повторно
-        try:
-            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-        except Exception:
-            pass
+        _skip_email(account, email, "skipped_sold")
         return
 
     # Defense in depth: IMAP-фильтр по From должен был отсеять до нас, но если
@@ -462,10 +463,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             "Skip: no ad reference in body, account=%s, from=%s, subject=%r",
             account["gmail_email"], email.get("from_email"), subject[:80],
         )
-        try:
-            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-        except Exception:
-            pass
+        _skip_email(account, email, "skipped_no_ad_ref")
         return
 
     # Сохраняем входящее СРАЗУ, до медленного Playwright-парсинга. Это:
@@ -727,6 +725,12 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 def poll_all_accounts() -> str:
     """Job: пройти по всем активным аккаунтам и обработать новые письма.
 
+    После регулярного UNSEEN-fetch — orphan-recovery scan: ищем SEEN-письма за
+    последние 2 дня, которых нет ни в `messages`, ни в `processed_messages`
+    (например бот завис в IMAP-recv до `_process_incoming` или crash посередине).
+    Найденным сиротам снимаем флаг Seen → следующий poll-цикл их подхватит как
+    обычные UNSEEN.
+
     Возвращает короткое summary для отображения в /api/status.
     """
     if config.polling_paused():
@@ -735,6 +739,7 @@ def poll_all_accounts() -> str:
     from_filter = config.gmail_from_filter() or None
     total_new = 0
     failed_imap = 0
+    total_orphans = 0
     for acc in accounts:
         try:
             new_emails = gmail.fetch_new(
@@ -753,9 +758,35 @@ def poll_all_accounts() -> str:
                 _process_incoming(acc, em)
             except Exception:
                 logger.exception("Ошибка обработки письма")
+
+        # Orphan-recovery (best-effort, не валим polling если упадёт).
+        # known_message_ids_since собирается ПОСЛЕ обработки выше — свежие ID
+        # уже попали в messages/processed_messages, recovery не подымет их зря.
+        try:
+            known = db.known_message_ids_since(since_days=3)
+            orphans = gmail.find_orphan_seen_uids(
+                acc["gmail_email"], acc["gmail_app_password"],
+                known_message_ids=known,
+                from_filter=from_filter,
+                since_days=2,
+            )
+            if orphans:
+                logger.warning(
+                    "Orphan-recovery: account=%s найдено %d SEEN-сирот, "
+                    "снимаю Seen → подхватятся следующим poll-ом",
+                    acc["gmail_email"], len(orphans),
+                )
+                gmail.unmark_seen(
+                    acc["gmail_email"], acc["gmail_app_password"], orphans,
+                )
+                total_orphans += len(orphans)
+        except Exception:
+            logger.exception("orphan-recovery упал для аккаунта %s", acc["id"])
+
     return (
         f"Аккаунтов: {len(accounts)}, новых писем: {total_new}"
         + (f", IMAP-ошибок: {failed_imap}" if failed_imap else "")
+        + (f", сирот восстановлено: {total_orphans}" if total_orphans else "")
     )
 
 

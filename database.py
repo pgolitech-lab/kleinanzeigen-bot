@@ -227,6 +227,25 @@ def init_db() -> None:
             )
         """)
 
+        # processed_messages — журнал ВСЕХ обработанных писем (включая skip-нутые).
+        # Используется orphan-recovery для отличия «никогда не видели» от «видели и
+        # сознательно skip-нули». Без этой таблицы recovery в бесконечном цикле
+        # реобрабатывает junk-письма (snoozes Haiku-classifier на $0.001 каждое).
+        # Reason: 'inquiry' | 'skipped_dedup' | 'skipped_noreply' | 'skipped_junk' |
+        #         'skipped_purchase_side' | 'skipped_classifier' | 'skipped_max_age' |
+        #         'skipped_sold' | 'skipped_no_ad_ref'.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS processed_messages (
+                gmail_message_id TEXT PRIMARY KEY,
+                account_id INTEGER,
+                processed_at TEXT NOT NULL,
+                reason TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_messages(processed_at)"
+        )
+
 
 # --- ACCOUNTS ---
 
@@ -533,6 +552,57 @@ def is_thread_waiting(gmail_thread_id: str) -> bool:
             (gmail_thread_id,),
         ).fetchone()
     return bool(row)
+
+
+# --- PROCESSED MESSAGES (orphan-recovery support) ---
+
+def mark_processed(
+    gmail_message_id: str,
+    account_id: Optional[int],
+    reason: str,
+) -> None:
+    """Запомнить что письмо обработано (или сознательно skip-нуто).
+
+    Используется orphan-recovery: чтобы отличить «не видели» от «видели и решили
+    не сохранять» (junk/noreply/sold/etc). Без этого recovery в цикле тащит из
+    Gmail те же junk-письма и тратит Haiku-classifier API.
+    """
+    if not gmail_message_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO processed_messages (gmail_message_id, account_id, processed_at, reason) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(gmail_message_id) DO UPDATE SET "
+            "processed_at = excluded.processed_at, reason = excluded.reason",
+            (gmail_message_id, account_id, datetime.utcnow().isoformat(), reason),
+        )
+
+
+def known_message_ids_since(since_days: int = 3) -> set[str]:
+    """Все Message-ID-ы которые бот за последние N дней так или иначе видел.
+
+    Объединяет:
+      - `messages.gmail_message_id` за созданные за period (все обработанные inquiry)
+      - `processed_messages.gmail_message_id` за period (skip-нутые / повторы)
+    Используется в orphan-recovery scan: всё что НЕ в этом set-е и помечено в
+    Gmail как Seen — потенциальный сирота.
+    """
+    cutoff_iso = (datetime.utcnow() - timedelta(days=since_days)).isoformat()
+    out: set[str] = set()
+    with get_conn() as conn:
+        for r in conn.execute(
+            "SELECT gmail_message_id FROM messages "
+            "WHERE created_at > ? AND gmail_message_id IS NOT NULL AND gmail_message_id != ''",
+            (cutoff_iso,),
+        ).fetchall():
+            out.add(r["gmail_message_id"])
+        for r in conn.execute(
+            "SELECT gmail_message_id FROM processed_messages WHERE processed_at > ?",
+            (cutoff_iso,),
+        ).fetchall():
+            out.add(r["gmail_message_id"])
+    return out
 
 
 def append_extra_note(message_id: int, note: str) -> None:

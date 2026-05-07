@@ -75,6 +75,8 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 
 **`thread_autopilot`** (NEW): per-thread state автопилота. PK=`gmail_thread_id`. Поля: `active`, `floor_price_eur`, `notify_mode` ('silent'|'notify'), `messages_sent` (counter, max 20), `started_by/at`, `stopped_at`, `stop_reason`. UPSERT при start (можно переактивировать после стопа).
 
+**`processed_messages`** (NEW 2026-05-07, для orphan-recovery): `gmail_message_id` PK, `account_id`, `processed_at`, `reason`. Журнал ВСЕХ писем которые бот видел и решил по ним что-то — даже skip-ы (junk/noreply/sold/etc). Используется `gmail.find_orphan_seen_uids` чтобы отличать «никогда не видели» от «видели и сознательно skip-нули»; без этого orphan-scan в цикле дёргает Haiku-classifier на одних и тех же junk-письмах. Заполняется через `db.mark_processed(msg_id, account_id, reason)` из единого хелпера `scheduler._skip_email`. Reason: `inquiry` / `skipped_dedup` / `skipped_noreply` / `skipped_junk` / `skipped_purchase_side` / `skipped_classifier` / `skipped_max_age` / `skipped_sold` / `skipped_no_ad_ref`.
+
 ## Telegram-бот (`modules/telegram_bot.py`)
 
 ### Режимы доставки
@@ -248,6 +250,7 @@ ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
 - **Group-mode Telegram** (legacy): `telegram_authorized_ids()` ВСЕГДА включает `telegram_chat_id` + extras из `telegram_authorized`.
 - **Haiku не поддерживает `effort`/`thinking`**: при `claude-haiku-4-5` (classifier, auto-ack, similarity) НЕ передавать эти параметры в `output_config` — bad request. Sonnet 4.6/4.7 поддерживают.
 - **Hourly мониторинг логов** (`scheduler.monitor_errors_job`): journalctl scan ERROR/Traceback → Telegram digest. Дедуп через `_REPORTED_ERROR_HASHES` (in-memory).
+- **IMAP timeout + orphan-recovery** (2026-05-07): `gmail.IMAP_TIMEOUT=30s` на ВСЕХ `IMAP4_SSL` calls — раньше без таймаута socket.recv мог висеть часами и блокировать polling-job (APScheduler пропускал каждый следующий запуск с `maximum running instances reached`, письма терялись). После регулярного UNSEEN-fetch в `poll_all_accounts` идёт **orphan-recovery scan**: `gmail.find_orphan_seen_uids` ищет SEEN-письма за последние 2 дня которых нет в `messages.gmail_message_id` ∪ `processed_messages.gmail_message_id` (за 3 дня), `gmail.unmark_seen` снимает с них `\\Seen` — следующий poll-цикл подхватит как обычные UNSEEN. Дёшево: только Message-ID per UID. Все skip-точки `_process_incoming` зовут `_skip_email(account, email, reason)` который делает `mark_seen + db.mark_processed` атомарно — без этого recovery в цикле реклассифицировал бы junk на Haiku ($0.001 каждое).
 - **`send_for_review` НЕ сбрасывает status в pending** если row уже не `new` (предотвращает sent → pending корраптинг pipeline-классификации). Безопасно перепосылать карточки через `/card N`.
 - **`messages.status='archived'`** — backfill-загруженные историч. inquiries (~762 шт). НЕ попадают в pipeline (фильтр SQL пропускает только active статусы).
 - **Хронология событий, а не id**: `db.thread_history` сортирует по `created_at ASC, id ASC`. `db.thread_events()` строит flat-список «событий» — incoming.created_at + outgoing.sent_at — корректно для recovery/backfill (новый id, старая дата). MAX(id) больше НЕ используется в `pipeline_threads`/`find_reminder_candidates`/UI-render.
