@@ -1,4 +1,6 @@
 // Helpers вокруг Telegram WebApp SDK.
+// NOTE: telegram-web-app.js должен загружаться SYNC (no async/defer)
+// в <head> до этого модуля; иначе window.Telegram.WebApp будет undefined.
 
 export const tg = window.Telegram?.WebApp;
 
