@@ -50,6 +50,9 @@ def verify_init_data(raw: str) -> dict:
     secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     expected_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
 
+    # Bug fix: non-ASCII hash crashes compare_digest with TypeError → guard first.
+    if not received_hash.isascii():
+        raise HTTPException(401, "init_data: hash mismatch")
     if not hmac.compare_digest(expected_hash, received_hash):
         raise HTTPException(401, "init_data: hash mismatch")
 
@@ -58,7 +61,12 @@ def verify_init_data(raw: str) -> dict:
     except (json.JSONDecodeError, IndexError):
         raise HTTPException(401, "init_data: cannot parse user")
 
-    if user.get("id") not in config.telegram_authorized_ids():
+    # Bug fix: user field must be a JSON object, not a scalar/array.
+    if not isinstance(user, dict):
+        raise HTTPException(401, "init_data: user field is not an object")
+
+    # Bug fix: telegram_authorized_ids() returns set[str], user["id"] is int — stringify.
+    if str(user.get("id")) not in config.telegram_authorized_ids():
         raise HTTPException(403, "user not authorized")
 
     return user

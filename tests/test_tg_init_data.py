@@ -42,7 +42,7 @@ def patched_config():
     """Подменяет config.telegram_bot_token и telegram_authorized_ids."""
     with patch("modules.tg_init_data.config") as m:
         m.telegram_bot_token.return_value = TEST_BOT_TOKEN
-        m.telegram_authorized_ids.return_value = {999}
+        m.telegram_authorized_ids.return_value = {"999"}  # str — match production
         yield m
 
 
@@ -103,3 +103,41 @@ def test_future_auth_date_raises_401(patched_config):
         tg_init_data.verify_init_data(init)
     assert ei.value.status_code == 401
     assert "expired" in ei.value.detail.lower() or "future" in ei.value.detail.lower()
+
+
+def test_non_ascii_hash_raises_401(patched_config):
+    """Non-ASCII в hash field не должен крашить compare_digest до 500."""
+    fields = {
+        "user": json.dumps(TEST_USER_AUTHORIZED, separators=(",", ":")),
+        "auth_date": str(int(time.time())),
+        "hash": "☃" * 64,  # 64-char non-ascii string
+    }
+    init = urlencode(fields)
+    with pytest.raises(HTTPException) as ei:
+        tg_init_data.verify_init_data(init)
+    assert ei.value.status_code == 401
+
+
+def test_user_field_non_dict_json_raises_401(patched_config):
+    """user=42 (валидный JSON но не object) → 401, не 500."""
+    fields = {
+        "user": "42",  # valid JSON, not a dict
+        "auth_date": str(int(time.time())),
+    }
+    data_check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    secret = hmac.new(b"WebAppData", TEST_BOT_TOKEN.encode(), hashlib.sha256).digest()
+    h = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    fields["hash"] = h
+    init = urlencode(fields)
+    with pytest.raises(HTTPException) as ei:
+        tg_init_data.verify_init_data(init)
+    assert ei.value.status_code == 401
+
+
+def test_str_authorized_ids_match_int_user_id(patched_config):
+    """Production: telegram_authorized_ids() returns set[str], user.id is int — должны совпадать через str()."""
+    # Mock уже patched — но патчим заново чтобы убедиться в типе set[str]:
+    patched_config.telegram_authorized_ids.return_value = {"999"}  # str-set, реальное поведение
+    init = _make_init_data(TEST_USER_AUTHORIZED)  # id=999 (int)
+    user = tg_init_data.verify_init_data(init)
+    assert user["id"] == 999
