@@ -1,29 +1,15 @@
 """Smoke-тесты для /api/ma/health через FastAPI TestClient (без живого uvicorn)."""
 from __future__ import annotations
-import hmac
-import hashlib
-import json
 import time
-from urllib.parse import urlencode
 from unittest.mock import patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import make_init_data, TEST_BOT_TOKEN
 
-TEST_BOT_TOKEN = "123456:test_token_AbCdEfG"
+
 TEST_USER = {"id": 999, "first_name": "Pg", "username": "pgtest"}
-
-
-def _make_init_data(user: dict, auth_date: int | None = None, bot_token: str = TEST_BOT_TOKEN) -> str:
-    if auth_date is None:
-        auth_date = int(time.time())
-    fields = {"user": json.dumps(user, separators=(",", ":")), "auth_date": str(auth_date)}
-    data_check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
-    secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-    h = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-    fields["hash"] = h
-    return urlencode(fields)
 
 
 @pytest.fixture
@@ -56,7 +42,7 @@ def test_health_bad_init_data_returns_401(client):
 
 
 def test_health_valid_returns_user(client):
-    init = _make_init_data(TEST_USER)
+    init = make_init_data(TEST_USER)
     res = client.get("/api/ma/health", headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
     body = res.json()
@@ -81,7 +67,7 @@ def test_cors_preflight_for_github_pages(client):
 
 
 def test_cors_rejects_unknown_origin(client):
-    """Неизвестный origin не получает Allow-Origin header."""
+    """Неизвестный origin не получает Allow-Origin header (Starlette returns 400)."""
     res = client.options(
         "/api/ma/health",
         headers={
@@ -89,6 +75,5 @@ def test_cors_rejects_unknown_origin(client):
             "Access-Control-Request-Method": "GET",
         },
     )
-    # FastAPI/Starlette CORS middleware just doesn't set the header for unknown origin.
-    # Status может быть 400 (CORS reject) или 200 без allow-origin header.
-    assert res.headers.get("access-control-allow-origin") != "https://evil.example.com"
+    assert res.status_code == 400
+    assert res.headers.get("access-control-allow-origin") is None
