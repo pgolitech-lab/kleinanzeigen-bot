@@ -25,3 +25,17 @@ export function startParam() {
 export function close() {
   tg?.close();
 }
+
+// BackButton API
+export function showBack(handler) {
+  if (!tg?.BackButton) return;
+  tg.BackButton.show();
+  tg.BackButton.offClick();
+  tg.BackButton.onClick(handler);
+}
+
+export function hideBack() {
+  if (!tg?.BackButton) return;
+  tg.BackButton.offClick();
+  tg.BackButton.hide();
+}
