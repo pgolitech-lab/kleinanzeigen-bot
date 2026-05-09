@@ -1,0 +1,27 @@
+:root {
+  --tg-bg: var(--tg-theme-bg-color, #1a1a1a);
+  --tg-text: var(--tg-theme-text-color, #e0e0e0);
+  --tg-hint: var(--tg-theme-hint-color, #888);
+  --tg-link: var(--tg-theme-link-color, #4a9eff);
+  --tg-button: var(--tg-theme-button-color, #1d4ed8);
+  --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+}
+
+body {
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  font-size: 14px;
+  margin: 0;
+}
+
+.muted { color: var(--tg-hint); }
+.error { color: #f87171; }
+.ok { color: #34d399; }
+
+pre.payload {
+  background: rgba(255,255,255,0.05);
+  padding: .75rem;
+  border-radius: 6px;
+  font-size: 12px;
+  overflow: auto;
+}
