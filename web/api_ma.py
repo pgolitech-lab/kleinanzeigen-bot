@@ -141,3 +141,22 @@ async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) 
     }
 
     return {"header": header, "events": events, "related": related}
+
+
+@router.get("/clients/{email}/history")
+async def ma_client_history(email: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """История тредов клиента (по buyer_email)."""
+    rows = db.list_threads_for_client(email)
+    threads = [
+        {
+            "thread_id": r["thread_id"],
+            "ad_title": r["ad_title"],
+            "ad_id": r["ad_id"],
+            "ad_price": r["ad_price"],
+            "msg_count": r["msg_count"],
+            "last_at": r["last_at"],
+            "last_status": r["last_status"],
+        }
+        for r in rows
+    ]
+    return {"buyer_email": email, "threads": threads}
