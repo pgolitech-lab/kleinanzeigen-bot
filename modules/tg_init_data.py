@@ -37,8 +37,11 @@ def verify_init_data(raw: str) -> dict:
     except (ValueError, IndexError):
         raise HTTPException(401, "init_data: bad auth_date")
 
-    if time.time() - auth_date > AUTH_DATE_MAX_AGE_SEC:
-        raise HTTPException(401, "init_data expired")
+    now = time.time()
+    # Future auth_date с small clock-skew tolerance считаем валидным;
+    # past — только в пределах AUTH_DATE_MAX_AGE_SEC.
+    if auth_date > now + 60 or now - auth_date > AUTH_DATE_MAX_AGE_SEC:
+        raise HTTPException(401, "init_data expired or future-dated")
 
     # data-check-string: k=v\nk=v... отсортированных по ключу.
     data_check = "\n".join(f"{k}={v[0]}" for k, v in sorted(parsed.items()))

@@ -93,3 +93,13 @@ def test_token_change_invalidates_old_data(patched_config):
     with pytest.raises(HTTPException) as ei:
         tg_init_data.verify_init_data(init)
     assert ei.value.status_code == 401
+
+
+def test_future_auth_date_raises_401(patched_config):
+    """Future auth_date (отрицательная дельта) тоже должна отбиваться."""
+    future = int(time.time()) + 9999
+    init = _make_init_data(TEST_USER_AUTHORIZED, auth_date=future)
+    with pytest.raises(HTTPException) as ei:
+        tg_init_data.verify_init_data(init)
+    assert ei.value.status_code == 401
+    assert "expired" in ei.value.detail.lower() or "future" in ei.value.detail.lower()
