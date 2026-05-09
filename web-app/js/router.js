@@ -22,7 +22,12 @@ function navigateBack() {
 
 export function start(mount) {
   function dispatch() {
-    const hash = location.hash || "#/";
+    let hash = location.hash || "#/";
+    // Telegram WebApp подкладывает #tgWebAppData=... в URL при запуске.
+    // Это не наш роут — считаем за root (pipeline).
+    if (!hash.startsWith("#/")) {
+      hash = "#/";
+    }
     for (const r of ROUTES) {
       const m = hash.match(r.pattern);
       if (m) {
