@@ -1,13 +1,12 @@
 import { initData, close } from "./tg.js";
 
-// Production: будет заменено на реальный cloudflared URL после Task 5.
-// Пока — пусто; Task 8 пропишет финальный URL и сделает повторный commit.
+// Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
+// Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.
 //
-// NB: когда API_BASE станет абсолютным URL, backend ДОЛЖЕН отдавать
-// Access-Control-Allow-Origin для нашего github.io origin'а
-// (CORSMiddleware уже сконфигурирован в Phase 1).
+// NB: backend (FastAPI на :8080) должен отдавать Access-Control-Allow-Origin для
+// github.io origin'а — CORSMiddleware уже сконфигурирован в Phase 1.
 // X-Telegram-Init-Data — non-simple header, всегда триггерит preflight.
-export const API_BASE = "";
+export const API_BASE = "https://choice-drunk-curriculum-effectiveness.trycloudflare.com";
 
 export async function api(path, { method = "GET", body = null, headers = {} } = {}) {
   const url = `${API_BASE}${path}`;
