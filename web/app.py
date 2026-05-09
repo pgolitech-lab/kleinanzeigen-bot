@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -14,8 +15,20 @@ import config
 import database as db
 import log_buffer
 import scheduler as sched_mod
+from modules.tg_init_data import verify_init_data_dep
 
 app = FastAPI(title="Kleinanzeigen Bot")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://pgolitech-lab.github.io",
+        "https://web.telegram.org",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["X-Telegram-Init-Data", "Content-Type"],
+    max_age=600,
+)
 
 # Шаблоны лежат в web/templates/ относительно корня проекта
 BASE_DIR = Path(__file__).parent
@@ -754,3 +767,16 @@ async def api_post_settings(request: Request) -> dict[str, Any]:
         db.set_setting(key, "" if value is None else str(value))
         updated.append(key)
     return {"updated": updated, "count": len(updated)}
+
+
+# ---------- Mini App API ----------
+
+@app.get("/api/ma/health")
+async def ma_health(user: dict = Depends(verify_init_data_dep)) -> dict:
+    """Health endpoint для Mini App. Возвращает идентичность оператора."""
+    return {
+        "ok": True,
+        "user_id": user.get("id"),
+        "username": user.get("username"),
+        "first_name": user.get("first_name"),
+    }
