@@ -71,3 +71,73 @@ async def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, l
     red.sort(key=lambda x: x["last_event_at"] or "")
     green.sort(key=lambda x: x["last_event_at"] or "")
     return {"red": red, "green": green}
+
+
+from fastapi import HTTPException
+
+
+def _event_to_api(event: dict[str, Any]) -> dict[str, Any]:
+    """Конвертация event-dict из db.thread_events в API-форму."""
+    row = event.get("row")
+    return {
+        "ts": event.get("ts"),
+        "kind": event.get("kind"),
+        "text": event.get("text"),
+        "ru_text": event.get("ru_text"),
+        "is_auto_ack": bool(event.get("is_auto_ack")),
+        "msg_id": row["id"] if row is not None else None,
+        "status": event.get("status") or (row["status"] if row is not None else None),
+    }
+
+
+def _related_match(row: Any) -> dict[str, Any]:
+    return {
+        "thread_id": row["gmail_thread_id"],
+        "ad_title": row["ad_title"] if "ad_title" in row.keys() else None,
+        "ad_price": row["ad_price"] if "ad_price" in row.keys() else None,
+        "last_at": (row["sent_at"] if "sent_at" in row.keys() else None) or (
+            row["created_at"] if "created_at" in row.keys() else None),
+    }
+
+
+@router.get("/threads/{thread_id}")
+async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Thread detail: header + chronological events + related-buyer block."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+
+    # Header — самый свежий direction="in" (он несёт ad-инфо и buyer)
+    last_in = next((r for r in reversed(history) if r["direction"] == "in"), history[-1])
+    account = db.get_account(last_in["account_id"]) if "account_id" in last_in.keys() else None
+    autopilot_row = db.get_thread_autopilot(thread_id)
+    is_autopilot = False
+    if autopilot_row is not None:
+        try:
+            is_autopilot = bool(autopilot_row["active"])
+        except (KeyError, IndexError):
+            is_autopilot = False
+
+    header = {
+        "thread_id": thread_id,
+        "ad_title": last_in["ad_title"],
+        "ad_price": last_in["ad_price"],
+        "ad_url": last_in["ad_url"] if "ad_url" in last_in.keys() else None,
+        "buyer_display_name": last_in["buyer_display_name"],
+        "buyer_email": last_in["buyer_name"],
+        "account_name": account["name"] if account is not None else None,
+        "account_email": account["gmail_email"] if account is not None else None,
+        "is_autopilot": is_autopilot,
+    }
+
+    events = [_event_to_api(e) for e in db.thread_events(thread_id)]
+
+    related_matches = db.find_related_inquiries(
+        last_in["buyer_display_name"], exclude_thread_id=thread_id, limit=10,
+    )
+    related = {
+        "buyer_display_name": last_in["buyer_display_name"],
+        "matches": [_related_match(r) for r in related_matches],
+    }
+
+    return {"header": header, "events": events, "related": related}
