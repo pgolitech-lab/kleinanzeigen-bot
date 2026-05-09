@@ -221,6 +221,7 @@ Command-menu в Telegram очищено (`setMyCommands([])`) — нет авт�
 
 ## Деплой
 WSL2 через sshfs смонтирован на /home/pg/kleinanzeigen-bot — это **тот же путь что прод**. Никакого rsync — правки сразу на сервере.
+GitHub: `origin` = https://github.com/pgolitech-lab/kleinanzeigen-bot.git. Через ssh использовать `git -C /home/pg/kleinanzeigen-bot ...` (default ssh cwd = /home/pg, не репо).
 ```
 ssh pg@192.168.88.28 'sudo systemctl restart kleinanzeigen-bot'
 ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
