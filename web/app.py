@@ -15,7 +15,7 @@ import config
 import database as db
 import log_buffer
 import scheduler as sched_mod
-from modules.tg_init_data import verify_init_data_dep
+from web.api_ma import router as ma_router
 
 app = FastAPI(title="Kleinanzeigen Bot")
 
@@ -29,6 +29,7 @@ app.add_middleware(
     allow_headers=["X-Telegram-Init-Data", "Content-Type"],
     max_age=600,
 )
+app.include_router(ma_router)
 
 # Шаблоны лежат в web/templates/ относительно корня проекта
 BASE_DIR = Path(__file__).parent
@@ -768,15 +769,3 @@ async def api_post_settings(request: Request) -> dict[str, Any]:
         updated.append(key)
     return {"updated": updated, "count": len(updated)}
 
-
-# ---------- Mini App API ----------
-
-@app.get("/api/ma/health")
-async def ma_health(user: dict = Depends(verify_init_data_dep)) -> dict:
-    """Health endpoint для Mini App. Возвращает идентичность оператора."""
-    return {
-        "ok": True,
-        "user_id": user.get("id"),
-        "username": user.get("username"),
-        "first_name": user.get("first_name"),
-    }
