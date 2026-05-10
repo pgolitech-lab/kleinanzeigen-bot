@@ -2,6 +2,7 @@ import { api } from "../api.js?v=20260510-11";
 import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-11";
 import { buildActionGrid } from "../components/action-grid.js?v=20260510-11";
 import { buildEditForm } from "../components/edit-form.js?v=20260510-11";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-12";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -165,6 +166,17 @@ function backToPipeline() {
   return el(`<a class="btn btn-sm btn-outline-secondary mt-3" href="#/pipeline">↩ К pipeline</a>`);
 }
 
+function backRow(threadId, onCompose) {
+  const row = el(`
+    <div class="d-flex gap-2 mt-3 thread-back-row">
+      <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ К pipeline</a>
+      <button class="btn btn-sm btn-outline-primary compose-btn">✉️ Написать клиенту</button>
+    </div>
+  `);
+  row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
+  return row;
+}
+
 
 async function tryReleaseLock(msgId) {
   if (msgId === null) return;
@@ -292,7 +304,16 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     }
   }
 
-  container.appendChild(backToPipeline());
+  container.appendChild(backRow(params.thread_id, () => {
+    // Replace bottom row with compose form
+    const oldRow = container.querySelector(".thread-back-row");
+    const composeForm = buildComposeForm({
+      threadId: params.thread_id,
+      onSubmitComplete: () => render(mount, params),
+      onCancel: () => render(mount, params),
+    });
+    if (oldRow) oldRow.replaceWith(composeForm);
+  }));
   mount.replaceChildren(container);
 }
 
