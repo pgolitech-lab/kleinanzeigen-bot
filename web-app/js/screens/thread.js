@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-16";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-16";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-16";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-16";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-16";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-16";
+import { api } from "../api.js?v=20260510-17";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-17";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-17";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-17";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-17";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-17";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -167,16 +167,24 @@ function backToPipeline() {
   return el(`<a class="btn btn-sm btn-outline-secondary mt-3" href="#/pipeline">↩ К pipeline</a>`);
 }
 
-function backRow(threadId, onCompose, onSuggest) {
+function backRow(threadId, onCompose) {
   const row = el(`
     <div class="d-flex gap-2 mt-3 thread-back-row flex-wrap">
       <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ К pipeline</a>
-      <button class="btn btn-sm btn-outline-success suggest-btn">🤖 Предложить ответ</button>
       <button class="btn btn-sm btn-outline-primary compose-btn">✉️ Написать клиенту</button>
     </div>
   `);
-  row.querySelector(".suggest-btn").addEventListener("click", () => onSuggest());
   row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
+  return row;
+}
+
+function topActions(threadId, onSuggest) {
+  const row = el(`
+    <div class="d-flex gap-2 mb-3 thread-top-actions">
+      <button class="btn btn-sm btn-outline-success suggest-btn w-100">🤖 Предложить ответ</button>
+    </div>
+  `);
+  row.querySelector(".suggest-btn").addEventListener("click", () => onSuggest());
   return row;
 }
 
@@ -246,6 +254,29 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   const container = el(`<div></div>`);
 
   container.appendChild(threadHeader(data.header, review?.lock ?? null, ourActor));
+  container.appendChild(topActions(
+    params.thread_id,
+    async () => {
+      const topRow = container.querySelector(".thread-top-actions");
+      const suggestBtn = topRow?.querySelector(".suggest-btn");
+      if (suggestBtn) {
+        suggestBtn.disabled = true;
+        suggestBtn.textContent = "🤖 Генерирую…";
+      }
+      try {
+        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {
+          method: "POST",
+        });
+        render(mount, params);
+      } catch (e) {
+        alert(`Ошибка: ${e.message ?? String(e)}`);
+        if (suggestBtn) {
+          suggestBtn.disabled = false;
+          suggestBtn.textContent = "🤖 Предложить ответ";
+        }
+      }
+    },
+  ));
   const related = relatedBlock(data.related);
   if (related) container.appendChild(related);
   if (data.events.length === 0) {
@@ -361,27 +392,6 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
         onCancel: () => render(mount, params),
       });
       if (oldRow) oldRow.replaceWith(composeForm);
-    },
-    async () => {
-      // onSuggest handler — POST suggest-reply, re-render thread
-      const oldRow = container.querySelector(".thread-back-row");
-      const suggestBtn = oldRow?.querySelector(".suggest-btn");
-      if (suggestBtn) {
-        suggestBtn.disabled = true;
-        suggestBtn.textContent = "🤖 Генерирую…";
-      }
-      try {
-        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {
-          method: "POST",
-        });
-        render(mount, params);  // re-render with new pending-draft + action-grid
-      } catch (e) {
-        alert(`Ошибка: ${e.message ?? String(e)}`);
-        if (suggestBtn) {
-          suggestBtn.disabled = false;
-          suggestBtn.textContent = "🤖 Предложить ответ";
-        }
-      }
     },
   ));
   mount.replaceChildren(container);
