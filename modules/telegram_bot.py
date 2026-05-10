@@ -865,26 +865,12 @@ def _confirmation_keyboard(original_callback: str, message_id: int) -> InlineKey
 # Ключи — либо `action` (для 2-частных callback типа send/skip),
 # либо `action:sub` (для 3-частных типа q:fest, t:harsh).
 NEEDS_CONFIRM: set[str] = {
-    "send", "skip", "sold", "clienthist", "closethread", "waitclient",
+    "closethread", "waitclient",
     "propose", "translate_confirm", "back_to_ru",
-    "price", "instr",  # эти открывают input-режим — но всё равно через confirm
-    "q:fest",
-    "t:harsh", "t:friend", "t:short", "t:regen",
 }
 
 # Объяснения для confirm-карточки. Ключ совпадает с NEEDS_CONFIRM.
 ACTION_EXPLANATIONS: dict[str, str] = {
-    "send": "<b>✅ Отправить</b> — отправит черновик клиенту через SMTP. Финальное действие, отменить нельзя.",
-    "skip": "<b>❌ Пропустить</b> — пометит сообщение <code>skipped</code>, клиент <b>НЕ</b> получит ответ.",
-    "sold": "<b>💰 Товар продан</b> — пометит объявление как ПРОДАНО. Будущие inquiries по нему авто-skip.",
-    "clienthist": "<b>📋 История клиента</b> — покажет полную переписку с этим клиентом по всем тредам.",
-    "price": "<b>💸 Своя цена</b> — введёшь конкретную цену числом, Claude перепишет драфт под неё. ~$0.005",
-    "instr": "<b>📝 Своя инструкция</b> — введёшь свободный промпт, Claude перепишет по нему. ~$0.005-0.01",
-    "q:fest": "<b>💎 Без торга</b> — Claude перепишет драфт как вежливый твёрдый отказ от торга. ~$0.005",
-    "t:harsh": "<b>👊 Жёстче</b> — Claude перепишет тон жёстче (твёрдо, без сюсюканий). ~$0.005",
-    "t:friend": "<b>☺️ Мягче</b> — Claude перепишет тон мягче (теплее, человечнее). ~$0.005",
-    "t:short": "<b>✂️ Короче</b> — Claude сократит ответ в 2 раза. ~$0.005",
-    "t:regen": "<b>🔁 Переформулировать</b> — Claude напишет тот же смысл другими словами. ~$0.005",
     "closethread": "<b>🏁 Завершить беседу</b> — уберёт тред из «Состояние переговоров» и из reminder-очереди. Все pending-драфты помечаются <code>skipped</code>. Если клиент напишет снова — тред автоматически вернётся.",
     "waitclient": "<b>⏳ Ждать ответа</b> — мы ничего не отправляем, ждём действия клиента. Pending-драфты помечаются <code>skipped</code>, тред переходит в 🟢 секцию pipeline. Авто-сброс при новом сообщении от клиента.",
     "propose": "<b>🤖 Предложить ответ</b> — Sonnet сгенерирует RU-черновик с учётом всей переписки, объявления и уроков оператора. Стоит ~$0.005-0.01. После — оператор может править и затем тапнуть «✅ Перевести и подтвердить».",
@@ -2593,107 +2579,10 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _delete_range(context, chat_id, clicked_msg_id, scan=50)
         return
 
-    # ── Autopilot start: ввод floor ──
-    if action == "apstart":
-        # Проверим не активен ли уже
-        ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
-        if ap and ap["active"]:
-            await query.answer(
-                f"🤖 Уже активен ({ap['messages_sent']}/20). Используй 🛑 чтоб остановить.",
-                show_alert=True,
-            )
-            return
-        # Default floor — из ad_briefs.key_facts.min_acceptable_eur
-        ad_id_val = _safe_get(msg, "ad_id")
-        default_floor = ""
-        if ad_id_val:
-            try:
-                bf = db.get_ad_brief(ad_id_val)
-                if bf and bf["key_facts_json"]:
-                    kf = json.loads(bf["key_facts_json"] or "{}")
-                    mp = kf.get("min_acceptable_eur")
-                    if isinstance(mp, (int, float)) and mp > 0:
-                        default_floor = str(int(mp))
-            except Exception:
-                pass
-        prompt = (
-            "🚀 <b>Включаем автопилот</b>\n"
-            "<i>Бот будет авто-отвечать клиенту до закрытия сделки или 20-го сообщения.</i>\n\n"
-            f"💰 <b>Floor цены (€)</b> — ниже не уступит."
-        )
-        if default_floor:
-            prompt += f" Default: <code>{default_floor}</code>"
-        await _enter_input_mode(
-            query, context, update,
-            action="autopilot_floor", msg=msg,
-            prompt_label=prompt,
-            draft_text=None,
-            placeholder=default_floor or "1500",
-        )
-        return
-
-    # ── Autopilot confirm (после ввода floor + выбора режима): apconfirm:silent:N / apconfirm:notify:N ──
-    if action == "apconfirm":
-        notify_mode = sub  # "silent" или "notify"
-        if notify_mode not in ("silent", "notify"):
-            await query.message.reply_text(f"Битый режим: {sub}")
-            return
-        # Floor должен быть в state — но мы храним в _PENDING_INPUTS["payload"]
-        chat_id_now = query.message.chat_id
-        user_id_now = update.effective_user.id if update.effective_user else 0
-        pending = _PENDING_INPUTS.get((chat_id_now, user_id_now))
-        floor_val = None
-        if pending and pending.get("action") == "autopilot_pending_mode":
-            floor_val = pending.get("floor_eur")
-        if floor_val is None:
-            await query.message.reply_text("⚠️ Состояние потеряно — начни заново через 🚀")
-            return
-        # Активируем
-        thread_id = msg["gmail_thread_id"] or ""
-        db.start_thread_autopilot(
-            thread_id, floor_price_eur=float(floor_val),
-            notify_mode=notify_mode, started_by=actor,
-        )
-        # Очищаем state
-        _PENDING_INPUTS.pop((chat_id_now, user_id_now), None)
-        # Удалим stub-сообщение если есть
-        stub = pending.get("stub_msg_id") if pending else None
-        if stub:
-            try:
-                await context.bot.delete_message(chat_id=chat_id_now, message_id=stub)
-            except Exception:
-                pass
-        # Обновляем карточку (broadcast) — теперь с autopilot-active клавиатурой
-        updated = db.get_message(msg_id)
-        await _broadcast_card(
-            context, msg_id, _format_review_text(updated),
-            reply_markup=_autopilot_active_keyboard(msg_id),
-        )
-        # Notify-старт если режим notify
-        if notify_mode == "notify":
-            try:
-                send_autopilot_start_notification(msg_id, float(floor_val), actor)
-            except Exception:
-                logger.exception("autopilot start notification fail")
-        return
-
-    # ── Autopilot stop (manual) ──
-    if action == "apstop":
-        thread_id = msg["gmail_thread_id"] or ""
-        db.stop_thread_autopilot(thread_id, "manual")
-        updated = db.get_message(msg_id)
-        await _broadcast_card(
-            context, msg_id,
-            _format_review_text(updated) + f"\n\n<i>🛑 {_html(actor)} остановил автопилот вручную</i>",
-            reply_markup=_review_keyboard_obj(msg_id),
-        )
-        return
-
     # ── Lock-check: actions меняющие state треда требуют монопольного доступа ──
     # Если другой оператор уже работает с тредом — popup, return.
-    LOCKABLE_ACTIONS = {"send", "skip", "sold", "closethread", "waitclient",
-                        "propose", "translate_confirm", "back_to_ru",
-                        "editru", "editde", "price", "instr", "q", "t"}
+    LOCKABLE_ACTIONS = {"closethread", "waitclient",
+                        "propose", "translate_confirm", "back_to_ru"}
     if action in LOCKABLE_ACTIONS:
         owner = _check_lock(msg_id, actor)
         if owner:
@@ -2751,179 +2640,6 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 _CHAT_TRACKED_MSGS[chat_id] = sent_set
         return
 
-    # ── opencard: переслать карточку ревью с per-DM раскладкой keyboard ──
-    # actor получает full review-keyboard. Остальные операторы (DM-fanout) видят
-    # ту же карточку, но с soft-lock keyboard «🔒 В работе у X» — индикатор что
-    # коллега работает, тапы блокируются popup'ом.
-    if action == "opencard":
-        try:
-            await context.bot.delete_message(
-                chat_id=query.message.chat_id,
-                message_id=query.message.message_id,
-            )
-        except Exception:
-            pass
-
-        actor_chat_id = query.message.chat_id
-        full_text = _truncate_html_safe(_format_review_text(msg))
-        ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
-        if ap and ap["active"]:
-            full_kb = {"inline_keyboard": [
-                [{"text": btn.text, "callback_data": btn.callback_data} for btn in row]
-                for row in _autopilot_active_keyboard(msg_id).inline_keyboard
-            ]}
-        else:
-            full_kb = _review_keyboard(msg_id, msg["status"])
-        locked_text = full_text + (
-            "\n\n🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨\n"
-            f"⚠️ <b>{_html(actor).upper()} ОТКРЫЛ КАРТОЧКУ</b>\n"
-            "<i>Если возьмёт действие — увидишь lock. Пока просто индикатор.</i>\n"
-            "🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨🟥🟨"
-        )
-        locked_kb = _locked_keyboard(msg_id, actor)
-
-        dm_ids = config.telegram_operator_dm_ids()
-        targets = dm_ids if dm_ids else [config.telegram_chat_id()]
-        # Чистим прошлые dispatches перед свежим fanout
-        db.clear_card_dispatches(msg_id)
-        for chat_id in targets:
-            is_actor = str(chat_id) == str(actor_chat_id)
-            text = full_text if is_actor else locked_text
-            kb = full_kb if is_actor else locked_kb
-            try:
-                r = _http_post_single("sendMessage", {
-                    "chat_id": chat_id,
-                    "text": text,
-                    "reply_markup": kb,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                })
-                tg_msg_id = r.get("message_id") if isinstance(r, dict) else None
-                if tg_msg_id:
-                    _track_msg(chat_id, tg_msg_id)
-                    db.add_card_dispatch(msg_id, chat_id, tg_msg_id)
-            except Exception:
-                logger.exception("opencard fanout: send to %s failed", chat_id)
-        return
-
-    # ── compose: писать клиенту произвольное сообщение (operator-initiated) ──
-    if action == "compose":
-        await _enter_input_mode(
-            query, context, update,
-            action="compose", msg=msg,
-            prompt_label=(
-                "✉️ <b>Напиши сообщение клиенту</b> (текст на русском — переведу на язык клиента; "
-                "или с директивой <code>на немецком: ...</code>)"
-            ),
-            draft_text=None,
-            placeholder="Напиши клиенту что-нибудь...",
-        )
-        return
-
-    # ── Edit RU / Edit DE — БЕЗ confirmation, сразу в input-режим ──
-    if action == "editru":
-        await _enter_input_mode(
-            query, context, update,
-            action="edit_ru", msg=msg,
-            prompt_label=f"✏️ <b>Жду правку RU</b>",
-            draft_text=msg["ru_answer"] or "",
-            placeholder="Твоя правка на русском...",
-        )
-        return
-    if action == "editde":
-        client_lang = _safe_get(msg, "client_lang") or "de"
-        lang_name, lang_flag = claude.lang_display(client_lang)
-        await _enter_input_mode(
-            query, context, update,
-            action="edit_de", msg=msg,
-            prompt_label=f"✏️ <b>Жду правку {lang_flag} {lang_name}</b> (без перевода — сохраню как есть, обратно в RU переведу для зеркала)",
-            draft_text=msg["de_answer"] or "",
-            placeholder=f"Правка на языке клиента ({lang_name})...",
-        )
-        return
-
-    # ── Своя цена / Своя инструкция — после confirm → input-режим ──
-    if action == "price":
-        await _enter_input_mode(
-            query, context, update,
-            action="price", msg=msg,
-            prompt_label="💸 <b>Введи цену цифрой (€)</b>, например: <code>2300</code>",
-            draft_text=None,
-            placeholder="2300",
-        )
-        return
-    if action == "instr":
-        await _enter_input_mode(
-            query, context, update,
-            action="instruction", msg=msg,
-            prompt_label="📝 <b>Введи инструкцию для Claude</b> (например: «ответь жёстче, упомяни самовывоз»)",
-            draft_text=None,
-            placeholder="ответь жёстче, упомяни самовывоз...",
-        )
-        return
-
-    # ── Send / Skip / Sold / Clienthist / Quick / Tweak — выполнить ──
-    if action == "send":
-        # Защита: send доступен только из status='edited' (DE подтверждён) или с
-        # уже-готовым de_answer. На 'new' нет драфта вообще; на 'pending' оператор
-        # ещё не одобрил перевод.
-        if msg["status"] == "new" or not msg["de_answer"]:
-            await query.answer(
-                "Нет черновика. Сначала «🤖 Предложить ответ».",
-                show_alert=True,
-            )
-            _release_lock(msg_id)
-            return
-        if msg["status"] == "pending":
-            await query.answer(
-                "Сначала «✅ Перевести и подтвердить» — операция требует подтверждённого перевода.",
-                show_alert=True,
-            )
-            _release_lock(msg_id)
-            return
-        db.update_message(msg_id, status="approved")
-        await _broadcast_card(context, msg_id, _format_review_text(msg) + f"\n\n⏳ <i>{_html(actor)} → отправляю…</i>", reply_markup=None)
-        import scheduler
-        result = await asyncio.to_thread(scheduler.send_one, msg_id)
-        if result["kind"] == "sent":
-            mode_tag = " (debug)" if result.get("mode") == "redirect" else ""
-            footer = (
-                "\n\n🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢\n"
-                f"✅ <b>{_html(actor).upper()} ОТПРАВИЛ КЛИЕНТУ{mode_tag.upper()}</b> ✅\n"
-                "🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢"
-            )
-        elif result["kind"] == "skipped":
-            footer = (
-                "\n\n🟨🟧🟨🟧🟨🟧🟨🟧🟨🟧🟨🟧🟨🟧\n"
-                f"🔒 <b>{_html(actor).upper()}: РЕЖИМ DISABLED</b>\n"
-                "<i>Сообщение не отправлено</i>\n"
-                "🟨🟧🟨🟧🟨🟧🟨🟧🟨🟧🟨🟧🟨🟧"
-            )
-        else:
-            footer = (
-                "\n\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n"
-                f"❌ <b>{_html(actor).upper()}: ОШИБКА</b>\n"
-                f"<i>{_html(result.get('message') or 'unknown')}</i>\n"
-                "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
-            )
-        await _broadcast_card(
-            context, msg_id,
-            _format_review_text(db.get_message(msg_id)) + footer,
-            reply_markup=_back_only_keyboard(msg_id),
-        )
-        _release_lock(msg_id)
-        return
-
-    if action == "skip":
-        db.update_message(msg_id, status="skipped")
-        await _broadcast_card(
-            context, msg_id,
-            _format_review_text(db.get_message(msg_id)) + f"\n\n<i>👤 {_html(actor)} пропустил</i>",
-            reply_markup=_back_only_keyboard(msg_id),
-        )
-        _release_lock(msg_id)
-        return
-
     if action == "waitclient":
         thread_id = msg["gmail_thread_id"] or ""
         if not thread_id:
@@ -2977,84 +2693,6 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ),
             reply_markup=_back_only_keyboard(msg_id),
         )
-        _release_lock(msg_id)
-        return
-
-    if action == "sold":
-        ad_id = _safe_get(msg, "ad_id")
-        if not ad_id:
-            await query.message.reply_text("⚠️ У сообщения нет ad_id — нечем помечать.")
-            _release_lock(msg_id)
-            return
-        db.mark_ad_sold(ad_id, sold=True)
-        db.update_message(msg_id, status="skipped_sold")
-        await _broadcast_card(
-            context, msg_id,
-            _format_review_text(db.get_message(msg_id)) + (
-                "\n\n🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢\n"
-                f"💰 <b>{_html(actor).upper()} ПОМЕТИЛ #{ad_id} ПРОДАНО</b> 💰\n"
-                "<i>Будущие inquiries по этому объявлению — auto-skip</i>\n"
-                "🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢🟩🟢"
-            ),
-            reply_markup=_back_only_keyboard(msg_id),
-        )
-        _release_lock(msg_id)
-        return
-
-    if action == "clienthist":
-        buyer_email = msg["buyer_name"] or ""
-        history_text = _format_client_history(buyer_email)
-        # Восстановим карточку в нормальный вид (она была в confirm-state)
-        await _safe_edit(
-            query, _format_review_text(msg),
-            reply_markup=_review_keyboard_for_msg(msg),
-        )
-        # Длинный history может превышать 4096 — рубим на чанки. Клавиатура
-        # «↩ Назад к pipeline» только на ПОСЛЕДНЕМ чанке.
-        chunks = _split_for_telegram(history_text, limit=4000)
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            sent = await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=chunk,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{msg_id}")],
-                ]) if is_last else None,
-            )
-            if sent and sent.message_id:
-                _track_msg(query.message.chat_id, sent.message_id)
-        return
-
-    # Quick (q:fest) или Tweak (t:harsh/friend/short/regen) — preset-регенерация
-    if action == "q" or action == "t":
-        if msg["status"] in ("sent", "sent_debug", "skipped", "skipped_sold"):
-            await _broadcast_card(
-                context, msg_id,
-                _format_review_text(msg) +
-                f"\n\n⚠️ <i>Сообщение уже {msg['status']}. Регенерация не имеет смысла.</i>",
-                reply_markup=None,
-            )
-            _release_lock(msg_id)
-            return
-        kind_label = "перегенерирую" if action == "q" else "переписываю"
-        await _broadcast_card(
-            context, msg_id,
-            _format_review_text(msg) + f"\n\n⏳ <i>{_html(actor)} → {kind_label} «{sub}»...</i>",
-            reply_markup=None,
-        )
-        import scheduler
-        result = await asyncio.to_thread(scheduler.regenerate_draft, msg_id, sub)
-        if result["kind"] == "regenerated":
-            updated = db.get_message(msg_id)
-            await _broadcast_card(context, msg_id, _format_review_text(updated), reply_markup=_review_keyboard_obj(msg_id))
-        else:
-            await _broadcast_card(
-                context, msg_id,
-                _format_review_text(msg) + f"\n\n{_html(result['message'])}",
-                reply_markup=_review_keyboard_obj(msg_id),
-            )
         _release_lock(msg_id)
         return
 
@@ -3185,7 +2823,8 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         _release_lock(msg_id)
         return
 
-    await query.message.reply_text(f"Неизвестное действие: {action}")
+    # Default: unknown action OR action that was moved to MA. Inform user gently.
+    await query.answer(text="Открой в Mini App для этого действия", show_alert=False)
 
 
 async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
