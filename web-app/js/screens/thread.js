@@ -1,7 +1,7 @@
-import { api } from "../api.js?v=20260510-10";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-10";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-10";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-10";
+import { api } from "../api.js?v=20260510-11";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-11";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-11";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-11";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -260,12 +260,20 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
               review,
               onSubmitComplete: async () => {
                 await render(mount, params);
-                const draft = mount.querySelector(".pending-draft");
-                if (draft) draft.scrollIntoView({ behavior: "smooth", block: "start" });
+                setTimeout(() => {
+                  const grid = mount.querySelector(".action-grid");
+                  if (grid) grid.scrollIntoView({ behavior: "smooth", block: "end" });
+                }, 200);
               },
               onCancel: () => {
                 const currentForm = container.querySelector(".edit-form");
-                if (currentForm) currentForm.replaceWith(buildGrid());
+                if (currentForm) {
+                  const newGrid = buildGrid();
+                  currentForm.replaceWith(newGrid);
+                  setTimeout(() => {
+                    newGrid.scrollIntoView({ behavior: "smooth", block: "end" });
+                  }, 200);
+                }
               },
               onError: (msg) => alert(`Ошибка: ${msg}`),
             });
