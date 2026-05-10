@@ -187,168 +187,6 @@ def _truncate(s: Optional[str], max_len: int = 220) -> str:
     return s[:max_len].rstrip() + "…"
 
 
-def _format_client_history(buyer_email: str) -> str:
-    """Полная история переписки с клиентом — все треды по всем объявлениям.
-
-    Подробный chat-style формат: для каждого треда — все события в хронологии,
-    bubbles с DE/RU переводом, как в thread-detail. Без обрезаний на 4 turn-а.
-    Используется callback-action `clienthist:N` — длинный текст шлётся chunks-ами.
-    """
-    if not buyer_email:
-        return "❓ Нет email клиента"
-    threads = db.list_threads_for_client(buyer_email)
-    if not threads:
-        return f"❓ Нет тредов для <code>{_html(buyer_email)}</code>"
-
-    # Сводка по клиенту
-    with db.get_conn() as conn:
-        info = conn.execute(
-            """
-            SELECT
-                (SELECT buyer_display_name FROM messages
-                 WHERE buyer_name = ? AND buyer_display_name IS NOT NULL
-                 ORDER BY id DESC LIMIT 1) AS name,
-                COUNT(*) AS total,
-                MIN(created_at) AS first,
-                MAX(created_at) AS last
-            FROM messages WHERE buyer_name = ?
-            """,
-            (buyer_email, buyer_email),
-        ).fetchone()
-
-    name = (info["name"] if info else "") or buyer_email.split("@")[0]
-    lines: list[str] = []
-    lines.append(f"<b>📋 История клиента: {_html(name)}</b>")
-    lines.append(f"<code>{_html(buyer_email[:80])}</code>")
-    lines.append(
-        f"💬 {info['total']} сообщ. в {len(threads)} тред(ах) · "
-        f"🕒 {_to_berlin(info['first'], '%Y-%m-%d')} → {_to_berlin(info['last'], '%Y-%m-%d')}"
-    )
-    lines.append("")
-
-    for i, t in enumerate(threads, 1):
-        ad_title = (t["ad_title"] or "— без объявления —")[:80]
-        ad_id_val = t["ad_id"] if "ad_id" in t.keys() else None
-        ad_price = t["ad_price"] if "ad_price" in t.keys() else None
-        seller = t["seller_name"] if "seller_name" in t.keys() else None
-        events = db.thread_events(t["thread_id"])
-
-        lines.append("─────────────────")
-        lines.append(
-            f"<b>━ Тред {i}/{len(threads)}: 📦 {_html(ad_title)}</b>"
-        )
-        meta_parts = []
-        if ad_price:
-            meta_parts.append(f"💰 {_html(str(ad_price))}")
-        if ad_id_val:
-            meta_parts.append(f"#{_html(str(ad_id_val))}")
-        if seller:
-            meta_parts.append(f"🏪 {_html(seller)}")
-        meta_parts.append(f"<code>{_html(t['last_status'] or '')}</code>")
-        meta_parts.append(f"{len(events)} событ.")
-        lines.append(" · ".join(meta_parts))
-
-        # Sonnet-summary этого треда (если был сгенерирован)
-        msgs = list(db.thread_history(t["thread_id"]))
-        last_with_summary = next(
-            (m for m in reversed(msgs) if _safe_get(m, "history_summary_ru")),
-            None,
-        )
-        if last_with_summary:
-            sm = _safe_get(last_with_summary, "history_summary_ru")
-            if sm:
-                lines.append(f"<i>🤖 {_html(sm)}</i>")
-        lines.append("")
-
-        # Полная лента событий: только реально-произошедшее (in + sent_out).
-        SENT_OUT = {"sent", "sent_debug"}
-        visible = [e for e in events if e["kind"] == "in" or e["status"] in SENT_OUT]
-        if not visible:
-            lines.append("<i>(пока нет реально-отправленного / полученного)</i>")
-            lines.append("")
-            continue
-        for e in visible:
-            r = e["row"]
-            ts = _to_berlin(e["ts"], "%Y-%m-%d %H:%M")
-            if e["kind"] == "in":
-                cl = _safe_get(r, "client_lang") or "?"
-                cflag = claude.lang_display(cl)[1]
-                lines.append(f"<b>📥 {ts} · {cflag}:</b>")
-                lines.append(f"<blockquote>{_html(e['text'] or '')}</blockquote>")
-                if e["ru_text"] and cl != "ru":
-                    lines.append(f"<i>🇷🇺 {_html(e['ru_text'])}</i>")
-            else:
-                ack = " 🤖 ack" if e["is_auto_ack"] else ""
-                lines.append(f"<b>📤 Мы{ack} · {ts}:</b>")
-                lines.append(f"<blockquote>{_html(e['text'] or '')}</blockquote>")
-                if e["ru_text"]:
-                    lines.append(f"<i>🇷🇺 {_html(e['ru_text'])}</i>")
-            lines.append("")
-
-    return "\n".join(lines)
-
-
-def _format_thread_history(thread_id: str, current_msg: sqlite3.Row, limit: int = 5) -> str:
-    """Собрать блок «История» — Claude-summary + последние N событий с РЕАЛЬНЫМИ таймстампами.
-
-    Используем `db.thread_events`: одна row 'in' с заполненным de_answer = два события
-    (клиент при created_at + наш ответ при sent_at). Это даёт правильный порядок
-    когда клиент успел прислать follow-up между нашим draft-ом и его реальной отправкой.
-    """
-    if not thread_id:
-        return ""
-    events = db.thread_events(thread_id)
-    # Исключаем события связанные с текущим msg-в-обработке (его клиентский bubble
-    # уже показан отдельным секциями карточки 📥/📤; в истории дублировать не нужно).
-    cur_id = current_msg["id"]
-    cur_kind_in = bool(current_msg["de_client"])
-    cur_kind_out_pending = bool(current_msg["de_answer"]) and (current_msg["status"] or "") in (
-        "new", "pending", "edited", "approved",
-    )
-    prior = []
-    for e in events:
-        if e["row"]["id"] == cur_id:
-            # Скип event'ов из текущей row: входящий-клиент (всегда дублирует)
-            # и наш-pending-draft (тоже показывается отдельно). Уже отправленные
-            # ответы по этой же row не возникают: msg-в-обработке либо новый incoming,
-            # либо follow-up до нашего ответа.
-            if e["kind"] == "in" and cur_kind_in:
-                continue
-            if e["kind"] == "out" and cur_kind_out_pending:
-                continue
-        prior.append(e)
-    if not prior:
-        return ""
-
-    lines: list[str] = []
-    total = len(prior)
-    lines.append(f"<b>━━━ История ({total}) ━━━</b>")
-
-    summary = _safe_get(current_msg, "history_summary_ru")
-    if summary:
-        lines.append(f"<i>🤖 {_html(summary)}</i>")
-        lines.append("")
-
-    if total > limit:
-        lines.append(f"<i>(последние {limit} событий)</i>")
-
-    for e in prior[-limit:]:
-        r = e["row"]
-        ts = _to_berlin(e["ts"], "%Y-%m-%d %H:%M")
-        text = e["ru_text"] or e["text"] or ""
-        if e["kind"] == "in":
-            buyer = _safe_get(r, "buyer_display_name") or r["buyer_name"] or "?"
-            buyer_short = (buyer.split("@")[0] if "@" in buyer else buyer)[:30]
-            lines.append(
-                f"● <b>{ts} {_html(buyer_short)}:</b> {_html(text)}"
-            )
-        else:
-            label = "🤖 Auto-ack" if e["is_auto_ack"] else "Мы"
-            lines.append(
-                f"○ <b>{ts} {label} [{e['status']}]:</b> {_html(text)}"
-            )
-    lines.append("")
-    return "\n".join(lines)
 
 
 def _safe_get(row: sqlite3.Row, key: str) -> Optional[str]:
@@ -474,58 +312,6 @@ def _format_related_warning(msg: sqlite3.Row) -> str:
     return "\n".join(lines)
 
 
-def _format_thread_chat(thread_id: str, current_msg: Optional[sqlite3.Row] = None,
-                        limit: int = 12) -> str:
-    """Отрендерить ленту событий треда для блока «История» в review-карточке.
-
-    Использует `db.thread_events` (хронологически: in.created_at + out.sent_at).
-    Только реально-произошедшее: incoming + outgoing с status sent/sent_debug.
-    Pending драфты НЕ показываем — это часть текущей review-карточки. Auto-ack
-    показываем (клиент его получил, нужен контекст).
-    """
-    if not thread_id:
-        return ""
-    events = db.thread_events(thread_id)
-    SENT_OUT = {"sent", "sent_debug"}
-    visible = [
-        e for e in events
-        if e["kind"] == "in" or e["status"] in SENT_OUT
-    ]
-    # Если current_msg ещё не сохранён как sent/skipped и его in-event есть в visible —
-    # оставляем (это incoming клиента). Сам draft current_msg из ленты исключён фильтром.
-    if not visible:
-        return ""
-    out_lines: list[str] = []
-    out_lines.append(f"<b>━━━ Переписка ({len(visible)}) ━━━</b>")
-    if len(visible) > limit:
-        out_lines.append(f"<i>(показаны последние {limit} из {len(visible)})</i>")
-        visible = visible[-limit:]
-    for e in visible:
-        r = e["row"]
-        ts = _to_berlin(e["ts"], "%H:%M")
-        if e["kind"] == "in":
-            cl = _safe_get(r, "client_lang") or "?"
-            cflag = claude.lang_display(cl)[1]
-            sender = (_safe_get(r, "buyer_display_name") or r["buyer_name"] or "?").split("@")[0][:20]
-            text = e["ru_text"] or e["text"] or ""
-            out_lines.append(f"<b>📥 {_html(sender)} · {ts} · {cflag}:</b>")
-            out_lines.append(f"<blockquote>{_html(text)}</blockquote>")
-        else:
-            ack_marker = " 🤖 ack" if e["is_auto_ack"] else ""
-            text = e["ru_text"] or e["text"] or ""
-            out_lines.append(f"<b>📤 Мы{ack_marker} · {ts}:</b>")
-            out_lines.append(f"<blockquote>{_html(text)}</blockquote>")
-    out_lines.append("")
-    return "\n".join(out_lines)
-
-
-def _autopilot_active_keyboard(message_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура карточки активного автопилота: только Stop + Назад."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛑 Остановить автопилот", callback_data=f"apstop:{message_id}")],
-        [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
-    ])
-
 
 def _autopilot_mode_choice_keyboard(message_id: int) -> InlineKeyboardMarkup:
     """После ввода floor — выбор режима уведомлений."""
@@ -536,13 +322,6 @@ def _autopilot_mode_choice_keyboard(message_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
     ])
 
-
-def _input_cancel_keyboard(message_id: int) -> InlineKeyboardMarkup:
-    """Кнопки для input-режима ожидания текста: «❌ Отменить» + «↩ Назад к pipeline»."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("❌ Отменить", callback_data=f"inputcancel:{message_id}")],
-        [InlineKeyboardButton("↩ Назад к pipeline", callback_data=f"back:{message_id}")],
-    ])
 
 
 def _confirmation_keyboard(original_callback: str, message_id: int) -> InlineKeyboardMarkup:
@@ -807,20 +586,6 @@ async def _safe_edit(query, text: str, reply_markup=None) -> None:
             logger.warning("edit_message_text: %s", e)
 
 
-async def _bot_edit(context, chat_id: int, tg_msg_id: int, text: str, reply_markup=None) -> None:
-    """Edit карточки по chat_id+message_id. Длинный HTML — auto-truncate."""
-    text = _truncate_html_safe(text)
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=tg_msg_id,
-            text=text, parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=reply_markup,
-        )
-    except BadRequest as e:
-        if "not modified" not in str(e).lower():
-            logger.warning("edit_message_text: %s", e)
-
 
 def _mode_badge() -> str:
     """Цветная плашка режима отправки в шапке карточки."""
@@ -1038,18 +803,6 @@ def _track_msg(chat_id: Any, msg_id: Optional[int]) -> None:
         pass
 
 
-async def _delete_all_tracked(context: Any, chat_id: Any) -> int:
-    """Удалить все запомненные сообщения для chat_id. Возвращает кол-во удалённых."""
-    msgs = _CHAT_TRACKED_MSGS.pop(int(chat_id), set())
-    deleted = 0
-    for mid in sorted(msgs, reverse=True):
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
-            deleted += 1
-        except Exception:
-            pass
-    return deleted
-
 
 async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, scan: int = 50) -> int:
     """Sweep: попытаться удалить msg_id в диапазоне [max_id-scan .. max_id] параллельно.
@@ -1077,10 +830,6 @@ async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, scan: int =
     )
     return sum(1 for r in results if not isinstance(r, Exception))
 
-
-# Residual input-mode state — kept for _exit_input_mode / inputcancel cleanup.
-# No longer populated (input-mode sessions removed); dict stays for safe .pop() in cleanup.
-_PENDING_INPUTS: dict[tuple[int, int], dict[str, Any]] = {}
 
 
 def _is_authorized(update: Update) -> bool:
@@ -1427,17 +1176,6 @@ def _supergroup_internal_id(chat_id_str: str) -> Optional[str]:
     return None
 
 
-def _msg_link(message_id: int, tg_msg_id: Optional[int]) -> str:
-    """Кликабельный <code>#N</code> с deep-link на оригинальную карточку (если есть)."""
-    label = f"#{message_id}"
-    if not tg_msg_id:
-        return f"<code>{label}</code>"
-    internal = _supergroup_internal_id(config.telegram_chat_id())
-    if not internal:
-        return f"<code>{label}</code>"  # для DM deep-link не работает
-    url = f"https://t.me/c/{internal}/{tg_msg_id}"
-    return f'<a href="{url}"><code>{label}</code></a>'
-
 
 def _format_pipeline_messages() -> list[tuple[str, Optional[InlineKeyboardMarkup]]]:
     """Список (text, kb) пар для пайплайна. 1 элемент = 1 Telegram-сообщение.
@@ -1553,77 +1291,6 @@ def _pipeline_thread_card(r: sqlite3.Row, n: int, marker: str) -> tuple[str, Inl
     ]])
     return text, kb
 
-
-def _pipeline_button_lines(r: sqlite3.Row, n: int, marker: str) -> tuple[str, str, str]:
-    """Три строки для тройки stacked-кнопок одного треда.
-
-    Returns:
-        (line1, line2, line3):
-            line1 = «N marker[📝] · CLIENT · STATUS»     — шапка
-            line2 = «TITLE · PRICE · AGE»                 — деталь товара
-            line3 = «💎 condition · мин N€»  ИЛИ          — sales-контекст из брифа,
-                    «← ‘последняя реплика клиента…’»     ИЛИ превью последнего сообщения
-
-    Каждая ≤ 64 символа (Telegram cap).
-
-    STATUS: ответили / ack+draft / ack / draft / новый
-    """
-    BUDGET = 64
-
-    ts_iso = (
-        _safe_get(r, "sent_at") if r["status"] in ("sent", "sent_debug")
-        else r["created_at"]
-    ) or r["created_at"]
-    age = _humanize_age(ts_iso)
-
-    has_real = bool(_safe_get(r, "has_real_reply"))
-    has_any_sent = bool(_safe_get(r, "has_any_sent"))
-    has_draft = bool(_safe_get(r, "has_pending_draft"))
-    has_ack_only = has_any_sent and not has_real
-
-    if has_real:
-        status_txt = "ответили"
-    elif has_ack_only and has_draft:
-        status_txt = "ack+draft"
-    elif has_ack_only:
-        status_txt = "ack"
-    elif has_draft:
-        status_txt = "draft"
-    else:
-        status_txt = "новый"
-
-    draft_marker = "📝" if has_draft else ""
-    buyer_raw = _safe_get(r, "buyer_display_name") or r["buyer_name"] or "?"
-    buyer = (buyer_raw.split("@")[0] if "@" in buyer_raw else buyer_raw)[:18]
-    ad_full = _short_ad_label(r)
-    price = _short_price(r["ad_price"])
-
-    # line1
-    line1 = f"{n} {marker}{draft_marker} · {buyer} · {status_txt}"
-    if len(line1) > BUDGET:
-        line1 = line1[:BUDGET - 1] + "…"
-
-    # line2: TITLE · PRICE · AGE
-    fixed_parts = []
-    if price:
-        fixed_parts.append(price)
-    fixed_parts.append(age)
-    fixed_tail = " · ".join(fixed_parts)
-    title_budget = BUDGET - len(fixed_tail) - len(" · ")
-    if title_budget <= 3:
-        line2 = fixed_tail
-    else:
-        title = ad_full
-        if len(title) > title_budget:
-            title = title[:title_budget - 1].rstrip() + "…"
-        line2 = f"{title} · {fixed_tail}"
-
-    # line3: бриф или превью клиента
-    line3 = _pipeline_line3_context(r)
-    if len(line3) > BUDGET:
-        line3 = line3[:BUDGET - 1].rstrip() + "…"
-
-    return line1, line2, line3
 
 
 def _pipeline_line3_context(r: sqlite3.Row) -> str:
@@ -2015,31 +1682,6 @@ async def _on_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 
-async def _exit_input_mode(query, context, msg_id: int, *, restore_card: bool = True) -> None:
-    """Выйти из input-режима: удалить stub force_reply сообщение, восстановить карточку."""
-    chat_id = query.message.chat_id
-    user_id = query.from_user.id if query.from_user else 0
-    pending = _PENDING_INPUTS.pop((chat_id, user_id), None)
-    if pending and pending.get("stub_msg_id"):
-        try:
-            await context.bot.delete_message(
-                chat_id=chat_id, message_id=pending["stub_msg_id"],
-            )
-        except Exception:
-            pass
-    for k in list(_PENDING_INPUTS.keys()):
-        if _PENDING_INPUTS[k]["msg_id"] == msg_id:
-            _PENDING_INPUTS.pop(k, None)
-    # Освобождаем лок треда — input завершён/отменён
-    _release_lock(msg_id)
-    if restore_card:
-        msg = db.get_message(msg_id)
-        if msg:
-            await _broadcast_card(
-                context, msg_id, _minicard_text(msg),
-                reply_markup=_ma_review_keyboard(msg_id),
-            )
-
 
 async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик нажатия inline-кнопок ✅/✏️/❌."""
@@ -2127,7 +1769,13 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # ── Cancel из input-режима (правка/цена/инструкция) → закрыть, восстановить ──
     if action == "inputcancel":
-        await _exit_input_mode(query, context, msg_id, restore_card=True)
+        _release_lock(msg_id)
+        msg = db.get_message(msg_id)
+        if msg:
+            await _broadcast_card(
+                context, msg_id, _minicard_text(msg),
+                reply_markup=_ma_review_keyboard(msg_id),
+            )
         return
 
     # ── noop: сепараторная кнопка в pipeline — ничего не делает ──
