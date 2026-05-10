@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 import json
 
@@ -419,4 +419,59 @@ async def ma_regenerate(msg_id: int, body: RegenerateBody,
     _apply_regenerate_result(msg_id, result)
     telegram_bot.broadcast_after_external_action(msg_id)
 
+    return _message_review_dict(msg_id)
+
+
+class EditTextBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+@router.post("/messages/{msg_id}/edit-ru")
+async def ma_edit_ru(msg_id: int, body: EditTextBody,
+                     user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Operator edits RU answer. Forward+back translate."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    import asyncio
+    target_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
+    de_text = await asyncio.to_thread(
+        claude.translate_only, body.text, "ru", target_lang
+    )
+    ru_back = await asyncio.to_thread(
+        claude.translate_only, de_text, target_lang, "ru"
+    )
+    db.update_message(msg_id, ru_answer=body.text, de_answer=de_text,
+                      ru_translation=ru_back, status="edited")
+    telegram_bot.broadcast_after_external_action(msg_id)
+    return _message_review_dict(msg_id)
+
+
+@router.post("/messages/{msg_id}/edit-de")
+async def ma_edit_de(msg_id: int, body: EditTextBody,
+                     user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Operator edits DE answer directly. Back-translate for verification."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    import asyncio
+    source_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
+    ru_back = await asyncio.to_thread(
+        claude.translate_only, body.text, source_lang, "ru"
+    )
+    db.update_message(msg_id, de_answer=body.text, ru_translation=ru_back,
+                      status="edited")
+    telegram_bot.broadcast_after_external_action(msg_id)
     return _message_review_dict(msg_id)

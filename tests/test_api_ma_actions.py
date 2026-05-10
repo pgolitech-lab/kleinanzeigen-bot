@@ -196,3 +196,58 @@ def test_regenerate_all_5_valid_strategies(client):
                      json={"strategy": strategy},
                      headers={"X-Telegram-Init-Data": init})
         assert res.status_code == 200, f"strategy={strategy} failed"
+
+
+def test_edit_ru_success(client):
+    c, mdb, mtb, msched, mclaude = client
+    # translate_only вызывается дважды: forward (ru→de) и back (de→ru)
+    mclaude.translate_only.side_effect = ["Neue DE Text", "Новый back"]
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/edit-ru",
+                 json={"text": "Новый RU текст"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["msg_id"] == 123
+    assert mclaude.translate_only.call_count == 2
+    args, kwargs = mdb.update_message.call_args
+    assert kwargs["ru_answer"] == "Новый RU текст"
+    assert kwargs["de_answer"] == "Neue DE Text"
+    assert kwargs["ru_translation"] == "Новый back"
+    assert kwargs["status"] == "edited"
+    mtb.broadcast_after_external_action.assert_called_once_with(123)
+
+
+def test_edit_de_success(client):
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = "Новый back-translation"
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/edit-de",
+                 json={"text": "Neuer DE Text"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    # translate_only вызывается ОДИН раз — только back-translate
+    assert mclaude.translate_only.call_count == 1
+    args, kwargs = mdb.update_message.call_args
+    assert kwargs["de_answer"] == "Neuer DE Text"
+    assert kwargs["ru_translation"] == "Новый back-translation"
+    assert "ru_answer" not in kwargs  # ru_answer НЕ трогаем
+    assert kwargs["status"] == "edited"
+
+
+def test_edit_ru_empty_text_422(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/edit-ru",
+                 json={"text": ""},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
+
+
+def test_edit_ru_too_long_422(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/edit-ru",
+                 json={"text": "x" * 5000},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
