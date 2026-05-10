@@ -703,6 +703,17 @@ async def ma_autopilot_stop(thread_id: str,
     return _thread_dict(thread_id)
 
 
+@router.post("/threads/{thread_id}/wait")
+async def ma_thread_wait(thread_id: str,
+                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    actor = actor_from_user(user)
+    db.mark_thread_waiting(thread_id, marked_by=actor)
+    return _thread_dict(thread_id)
+
+
 @router.post("/threads/{thread_id}/suggest-reply")
 async def ma_suggest_reply(thread_id: str,
                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:

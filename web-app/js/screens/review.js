@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260510-21";
-import { setLoading, setError } from "../utils.js?v=20260510-21";
+import { api } from "../api.js?v=20260510-22";
+import { setLoading, setError } from "../utils.js?v=20260510-22";
 
 export async function render(mount, params) {
   setLoading(mount, "Открываю карточку…");

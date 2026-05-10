@@ -1,61 +1,67 @@
 // Action grid — sticky-bottom компонент с inline confirm state machine.
 
-import { api } from "../api.js?v=20260510-21";
-import { el } from "../utils.js?v=20260510-21";
+import { api } from "../api.js?v=20260510-22";
+import { el } from "../utils.js?v=20260510-22";
 
 const CONFIRM_TIMEOUT_MS = 5000;
 
-// Action key → {label, path, body?, confirm, kind: "final"|"intermediate"|"edit", field?}
+// Action key → {label, path, body?, confirm, kind: "final"|"intermediate"|"edit"|"thread"}
 const ACTIONS = {
   send:        {label: "✅ ОТПРАВИТЬ",     path: "/send",        confirm: "Отправить?",   kind: "final"},
   skip:        {label: "❌ Пропустить",   path: "/skip",        confirm: "Пропустить?",  kind: "final"},
   sold:        {label: "💰 Продано",      path: "/sold",        confirm: "Помечать продано?", kind: "final"},
-  fest:        {label: "💎 Без торга",   path: "/regenerate",  body: {strategy: "fest"},  confirm: "Регенерировать?", kind: "intermediate"},
-  harsh:       {label: "👊 Жёстче",      path: "/regenerate",  body: {strategy: "harsh"}, confirm: "Регенерировать?", kind: "intermediate"},
-  friend:      {label: "☺️ Мягче",       path: "/regenerate",  body: {strategy: "friend"},confirm: "Регенерировать?", kind: "intermediate"},
-  short:       {label: "✂️ Короче",      path: "/regenerate",  body: {strategy: "short"}, confirm: "Регенерировать?", kind: "intermediate"},
-  regen:       {label: "🔁 Переформ.",   path: "/regenerate",  body: {strategy: "regen"}, confirm: "Регенерировать?", kind: "intermediate"},
-  edit_ru:     {label: "✏️ Правка RU",  kind: "edit", field: "ru"},
-  edit_de:     {label: "✏️ Правка DE",  kind: "edit", field: "de"},
-  price:       {label: "💸 Своя цена",  kind: "edit", field: "price"},
-  instruction: {label: "📝 Своя инстр.",kind: "edit", field: "instruction"},
+  wait:        {label: "✋ Ждать",          kind: "thread"},  // wired via onWait callback (calls thread endpoint)
+  edit_ru:     {label: "✏️ Правка RU",   kind: "edit", field: "ru"},
+  edit_de:     {label: "✏️ Правка DE",   kind: "edit", field: "de"},
+  instruction: {label: "📝 Своя инстр.", kind: "edit", field: "instruction"},
 };
 
 
-export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest, onSuggest, onCompose}) {
-  /**
-   * onActionComplete(action_key, response_body) — после успешного API call
-   * onError(action_key, message) — при HTTP error
-   * onEditRequest(field) — оператор тапнул edit-* / price / instruction
-   * onSuggest() — кнопка "🤖 Предложить ответ"
-   * onCompose() — кнопка "✉️ Написать клиенту"
-   */
+export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest, onSuggest, onCompose, onHistory, onWait, autopilotBlock}) {
   const grid = el(`
     <div class="action-grid mt-3">
       <div class="row g-2 mb-2">
-        <div class="col-6"><button class="btn btn-outline-success w-100 suggest-btn">🤖 Предложить</button></div>
-        <div class="col-6"><button class="btn btn-outline-primary w-100 compose-btn">✉️ Написать</button></div>
+        <div class="col-4"><button class="btn btn-sm btn-outline-success w-100 suggest-btn">🤖 Предложить</button></div>
+        <div class="col-4"><button class="btn btn-sm btn-outline-primary w-100 compose-btn">✉️ Написать</button></div>
+        <div class="col-4"><button class="btn btn-sm btn-outline-secondary w-100 history-btn">📋 История</button></div>
       </div>
       <div class="d-grid mb-2">
         <button data-action="send" class="btn btn-primary">✅ ОТПРАВИТЬ</button>
       </div>
-      <div class="row g-2">
+      <div class="row g-2 mb-2">
         <div class="col-6"><button data-action="edit_ru" class="btn btn-outline-secondary w-100">✏️ Правка RU</button></div>
         <div class="col-6"><button data-action="edit_de" class="btn btn-outline-secondary w-100">✏️ Правка DE</button></div>
-        <div class="col-6"><button data-action="fest" class="btn btn-outline-secondary w-100">💎 Без торга</button></div>
-        <div class="col-6"><button data-action="price" class="btn btn-outline-secondary w-100">💸 Своя цена</button></div>
-        <div class="col-6"><button data-action="harsh" class="btn btn-outline-secondary w-100">👊 Жёстче</button></div>
-        <div class="col-6"><button data-action="friend" class="btn btn-outline-secondary w-100">☺️ Мягче</button></div>
-        <div class="col-6"><button data-action="short" class="btn btn-outline-secondary w-100">✂️ Короче</button></div>
-        <div class="col-6"><button data-action="regen" class="btn btn-outline-secondary w-100">🔁 Переформ.</button></div>
+      </div>
+      <div class="row g-2 mb-2">
         <div class="col-6"><button data-action="instruction" class="btn btn-outline-secondary w-100">📝 Своя инстр.</button></div>
+        <div class="col-6"><button data-action="wait" class="btn btn-outline-warning w-100">✋ Ждать</button></div>
+      </div>
+      <div class="row g-2 mb-2">
         <div class="col-6"><button data-action="skip" class="btn btn-outline-danger w-100">❌ Пропустить</button></div>
+        <div class="col-6"><button data-action="sold" class="btn btn-danger w-100">💰 Продано</button></div>
       </div>
-      <div class="d-grid mt-2">
-        <button data-action="sold" class="btn btn-danger">💰 Продано</button>
-      </div>
+      <div class="ap-slot"></div>
     </div>
   `);
+
+  // Wire dedicated buttons (no confirm gate)
+  grid.querySelector(".suggest-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (onSuggest) onSuggest();
+  });
+  grid.querySelector(".compose-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (onCompose) onCompose();
+  });
+  grid.querySelector(".history-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (onHistory) onHistory();
+  });
+
+  // Autopilot block slotted inside grid (passed from parent)
+  if (autopilotBlock) {
+    grid.querySelector(".ap-slot").appendChild(autopilotBlock);
+  }
 
   let confirmTimer = null;
   let confirmingAction = null;
@@ -85,6 +91,11 @@ export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest
     if (a.kind === "edit") {
       resetConfirm();
       onEditRequest(a.field);
+      return;
+    }
+    if (a.kind === "thread") {
+      resetConfirm();
+      if (onWait) onWait();
       return;
     }
     grid.querySelectorAll("button[data-action]").forEach(b => b.disabled = true);
@@ -127,27 +138,17 @@ export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest
     if (!btn || btn.disabled) return;
     const actionKey = btn.dataset.action;
     if (confirmingAction && confirmingAction !== actionKey) {
-      // Тап другой кнопки во время confirm — отменяем confirm
       resetConfirm();
       return;
     }
-    if (confirmingAction === actionKey) return; // confirm-mode, ждём [Да]/[Нет]
+    if (confirmingAction === actionKey) return;
 
     const a = ACTIONS[actionKey];
-    if (a.kind === "edit") {
-      fireAction(actionKey);  // edit не требует confirm
+    if (a.kind === "edit" || a.kind === "thread") {
+      fireAction(actionKey);  // no confirm for edit/thread (edit opens form; wait is benign)
     } else {
       startConfirm(actionKey);
     }
-  });
-
-  grid.querySelector(".suggest-btn").addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (onSuggest) onSuggest();
-  });
-  grid.querySelector(".compose-btn").addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (onCompose) onCompose();
   });
 
   return grid;

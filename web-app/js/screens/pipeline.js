@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260510-21";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-21";
+import { api } from "../api.js?v=20260510-22";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-22";
 
 function threadCard(thread) {
   const card = el(`

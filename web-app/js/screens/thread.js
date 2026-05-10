@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-21";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-21";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-21";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-21";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-21";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-21";
+import { api } from "../api.js?v=20260510-22";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-22";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-22";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-22";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-22";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-22";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -175,15 +175,25 @@ function backRow(threadId) {
   `);
 }
 
-function actionButtonsFallback(onSuggest, onCompose) {
+function actionButtonsFallback(onSuggest, onCompose, onHistory, onWait, apBlock) {
   const row = el(`
-    <div class="row g-2 mt-3 thread-actions-fallback">
-      <div class="col-6"><button class="btn btn-outline-success w-100 suggest-btn">🤖 Предложить</button></div>
-      <div class="col-6"><button class="btn btn-outline-primary w-100 compose-btn">✉️ Написать клиенту</button></div>
+    <div class="thread-actions-fallback mt-3">
+      <div class="row g-2 mb-2">
+        <div class="col-4"><button class="btn btn-sm btn-outline-success w-100 suggest-btn">🤖 Предложить</button></div>
+        <div class="col-4"><button class="btn btn-sm btn-outline-primary w-100 compose-btn">✉️ Написать</button></div>
+        <div class="col-4"><button class="btn btn-sm btn-outline-secondary w-100 history-btn">📋 История</button></div>
+      </div>
+      <div class="d-grid mb-2">
+        <button class="btn btn-sm btn-outline-warning wait-btn">✋ Ждать клиента</button>
+      </div>
+      <div class="ap-slot-fallback"></div>
     </div>
   `);
   row.querySelector(".suggest-btn").addEventListener("click", () => onSuggest());
   row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
+  row.querySelector(".history-btn").addEventListener("click", () => { if (onHistory) onHistory(); });
+  row.querySelector(".wait-btn").addEventListener("click", () => { if (onWait) onWait(); });
+  if (apBlock) row.querySelector(".ap-slot-fallback").appendChild(apBlock);
   return row;
 }
 
@@ -301,6 +311,26 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     if (gridOrFallback && composeForm) gridOrFallback.replaceWith(composeForm);
   }
 
+  function historyHandler() {
+    const email = data.header?.buyer_email;
+    if (!email) {
+      alert("Email клиента не известен");
+      return;
+    }
+    location.hash = `#/client/${encodeURIComponent(email)}`;
+  }
+
+  async function waitHandler() {
+    try {
+      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/wait`, {
+        method: "POST",
+      });
+      render(mount, params);
+    } catch (e) {
+      alert(`Ошибка: ${e.message ?? String(e)}`);
+    }
+  }
+
   if (review) {
     const draftBlock = pendingDraftBlock(review);
     container.appendChild(draftBlock);
@@ -309,6 +339,28 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       container.appendChild(lockedByOtherBanner(review.lock, () => render(mount, params)));
     } else if (acquired) {
       function buildGrid() {
+        const autopilotState = review?.autopilot ?? (data.header.is_autopilot ? {active: true} : null);
+        const apBlock = buildAutopilotStatus({
+          autopilotState,
+          onStop: async () => {
+            if (!confirm("Остановить автопилот?")) return;
+            try {
+              await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/autopilot/stop`, {method: "POST"});
+              render(mount, params);
+            } catch (e) {
+              alert(`Ошибка: ${e.message ?? String(e)}`);
+            }
+          },
+          onStart: () => {
+            const apForm = buildAutopilotForm({
+              threadId: params.thread_id,
+              onSubmitComplete: () => render(mount, params),
+              onCancel: () => render(mount, params),
+            });
+            const currentGrid = container.querySelector(".action-grid");
+            if (currentGrid) currentGrid.replaceWith(apForm);
+          },
+        });
         return buildActionGrid({
           msgId: latestPendingMsgId,
           onActionComplete: (action, res) => {
@@ -346,6 +398,9 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
           },
           onSuggest: suggestHandler,
           onCompose: composeHandler,
+          onHistory: historyHandler,
+          onWait: waitHandler,
+          autopilotBlock: apBlock,
         });
       }
       container.appendChild(buildGrid());
@@ -360,42 +415,35 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   }
 
   // Fallback: if action-grid was NOT rendered (no pending, no acquired lock, or locked-by-other),
-  // show standalone suggest/compose row so operator can still take action.
+  // show standalone suggest/compose/history/wait row so operator can still take action.
   if (!container.querySelector(".action-grid")) {
-    container.appendChild(actionButtonsFallback(suggestHandler, composeHandler));
+    const autopilotState = review?.autopilot ?? (data.header.is_autopilot ? {active: true} : null);
+    const apStatusContainer = el(`<div class="ap-wrap"></div>`);
+    function renderApStatus() {
+      apStatusContainer.replaceChildren(buildAutopilotStatus({
+        autopilotState,
+        onStop: async () => {
+          if (!confirm("Остановить автопилот?")) return;
+          try {
+            await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/autopilot/stop`, {method: "POST"});
+            render(mount, params);
+          } catch (e) {
+            alert(`Ошибка: ${e.message ?? String(e)}`);
+          }
+        },
+        onStart: () => {
+          const form = buildAutopilotForm({
+            threadId: params.thread_id,
+            onSubmitComplete: () => render(mount, params),
+            onCancel: () => renderApStatus(),
+          });
+          apStatusContainer.replaceChildren(form);
+        },
+      }));
+    }
+    renderApStatus();
+    container.appendChild(actionButtonsFallback(suggestHandler, composeHandler, historyHandler, waitHandler, apStatusContainer));
   }
-
-  // Autopilot status block — viewable in any thread (with or without pending)
-  const autopilotState = review?.autopilot ?? (
-    data.header.is_autopilot ? {active: true} : null
-  );
-
-  const apStatusContainer = el(`<div class="ap-wrap"></div>`);
-
-  function renderApStatus() {
-    apStatusContainer.replaceChildren(buildAutopilotStatus({
-      autopilotState,
-      onStop: async () => {
-        if (!confirm("Остановить автопилот?")) return;
-        try {
-          await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/autopilot/stop`, {method: "POST"});
-          render(mount, params);
-        } catch (e) {
-          alert(`Ошибка: ${e.message ?? String(e)}`);
-        }
-      },
-      onStart: () => {
-        const form = buildAutopilotForm({
-          threadId: params.thread_id,
-          onSubmitComplete: () => render(mount, params),
-          onCancel: () => renderApStatus(),
-        });
-        apStatusContainer.replaceChildren(form);
-      },
-    }));
-  }
-  renderApStatus();
-  container.appendChild(apStatusContainer);
 
   container.appendChild(backRow(params.thread_id));
   mount.replaceChildren(container);
