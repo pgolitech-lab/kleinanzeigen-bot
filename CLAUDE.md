@@ -19,6 +19,28 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - Playwright Python (парсинг Kleinanzeigen)
 - APScheduler
 - systemd
+## Mini App (актуально 2026-05-10)
+- **URL:** https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/ (GitHub Pages из main:/web-app/, repo public)
+- **HTTPS бэкенд:** cloudflared Quick Tunnel `https://choice-drunk-curriculum-effectiveness.trycloudflare.com` → 127.0.0.1:8080 (URL ротируется при рестарте — обновить web-app/js/api.js:API_BASE и bump cache-bust)
+- **Auth:** Telegram WebApp initData HMAC-валидация в `modules/tg_init_data.py`, dependency `verify_init_data_dep` на всех `/api/ma/*` endpoint'ах
+- **Lock:** общий `modules/operator_lock.py` (msg_id → actor, auto-expire 5 мин) — используют и бот wrappers (`_acquire_lock`/`_release_lock`/`_check_lock`), и MA endpoints
+- **API surface:** `web/api_ma.py` (~800 LOC) — 19+ endpoint'ов под `/api/ma/*`: pipeline, threads, messages (review payload + lock), send/skip/sold/regenerate/edit-ru/edit-de/instruction, compose, autopilot start/stop/preview, suggest-reply, thread wait, settings GET/POST
+- **Frontend (web-app/js):** screens (pipeline/thread/history/settings/review) + components (action-grid, edit-form, compose-form, autopilot-form, suggest-form). Vanilla ESM + Bootstrap 5.3 + telegram-web-app.js. NO build step. Deploy = git push origin main → Pages пересобирает ~60 сек
+- **Cache-bust:** при изменении SPA bump `?v=YYYYMMDD-N` во ВСЕХ ESM-импортах + index.html. TG Desktop кэширует агрессивно — иногда нужен полный рестарт клиента
+- **Bot↔MA broadcast:** после action в MA → `telegram_bot.broadcast_after_external_action(msg_id)` (sync через `_http_post_single editMessageText`) — обновляет text всех DM-копий мини-карточки. Keyboard не трогает; в боте guard на устаревший status
+- **Action-grid layout** (когда есть pending):
+  ```
+  [🤖 Предложить] [✉️ Написать] [📋 История]
+  [📝 Своя инстр.] [✋ Ждать]
+  [❌ Пропустить]  [💰 Продано]
+  [🚀 Автопилот status]
+  ```
+  🤖 Предложить → unified suggest-form с RU/DE textareas + 🔁 regenerate + 📨 send (auto-edit). НЕТ отдельных «Правка RU/DE/Отправить» — это всё внутри Предложить/Написать
+- **Backup point:** git tag `pre-phase4-2026-05-10` (commit `9d81f1d`); DB snapshot `/home/pg/backups/db-pre-phase4-2026-05-10.db`; rollback procedure `/home/pg/backups/ROLLBACK.md`
+- **Phase docs:** specs/plans в `docs/superpowers/{specs,plans}/2026-05-{09,10}-tg-mini-app-*.md` (Phase 1-4.5) и `2026-05-10-tg-bot-phase5-*.md` (slim bot)
+- **Тесты:** 111 unit-тестов (pytest) в `tests/test_*.py`
+- **Bot legacy section ниже** описывает inline-keyboard UX до Phase 5 — большая часть удалена. Бот теперь только pipeline + reminders + daily_summary + hourly errors. send_for_review шлёт мини-карточку с одной web_app кнопкой. Pipeline-карточки тоже web_app deep-link
+
 
 ## Структура
 - `main.py` — entry: bootstrap БД → scheduler в фоне → Telegram polling в потоке → uvicorn
