@@ -10,7 +10,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
+import json
+
 import database as db
+from modules import operator_lock
 from modules.tg_init_data import verify_init_data_dep
 
 
@@ -160,3 +163,81 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
         for r in rows
     ]
     return {"buyer_email": email, "threads": threads}
+
+
+def _parse_deal_brief(raw) -> dict | None:
+    """Parse messages.deal_brief_json. None при NULL/empty/invalid JSON."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _autopilot_view(autopilot_row) -> dict:
+    """Standard autopilot dict для frontend. Defaults если row=None."""
+    if autopilot_row is None:
+        return {"active": False, "messages_sent": 0, "floor_eur": None, "notify_mode": None}
+    try:
+        return {
+            "active": bool(autopilot_row["active"]),
+            "messages_sent": autopilot_row["messages_sent"] if "messages_sent" in autopilot_row.keys() else 0,
+            "floor_eur": autopilot_row["floor_eur"] if "floor_eur" in autopilot_row.keys() else None,
+            "notify_mode": autopilot_row["notify_mode"] if "notify_mode" in autopilot_row.keys() else None,
+        }
+    except (KeyError, IndexError):
+        return {"active": False, "messages_sent": 0, "floor_eur": None, "notify_mode": None}
+
+
+@router.get("/messages/{msg_id}")
+async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict:
+    """Полный review payload: ad meta + client message + draft + deal_brief + related + lock + autopilot."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+
+    thread_id = row["gmail_thread_id"]
+    autopilot_row = db.get_thread_autopilot(thread_id) if thread_id else None
+    lock_state = operator_lock.state(msg_id)
+    lock_holder = lock_state[0] if lock_state else None
+    related_matches = db.find_related_inquiries(
+        row["buyer_display_name"], exclude_thread_id=thread_id, limit=10,
+    ) if row["buyer_display_name"] else []
+
+    return {
+        "msg_id": row["id"],
+        "thread_id": thread_id,
+        "status": row["status"],
+        "ad": {
+            "title": row["ad_title"],
+            "price": row["ad_price"],
+            "url": row["ad_url"] if "ad_url" in row.keys() else None,
+            "id": row["ad_id"] if "ad_id" in row.keys() else None,
+            "buyer_display_name": row["buyer_display_name"],
+            "buyer_email": row["buyer_name"] if "buyer_name" in row.keys() else None,
+        },
+        "client_lang": row["client_lang"] if "client_lang" in row.keys() else None,
+        "client_message": {
+            "raw": row["de_client"] if "de_client" in row.keys() else None,
+            "ru": row["ru_client"] if "ru_client" in row.keys() else None,
+        },
+        "draft": {
+            "ru_answer": row["ru_answer"] if "ru_answer" in row.keys() else None,
+            "de_answer": row["de_answer"] if "de_answer" in row.keys() else None,
+            "ru_translation": row["ru_translation"] if "ru_translation" in row.keys() else None,
+        },
+        "deal_brief": _parse_deal_brief(row["deal_brief_json"] if "deal_brief_json" in row.keys() else None),
+        "related": {
+            "buyer_display_name": row["buyer_display_name"],
+            "matches": [_related_match(r) for r in related_matches],
+        },
+        "lock": {
+            "holder": lock_holder,
+            "remaining_min": operator_lock.remaining_min(msg_id),
+        },
+        "autopilot": _autopilot_view(autopilot_row),
+        "extra_notes": row["extra_notes"] if "extra_notes" in row.keys() else None,
+        "is_auto_ack": bool(row["is_auto_ack"]) if "is_auto_ack" in row.keys() else False,
+    }
