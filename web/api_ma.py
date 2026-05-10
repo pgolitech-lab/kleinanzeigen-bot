@@ -106,14 +106,11 @@ def _related_match(row: Any) -> dict[str, Any]:
     }
 
 
-@router.get("/threads/{thread_id}")
-async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Thread detail: header + chronological events + related-buyer block."""
+def _thread_dict(thread_id: str) -> dict[str, Any]:
+    """Полный thread payload (header + events + related). Used by GET threads and autopilot endpoints."""
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
-
-    # Header — самый свежий direction="in" (он несёт ad-инфо и buyer)
     last_in = next((r for r in reversed(history) if r["direction"] == "in"), history[-1])
     account = db.get_account(last_in["account_id"]) if "account_id" in last_in.keys() else None
     autopilot_row = db.get_thread_autopilot(thread_id)
@@ -123,30 +120,31 @@ async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) 
             is_autopilot = bool(autopilot_row["active"])
         except (KeyError, IndexError):
             is_autopilot = False
-
     header = {
         "thread_id": thread_id,
         "ad_title": last_in["ad_title"],
         "ad_price": last_in["ad_price"],
         "ad_url": last_in["ad_url"] if "ad_url" in last_in.keys() else None,
         "buyer_display_name": last_in["buyer_display_name"],
-        "buyer_email": last_in["buyer_name"],
+        "buyer_email": last_in["buyer_name"] if "buyer_name" in last_in.keys() else None,
         "account_name": account["name"] if account is not None else None,
         "account_email": account["gmail_email"] if account is not None else None,
         "is_autopilot": is_autopilot,
     }
-
     events = [_event_to_api(e) for e in db.thread_events(thread_id)]
-
     related_matches = db.find_related_inquiries(
         last_in["buyer_display_name"], exclude_thread_id=thread_id, limit=10,
-    )
+    ) if last_in["buyer_display_name"] else []
     related = {
         "buyer_display_name": last_in["buyer_display_name"],
         "matches": [_related_match(r) for r in related_matches],
     }
-
     return {"header": header, "events": events, "related": related}
+
+
+@router.get("/threads/{thread_id}")
+async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    return _thread_dict(thread_id)
 
 
 @router.get("/clients/{email}/history")
@@ -554,3 +552,48 @@ async def ma_compose(thread_id: str, body: ComposeBody,
         "sent_msg_id": result.get("message_id"),
         "thread_id": thread_id,
     }
+
+
+
+class AutopilotStartBody(BaseModel):
+    floor_eur: float = Field(..., gt=0, lt=100000)
+    notify_mode: str
+
+    @field_validator("notify_mode")
+    @classmethod
+    def _check_notify(cls, v: str) -> str:
+        if v not in {"silent", "notify"}:
+            raise ValueError("notify_mode must be 'silent' or 'notify'")
+        return v
+
+
+@router.post("/threads/{thread_id}/autopilot/start")
+async def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
+                              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Запустить автопилот для треда."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    actor = actor_from_user(user)
+    msg_id = history[-1]["id"]
+
+    db.start_thread_autopilot(thread_id, body.floor_eur, body.notify_mode, actor)
+
+    if body.notify_mode == "notify":
+        try:
+            telegram_bot.send_autopilot_start_notification(msg_id, body.floor_eur, actor)
+        except Exception:
+            pass  # best-effort
+
+    return _thread_dict(thread_id)
+
+
+@router.post("/threads/{thread_id}/autopilot/stop")
+async def ma_autopilot_stop(thread_id: str,
+                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Остановить автопилот (manual stop)."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    db.stop_thread_autopilot(thread_id, "manual")
+    return _thread_dict(thread_id)
