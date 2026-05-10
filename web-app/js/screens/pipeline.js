@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260510-11";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-11";
+import { api } from "../api.js?v=20260510-12";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-12";
 
 function threadCard(thread) {
   const card = el(`
@@ -65,18 +65,19 @@ function sectionBlock(title, color, threads) {
   return sec;
 }
 
-function refreshButton(onClick) {
-  const btn = el(`<button class="btn btn-sm btn-outline-secondary mb-2">↻ Обновить</button>`);
-  btn.addEventListener("click", onClick);
-  return btn;
-}
-
 export async function render(mount, params) {
   setLoading(mount, "Загружаю pipeline…");
   try {
     const data = await api("/api/ma/pipeline");
     const container = el(`<div></div>`);
-    container.appendChild(refreshButton(() => render(mount, params)));
+    const headerRow = el(`
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <button class="btn btn-sm btn-outline-secondary refresh-btn">↻ Обновить</button>
+        <a class="btn btn-sm btn-outline-secondary" href="#/settings">⚙</a>
+      </div>
+    `);
+    headerRow.querySelector(".refresh-btn").addEventListener("click", () => render(mount, params));
+    container.appendChild(headerRow);
     container.appendChild(sectionBlock("ждут нас", "🔴", data.red ?? []));
     container.appendChild(sectionBlock("ждём клиента", "🟢", data.green ?? []));
     mount.replaceChildren(container);
