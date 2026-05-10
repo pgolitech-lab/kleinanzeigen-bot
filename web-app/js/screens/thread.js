@@ -1,7 +1,7 @@
-import { api } from "../api.js?v=20260510-9";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-9";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-9";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-9";
+import { api } from "../api.js?v=20260510-10";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-10";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-10";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-10";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -243,28 +243,37 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     if (acquireError === "locked" && review.lock) {
       container.appendChild(lockedByOtherBanner(review.lock, () => render(mount, params)));
     } else if (acquired) {
-      const grid = buildActionGrid({
-        msgId: latestPendingMsgId,
-        onActionComplete: (action, res) => {
-          render(mount, params);
-        },
-        onError: (action, message) => {
-          alert(`Ошибка: ${message}`);
-        },
-        onEditRequest: (field) => {
-          const oldGrid = container.querySelector(".action-grid");
-          const form = buildEditForm({
-            msgId: latestPendingMsgId,
-            field,
-            review,
-            onSubmitComplete: () => render(mount, params),
-            onCancel: () => render(mount, params),
-            onError: (msg) => alert(`Ошибка: ${msg}`),
-          });
-          if (oldGrid && form) oldGrid.replaceWith(form);
-        },
-      });
-      container.appendChild(grid);
+      function buildGrid() {
+        return buildActionGrid({
+          msgId: latestPendingMsgId,
+          onActionComplete: (action, res) => {
+            render(mount, params);
+          },
+          onError: (action, message) => {
+            alert(`Ошибка: ${message}`);
+          },
+          onEditRequest: (field) => {
+            const oldGrid = container.querySelector(".action-grid");
+            const form = buildEditForm({
+              msgId: latestPendingMsgId,
+              field,
+              review,
+              onSubmitComplete: async () => {
+                await render(mount, params);
+                const draft = mount.querySelector(".pending-draft");
+                if (draft) draft.scrollIntoView({ behavior: "smooth", block: "start" });
+              },
+              onCancel: () => {
+                const currentForm = container.querySelector(".edit-form");
+                if (currentForm) currentForm.replaceWith(buildGrid());
+              },
+              onError: (msg) => alert(`Ошибка: ${msg}`),
+            });
+            if (oldGrid && form) oldGrid.replaceWith(form);
+          },
+        });
+      }
+      container.appendChild(buildGrid());
     } else if (acquireError === "network") {
       const warn = el(`<p class="text-warning small mt-3">⚠️ Не удалось взять lock — действия недоступны. <a href="#" class="reload-link">Перезагрузить</a></p>`);
       warn.querySelector(".reload-link").addEventListener("click", (e) => {
