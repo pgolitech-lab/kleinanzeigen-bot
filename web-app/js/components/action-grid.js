@@ -1,7 +1,7 @@
 // Action grid — sticky-bottom компонент с inline confirm state machine.
 
-import { api } from "../api.js?v=20260510-8";
-import { el } from "../utils.js?v=20260510-8";
+import { api } from "../api.js?v=20260510-9";
+import { el } from "../utils.js?v=20260510-9";
 
 const CONFIRM_TIMEOUT_MS = 5000;
 
@@ -61,7 +61,13 @@ export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest
     }
     if (confirmingAction) {
       const btn = grid.querySelector(`[data-action="${confirmingAction}"]`);
-      if (btn) btn.textContent = ACTIONS[confirmingAction].label;
+      if (btn) {
+        btn.textContent = ACTIONS[confirmingAction].label;
+        if (btn.dataset.originalClass) {
+          btn.className = btn.dataset.originalClass;
+          delete btn.dataset.originalClass;
+        }
+      }
       confirmingAction = null;
     }
     grid.querySelectorAll("button[data-action]").forEach(b => b.disabled = false);
@@ -91,6 +97,8 @@ export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest
     const a = ACTIONS[actionKey];
     confirmingAction = actionKey;
     const btn = grid.querySelector(`[data-action="${actionKey}"]`);
+    btn.dataset.originalClass = btn.className;
+    btn.className = "btn btn-warning text-dark";
     btn.innerHTML = `⚠️ ${a.confirm} <span class="ms-1 text-success" data-confirm="yes">[Да]</span> <span class="ms-1 text-danger" data-confirm="no">[Нет]</span>`;
     grid.querySelectorAll("button[data-action]").forEach(b => {
       if (b !== btn) b.disabled = true;
