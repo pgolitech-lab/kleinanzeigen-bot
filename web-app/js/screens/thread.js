@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-15";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-15";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-15";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-15";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-15";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-15";
+import { api } from "../api.js?v=20260510-16";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-16";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-16";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-16";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-16";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-16";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -251,7 +251,15 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   if (data.events.length === 0) {
     container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
   } else {
-    data.events.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
+    // Sort events by ts ASC — newest at bottom (chat-style)
+    const sortedEvents = [...data.events].sort((a, b) => {
+      const ta = a.ts || "";
+      const tb = b.ts || "";
+      if (ta < tb) return -1;
+      if (ta > tb) return 1;
+      return 0;
+    });
+    sortedEvents.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
   }
 
   if (review) {
