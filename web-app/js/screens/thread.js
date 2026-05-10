@@ -1,9 +1,10 @@
-import { api } from "../api.js?v=20260510-22";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-22";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-22";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-22";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-22";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-22";
+import { api } from "../api.js?v=20260510-23";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-23";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-23";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-23";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-23";
+import { buildSuggestForm } from "../components/suggest-form.js?v=20260510-23";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-23";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -280,26 +281,30 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   }
 
   // Handlers defined at renderThread scope so both buildGrid and fallback can reference them.
-  async function suggestHandler() {
+  function suggestHandler() {
+    // Replace action-grid (or fallback) with unified suggest+edit+send form
     const gridOrFallback = container.querySelector(".action-grid") || container.querySelector(".thread-actions-fallback");
-    const sBtn = gridOrFallback?.querySelector(".suggest-btn");
-    if (sBtn) {
-      sBtn.disabled = true;
-      sBtn.textContent = "🤖 Генерирую…";
+    if (!gridOrFallback) return;
+
+    // If there is no pending msg_id, we can't send via /messages/{id}/send.
+    // Call suggest endpoint to CREATE a pending, then re-render - operator clicks again.
+    if (latestPendingMsgId === null) {
+      api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST"})
+        .then(() => render(mount, params))
+        .catch(e => alert(`\u041e\u0448\u0438\u0431\u043a\u0430: ${e.message ?? String(e)}`));
+      return;
     }
-    try {
-      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {
-        method: "POST",
-      });
-      render(mount, params);
-    } catch (e) {
-      alert(`Ошибка: ${e.message ?? String(e)}`);
-      if (sBtn) {
-        sBtn.disabled = false;
-        sBtn.textContent = "🤖 Предложить";
-      }
-    }
+
+    const form = buildSuggestForm({
+      msgId: latestPendingMsgId,
+      threadId: params.thread_id,
+      review,
+      onSubmitComplete: () => render(mount, params),
+      onCancel: () => render(mount, params),
+    });
+    gridOrFallback.replaceWith(form);
   }
+
 
   function composeHandler() {
     const gridOrFallback = container.querySelector(".action-grid") || container.querySelector(".thread-actions-fallback");

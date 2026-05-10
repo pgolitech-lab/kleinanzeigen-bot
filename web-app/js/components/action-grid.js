@@ -1,18 +1,15 @@
 // Action grid — sticky-bottom компонент с inline confirm state machine.
 
-import { api } from "../api.js?v=20260510-22";
-import { el } from "../utils.js?v=20260510-22";
+import { api } from "../api.js?v=20260510-23";
+import { el } from "../utils.js?v=20260510-23";
 
 const CONFIRM_TIMEOUT_MS = 5000;
 
 // Action key → {label, path, body?, confirm, kind: "final"|"intermediate"|"edit"|"thread"}
 const ACTIONS = {
-  send:        {label: "✅ ОТПРАВИТЬ",     path: "/send",        confirm: "Отправить?",   kind: "final"},
   skip:        {label: "❌ Пропустить",   path: "/skip",        confirm: "Пропустить?",  kind: "final"},
   sold:        {label: "💰 Продано",      path: "/sold",        confirm: "Помечать продано?", kind: "final"},
   wait:        {label: "✋ Ждать",          kind: "thread"},  // wired via onWait callback (calls thread endpoint)
-  edit_ru:     {label: "✏️ Правка RU",   kind: "edit", field: "ru"},
-  edit_de:     {label: "✏️ Правка DE",   kind: "edit", field: "de"},
   instruction: {label: "📝 Своя инстр.", kind: "edit", field: "instruction"},
 };
 
@@ -24,13 +21,6 @@ export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest
         <div class="col-4"><button class="btn btn-sm btn-outline-success w-100 suggest-btn">🤖 Предложить</button></div>
         <div class="col-4"><button class="btn btn-sm btn-outline-primary w-100 compose-btn">✉️ Написать</button></div>
         <div class="col-4"><button class="btn btn-sm btn-outline-secondary w-100 history-btn">📋 История</button></div>
-      </div>
-      <div class="d-grid mb-2">
-        <button data-action="send" class="btn btn-primary">✅ ОТПРАВИТЬ</button>
-      </div>
-      <div class="row g-2 mb-2">
-        <div class="col-6"><button data-action="edit_ru" class="btn btn-outline-secondary w-100">✏️ Правка RU</button></div>
-        <div class="col-6"><button data-action="edit_de" class="btn btn-outline-secondary w-100">✏️ Правка DE</button></div>
       </div>
       <div class="row g-2 mb-2">
         <div class="col-6"><button data-action="instruction" class="btn btn-outline-secondary w-100">📝 Своя инстр.</button></div>
