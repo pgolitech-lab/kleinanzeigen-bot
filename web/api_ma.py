@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, field_validator
 
 import json
 
@@ -201,13 +202,16 @@ def actor_from_user(user: dict) -> str:
     return f"{prefix}{name}#{uid}"
 
 
-@router.get("/messages/{msg_id}")
-async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict:
-    """Полный review payload: ad meta + client message + draft + deal_brief + related + lock + autopilot."""
+
+VALID_STRATEGIES = {"fest", "harsh", "friend", "short", "regen"}
+
+
+def _message_review_dict(msg_id: int) -> "dict[str, Any]":
+    """Полный review payload (используется и в GET, и в action POSTs).
+    Raises HTTPException(404) если msg отсутствует."""
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
-
     thread_id = row["gmail_thread_id"]
     autopilot_row = db.get_thread_autopilot(thread_id) if thread_id else None
     lock_state = operator_lock.state(msg_id)
@@ -215,7 +219,6 @@ async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_d
     related_matches = db.find_related_inquiries(
         row["buyer_display_name"], exclude_thread_id=thread_id, limit=10,
     ) if row["buyer_display_name"] else []
-
     return {
         "msg_id": row["id"],
         "thread_id": thread_id,
@@ -251,6 +254,23 @@ async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_d
         "extra_notes": row["extra_notes"] if "extra_notes" in row.keys() else None,
         "is_auto_ack": bool(row["is_auto_ack"]) if "is_auto_ack" in row.keys() else False,
     }
+
+
+class RegenerateBody(BaseModel):
+    strategy: str
+
+    @field_validator("strategy")
+    @classmethod
+    def _check_strategy(cls, v: str) -> str:
+        if v not in VALID_STRATEGIES:
+            raise ValueError(f"strategy must be one of {sorted(VALID_STRATEGIES)}")
+        return v
+
+
+@router.get("/messages/{msg_id}")
+async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Полный review payload."""
+    return _message_review_dict(msg_id)
 
 
 @router.get("/messages/{msg_id}/lock")
@@ -358,3 +378,45 @@ async def ma_sold(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
     telegram_bot.broadcast_after_external_action(msg_id)
     telegram_bot._release_lock(msg_id)
     return {"ok": True, "status": "skipped_sold"}
+
+
+def _apply_regenerate_result(msg_id: int, result: "dict[str, Any]") -> None:
+    """Записать результат claude.regenerate_* в db и перевести status в 'edited'."""
+    fields: "dict[str, Any]" = {"status": "edited"}
+    if "ru_answer" in result:
+        fields["ru_answer"] = result["ru_answer"]
+    if "client_answer" in result:
+        fields["de_answer"] = result["client_answer"]
+    if "ru_translation" in result:
+        fields["ru_translation"] = result["ru_translation"]
+    deal: "dict[str, Any]" = {}
+    for src_key in ("deal_summary_ru", "expected_next", "negotiated_price_eur", "client_assessment"):
+        if src_key in result:
+            target_key = "summary_ru" if src_key == "deal_summary_ru" else src_key
+            deal[target_key] = result[src_key]
+    if deal:
+        fields["deal_brief_json"] = json.dumps(deal, ensure_ascii=False)
+    db.update_message(msg_id, **fields)
+
+
+@router.post("/messages/{msg_id}/regenerate")
+async def ma_regenerate(msg_id: int, body: RegenerateBody,
+                        user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Регенерировать draft под strategy. Intermediate — lock keeps."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    import asyncio
+    result = await asyncio.to_thread(
+        claude.regenerate_with_strategy, row, body.strategy
+    )
+    _apply_regenerate_result(msg_id, result)
+    telegram_bot.broadcast_after_external_action(msg_id)
+
+    return _message_review_dict(msg_id)

@@ -135,3 +135,64 @@ def test_action_endpoints_require_auth(client):
                  "/api/ma/messages/123/sold"]:
         res = c.post(path)
         assert res.status_code == 422
+
+def test_regenerate_valid_strategy(client):
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.regenerate_with_strategy.return_value = {
+        "ru_answer": "новый RU",
+        "client_answer": "neue DE",
+        "ru_translation": "новый back",
+        "deal_summary_ru": "обновлено",
+        "expected_next": "ждём",
+        "negotiated_price_eur": 1400,
+        "client_assessment": "серьёзный",
+    }
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/regenerate",
+                 json={"strategy": "harsh"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    body = res.json()
+    # Возвращается полный review payload (как GET /messages/{id})
+    assert body["msg_id"] == 123
+    mclaude.regenerate_with_strategy.assert_called_once()
+    args, kwargs = mclaude.regenerate_with_strategy.call_args
+    assert args[1] == "harsh"
+    mtb.broadcast_after_external_action.assert_called_once_with(123)
+    # Lock остаётся (intermediate)
+    mtb._release_lock.assert_not_called()
+
+
+def test_regenerate_invalid_strategy_422(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/regenerate",
+                 json={"strategy": "evil"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
+    mclaude.regenerate_with_strategy.assert_not_called()
+
+
+def test_regenerate_409_when_locked(client):
+    c, mdb, mtb, msched, mclaude = client
+    mtb._check_lock.return_value = "@other#222"
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/regenerate",
+                 json={"strategy": "harsh"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 409
+
+
+def test_regenerate_all_5_valid_strategies(client):
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.regenerate_with_strategy.return_value = {
+        "ru_answer": "x", "client_answer": "y", "ru_translation": "z",
+        "deal_summary_ru": "", "expected_next": "", "negotiated_price_eur": None,
+        "client_assessment": "",
+    }
+    init = make_init_data(TEST_USER)
+    for strategy in ["fest", "harsh", "friend", "short", "regen"]:
+        res = c.post("/api/ma/messages/123/regenerate",
+                     json={"strategy": strategy},
+                     headers={"X-Telegram-Init-Data": init})
+        assert res.status_code == 200, f"strategy={strategy} failed"
