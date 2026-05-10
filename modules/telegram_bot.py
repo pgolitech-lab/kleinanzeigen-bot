@@ -36,7 +36,7 @@ from telegram.ext import (
 
 import config
 import database as db
-from modules import ad_brief, claude, parser
+from modules import ad_brief, claude, operator_lock, parser
 
 logger = logging.getLogger(__name__)
 
@@ -855,11 +855,8 @@ def _confirmation_addendum(action_key: str) -> str:
 # Lock + broadcast (DM-mode)
 # ============================================================
 
-# In-memory лок треда: msg_id → (actor_str, acquired_datetime).
-# 5 мин таймаут. Lock acquire-ится на любое actionable-нажатие; release при
-# завершении действия. Если оператор начал input-режим и забыл — lock авто-освободится.
-_THREAD_LOCKS: dict[int, tuple[str, datetime]] = {}
-LOCK_TIMEOUT_SEC = 300  # 5 минут
+# Lock state теперь живёт в modules/operator_lock.py — общий с web/api_ma.
+# Wrappers ниже сохраняют orchestration с thread_busy + drain_deferred.
 
 # Per-thread «занят» флаг — синхронизация с входящим polling: пока оператор
 # работает с каким-либо row треда (любой active lock) ИЛИ пока идёт SMTP-отправка
@@ -910,28 +907,24 @@ def _msg_thread_id(msg_id: int) -> Optional[str]:
 
 def _check_lock(msg_id: int, actor: str) -> Optional[str]:
     """Возвращает имя текущего владельца если лок занят ДРУГИМ. None если свободно/мой."""
-    e = _THREAD_LOCKS.get(msg_id)
-    if not e:
+    st = operator_lock.state(msg_id)
+    if st is None:
+        # Lock мог только что auto-expire-нуть внутри state() — синхронизируем busy-flag.
+        clear_thread_busy(_msg_thread_id(msg_id), "operator")
         return None
-    owner, acquired = e
+    owner, _ = st
     if owner == actor:
         return None
-    age = (datetime.utcnow() - acquired).total_seconds()
-    if age < LOCK_TIMEOUT_SEC:
-        return owner
-    # Auto-expire
-    del _THREAD_LOCKS[msg_id]
-    clear_thread_busy(_msg_thread_id(msg_id), "operator")
-    return None
+    return owner
 
 
 def _acquire_lock(msg_id: int, actor: str) -> None:
-    _THREAD_LOCKS[msg_id] = (actor, datetime.utcnow())
+    operator_lock.remember(msg_id, actor)
     mark_thread_busy(_msg_thread_id(msg_id), "operator", actor)
 
 
 def _release_lock(msg_id: int) -> None:
-    _THREAD_LOCKS.pop(msg_id, None)
+    operator_lock.forget(msg_id)
     thread_id = _msg_thread_id(msg_id)
     clear_thread_busy(thread_id, "operator")
     # После освобождения — попробуем поднять отложенные карточки.
@@ -946,12 +939,7 @@ def _release_lock(msg_id: int) -> None:
 
 def _lock_remaining_min(msg_id: int) -> int:
     """Минут до auto-release. 0 если нет лока или истёк."""
-    e = _THREAD_LOCKS.get(msg_id)
-    if not e:
-        return 0
-    age = (datetime.utcnow() - e[1]).total_seconds()
-    remaining = LOCK_TIMEOUT_SEC - age
-    return max(0, int(remaining // 60) + 1)
+    return operator_lock.remaining_min(msg_id)
 
 
 async def _broadcast_card(context: Any, msg_id: int, text: str, reply_markup: Any = None) -> None:
