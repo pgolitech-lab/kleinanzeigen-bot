@@ -1004,6 +1004,59 @@ def _truncate_html_safe(text: str, limit: int = 4000, suffix: str = "\n\n<i>…(
     return text[:target_len] + suffix
 
 
+def broadcast_after_external_action(msg_id: int) -> None:
+    """Sync обновление всех DM-копий review-карточки после внешнего действия (MA).
+
+    Best-effort: log + return на любой ошибке. Обновляет только text — keyboard
+    остаётся прежним (бот пересоберёт его при следующем взаимодействии).
+
+    Используется из web/api_ma.py POST endpoint'ов.
+    """
+    try:
+        msg = db.get_message(msg_id)
+    except Exception:
+        logger.exception("broadcast_after_external_action: db.get_message failed")
+        return
+    if not msg:
+        return
+
+    try:
+        text = _format_review_text(msg)
+    except Exception:
+        logger.exception("broadcast_after_external_action: _format_review_text failed")
+        return
+    text = _truncate_html_safe(text)
+
+    dispatches = db.list_card_dispatches(msg_id)
+    if not dispatches:
+        # Fallback на legacy telegram_message_id
+        if msg["telegram_message_id"]:
+            try:
+                _http_post_single("editMessageText", {
+                    "chat_id": int(config.telegram_chat_id()),
+                    "message_id": msg["telegram_message_id"],
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                })
+            except Exception:
+                logger.warning("broadcast_after_external_action legacy edit failed")
+        return
+
+    for d in dispatches:
+        try:
+            _http_post_single("editMessageText", {
+                "chat_id": d["chat_id"],
+                "message_id": d["tg_msg_id"],
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+        except Exception:
+            logger.warning("broadcast_after_external_action edit failed: chat=%s msg=%s",
+                           d["chat_id"], d["tg_msg_id"])
+
+
 async def _safe_edit(query, text: str, reply_markup=None) -> None:
     """Edit текущей карточки. Длинный HTML — auto-truncate. 'not modified' — silent."""
     text = _truncate_html_safe(text)
