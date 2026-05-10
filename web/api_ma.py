@@ -241,3 +241,16 @@ async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_d
         "extra_notes": row["extra_notes"] if "extra_notes" in row.keys() else None,
         "is_auto_ack": bool(row["is_auto_ack"]) if "is_auto_ack" in row.keys() else False,
     }
+
+
+@router.get("/messages/{msg_id}/lock")
+async def ma_message_lock_state(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Lock-state poll endpoint — лёгкий, без full review payload."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    st = operator_lock.state(msg_id)
+    return {
+        "holder": st[0] if st else None,
+        "remaining_min": operator_lock.remaining_min(msg_id),
+    }

@@ -185,3 +185,43 @@ def test_message_review_rejects_bad_hash(client):
         headers={"X-Telegram-Init-Data": "user=%7B%22id%22%3A1%7D&auth_date=99&hash=fake"},
     )
     assert res.status_code == 401
+
+
+def test_lock_state_returns_holder(client):
+    c, mdb, mol = client
+    mdb.get_message.return_value = _full_msg_row()
+    mol.state.return_value = ("@alice#100", 1700000000.0)
+    mol.remaining_min.return_value = 3
+    init = make_init_data(TEST_USER)
+    res = c.get("/api/ma/messages/123/lock", headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["holder"] == "@alice#100"
+    assert body["remaining_min"] == 3
+
+
+def test_lock_state_returns_null_when_free(client):
+    c, mdb, mol = client
+    mdb.get_message.return_value = _full_msg_row()
+    mol.state.return_value = None
+    mol.remaining_min.return_value = 0
+    init = make_init_data(TEST_USER)
+    res = c.get("/api/ma/messages/123/lock", headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["holder"] is None
+    assert body["remaining_min"] == 0
+
+
+def test_lock_404_when_msg_missing(client):
+    c, mdb, mol = client
+    mdb.get_message.return_value = None
+    init = make_init_data(TEST_USER)
+    res = c.get("/api/ma/messages/999/lock", headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 404
+
+
+def test_lock_endpoint_requires_auth(client):
+    c, mdb, mol = client
+    res = c.get("/api/ma/messages/123/lock")
+    assert res.status_code == 422
