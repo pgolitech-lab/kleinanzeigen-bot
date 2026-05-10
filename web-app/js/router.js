@@ -1,12 +1,12 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260510-17";
-import * as thread from "./screens/thread.js?v=20260510-17";
-import * as history from "./screens/history.js?v=20260510-17";
-import * as settings from "./screens/settings.js?v=20260510-17";
-import * as review from "./screens/review.js?v=20260510-17";
-import { setError } from "./utils.js?v=20260510-17";
-import { hideBack, showBack } from "./tg.js?v=20260510-17";
+import * as pipeline from "./screens/pipeline.js?v=20260510-18";
+import * as thread from "./screens/thread.js?v=20260510-18";
+import * as history from "./screens/history.js?v=20260510-18";
+import * as settings from "./screens/settings.js?v=20260510-18";
+import * as review from "./screens/review.js?v=20260510-18";
+import { setError } from "./utils.js?v=20260510-18";
+import { hideBack, showBack } from "./tg.js?v=20260510-18";
 
 const ROUTES = [
   { pattern: /^#?\/?$/,                   screen: pipeline, params: () => ({}) },

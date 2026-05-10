@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-17";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-17";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-17";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-17";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-17";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-17";
+import { api } from "../api.js?v=20260510-18";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-18";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-18";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-18";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-18";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-18";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -167,24 +167,23 @@ function backToPipeline() {
   return el(`<a class="btn btn-sm btn-outline-secondary mt-3" href="#/pipeline">↩ К pipeline</a>`);
 }
 
-function backRow(threadId, onCompose) {
-  const row = el(`
-    <div class="d-flex gap-2 mt-3 thread-back-row flex-wrap">
+function backRow(threadId) {
+  return el(`
+    <div class="d-flex gap-2 mt-3 thread-back-row">
       <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ К pipeline</a>
-      <button class="btn btn-sm btn-outline-primary compose-btn">✉️ Написать клиенту</button>
     </div>
   `);
-  row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
-  return row;
 }
 
-function topActions(threadId, onSuggest) {
+function topActions(threadId, onSuggest, onCompose) {
   const row = el(`
-    <div class="d-flex gap-2 mb-3 thread-top-actions">
-      <button class="btn btn-sm btn-outline-success suggest-btn w-100">🤖 Предложить ответ</button>
+    <div class="d-flex gap-2 mb-3 thread-top-actions flex-wrap">
+      <button class="btn btn-sm btn-outline-success suggest-btn flex-grow-1">🤖 Предложить ответ</button>
+      <button class="btn btn-sm btn-outline-primary compose-btn flex-grow-1">✉️ Написать клиенту</button>
     </div>
   `);
   row.querySelector(".suggest-btn").addEventListener("click", () => onSuggest());
+  row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
   return row;
 }
 
@@ -275,6 +274,15 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
           suggestBtn.textContent = "🤖 Предложить ответ";
         }
       }
+    },
+    () => {
+      const topRow = container.querySelector(".thread-top-actions");
+      const composeForm = buildComposeForm({
+        threadId: params.thread_id,
+        onSubmitComplete: () => render(mount, params),
+        onCancel: () => render(mount, params),
+      });
+      if (topRow) topRow.replaceWith(composeForm);
     },
   ));
   const related = relatedBlock(data.related);
@@ -381,19 +389,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   renderApStatus();
   container.appendChild(apStatusContainer);
 
-  container.appendChild(backRow(
-    params.thread_id,
-    () => {
-      // existing onCompose handler — replace bottom row with compose form
-      const oldRow = container.querySelector(".thread-back-row");
-      const composeForm = buildComposeForm({
-        threadId: params.thread_id,
-        onSubmitComplete: () => render(mount, params),
-        onCancel: () => render(mount, params),
-      });
-      if (oldRow) oldRow.replaceWith(composeForm);
-    },
-  ));
+  container.appendChild(backRow(params.thread_id));
   mount.replaceChildren(container);
 }
 
