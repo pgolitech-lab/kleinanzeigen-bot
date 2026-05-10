@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-18";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-18";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-18";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-18";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-18";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-18";
+import { api } from "../api.js?v=20260510-19";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-19";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-19";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-19";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-19";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-19";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -253,6 +253,22 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   const container = el(`<div></div>`);
 
   container.appendChild(threadHeader(data.header, review?.lock ?? null, ourActor));
+  const related = relatedBlock(data.related);
+  if (related) container.appendChild(related);
+  if (data.events.length === 0) {
+    container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
+  } else {
+    // Sort events by ts ASC — newest at bottom (chat-style)
+    const sortedEvents = [...data.events].sort((a, b) => {
+      const ta = a.ts || "";
+      const tb = b.ts || "";
+      if (ta < tb) return -1;
+      if (ta > tb) return 1;
+      return 0;
+    });
+    sortedEvents.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
+  }
+
   container.appendChild(topActions(
     params.thread_id,
     async () => {
@@ -285,21 +301,6 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       if (topRow) topRow.replaceWith(composeForm);
     },
   ));
-  const related = relatedBlock(data.related);
-  if (related) container.appendChild(related);
-  if (data.events.length === 0) {
-    container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
-  } else {
-    // Sort events by ts ASC — newest at bottom (chat-style)
-    const sortedEvents = [...data.events].sort((a, b) => {
-      const ta = a.ts || "";
-      const tb = b.ts || "";
-      if (ta < tb) return -1;
-      if (ta > tb) return 1;
-      return 0;
-    });
-    sortedEvents.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
-  }
 
   if (review) {
     const draftBlock = pendingDraftBlock(review);
