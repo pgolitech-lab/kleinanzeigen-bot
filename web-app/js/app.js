@@ -1,7 +1,7 @@
 // Mini App entry point. Bootstrap → router.start.
 
-import { ready, startParam } from "./tg.js?v=20260510-12";
-import { start as startRouter } from "./router.js?v=20260510-12";
+import { ready, startParam } from "./tg.js?v=20260510-13";
+import { start as startRouter } from "./router.js?v=20260510-13";
 
 function applyStartParam() {
   const sp = startParam();

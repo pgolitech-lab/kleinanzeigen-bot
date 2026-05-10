@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-12";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-12";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-12";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-12";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-12";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-12";
+import { api } from "../api.js?v=20260510-13";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-13";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-13";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-13";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-13";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-13";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -20,7 +20,7 @@ function findLatestPending(events) {
   return candidate;
 }
 
-function threadHeader(header, lock) {
+function threadHeader(header, lock, ourActor) {
   const card = el(`
     <div class="border-bottom pb-2 mb-3">
       <div class="d-flex justify-content-between align-items-start">
@@ -51,7 +51,7 @@ function threadHeader(header, lock) {
     const b = el(`<span class="badge bg-warning text-dark">🤖 автопилот</span>`);
     card.querySelector(".autopilot-badge").appendChild(b);
   }
-  if (lock?.holder) {
+  if (lock?.holder && lock.holder !== ourActor) {
     const badge = el(`<div class="text-danger small mt-1 lock-badge">🟥 в работе у <span class="holder"></span> (<span class="mins"></span> мин)</div>`);
     badge.querySelector(".holder").textContent = lock.holder;
     badge.querySelector(".mins").textContent = String(lock.remaining_min);
@@ -204,6 +204,7 @@ export async function render(mount, params) {
     let review = null;
     let acquired = false;
     let acquireError = null;
+    let ourActor = null;
 
     if (latestPendingMsgId !== null) {
       try {
@@ -216,6 +217,7 @@ export async function render(mount, params) {
         const lockRes = await api(`/api/ma/messages/${latestPendingMsgId}/lock/acquire`, {method: "POST"});
         acquired = true;
         _heldMsgId = latestPendingMsgId;
+        ourActor = lockRes.holder;
         if (review) {
           review.lock = lockRes;
         }
@@ -229,7 +231,7 @@ export async function render(mount, params) {
       }
     }
 
-    renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError);
+    renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor);
 
   } catch (e) {
     setError(mount, e.message ?? String(e));
@@ -237,10 +239,10 @@ export async function render(mount, params) {
 }
 
 
-function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError) {
+function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor) {
   const container = el(`<div></div>`);
 
-  container.appendChild(threadHeader(data.header, review?.lock ?? null));
+  container.appendChild(threadHeader(data.header, review?.lock ?? null, ourActor));
   const related = relatedBlock(data.related);
   if (related) container.appendChild(related);
   if (data.events.length === 0) {
