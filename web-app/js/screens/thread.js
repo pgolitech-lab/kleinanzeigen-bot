@@ -167,13 +167,15 @@ function backToPipeline() {
   return el(`<a class="btn btn-sm btn-outline-secondary mt-3" href="#/pipeline">↩ К pipeline</a>`);
 }
 
-function backRow(threadId, onCompose) {
+function backRow(threadId, onCompose, onSuggest) {
   const row = el(`
-    <div class="d-flex gap-2 mt-3 thread-back-row">
+    <div class="d-flex gap-2 mt-3 thread-back-row flex-wrap">
       <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ К pipeline</a>
+      <button class="btn btn-sm btn-outline-success suggest-btn">🤖 Предложить ответ</button>
       <button class="btn btn-sm btn-outline-primary compose-btn">✉️ Написать клиенту</button>
     </div>
   `);
+  row.querySelector(".suggest-btn").addEventListener("click", () => onSuggest());
   row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
   return row;
 }
@@ -339,16 +341,40 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   renderApStatus();
   container.appendChild(apStatusContainer);
 
-  container.appendChild(backRow(params.thread_id, () => {
-    // Replace bottom row with compose form
-    const oldRow = container.querySelector(".thread-back-row");
-    const composeForm = buildComposeForm({
-      threadId: params.thread_id,
-      onSubmitComplete: () => render(mount, params),
-      onCancel: () => render(mount, params),
-    });
-    if (oldRow) oldRow.replaceWith(composeForm);
-  }));
+  container.appendChild(backRow(
+    params.thread_id,
+    () => {
+      // existing onCompose handler — replace bottom row with compose form
+      const oldRow = container.querySelector(".thread-back-row");
+      const composeForm = buildComposeForm({
+        threadId: params.thread_id,
+        onSubmitComplete: () => render(mount, params),
+        onCancel: () => render(mount, params),
+      });
+      if (oldRow) oldRow.replaceWith(composeForm);
+    },
+    async () => {
+      // onSuggest handler — POST suggest-reply, re-render thread
+      const oldRow = container.querySelector(".thread-back-row");
+      const suggestBtn = oldRow?.querySelector(".suggest-btn");
+      if (suggestBtn) {
+        suggestBtn.disabled = true;
+        suggestBtn.textContent = "🤖 Генерирую…";
+      }
+      try {
+        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {
+          method: "POST",
+        });
+        render(mount, params);  // re-render with new pending-draft + action-grid
+      } catch (e) {
+        alert(`Ошибка: ${e.message ?? String(e)}`);
+        if (suggestBtn) {
+          suggestBtn.disabled = false;
+          suggestBtn.textContent = "🤖 Предложить ответ";
+        }
+      }
+    },
+  ));
   mount.replaceChildren(container);
 }
 
