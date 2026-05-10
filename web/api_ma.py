@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends
 import json
 
 import database as db
-from modules import operator_lock
+from modules import operator_lock, telegram_bot
 from modules.tg_init_data import verify_init_data_dep
 
 
@@ -191,6 +191,14 @@ def _autopilot_view(autopilot_row) -> dict:
         return {"active": False, "messages_sent": 0, "floor_eur": None, "notify_mode": None}
 
 
+def actor_from_user(user: dict) -> str:
+    """Format actor for lock — matches what bot uses in callbacks."""
+    uid = user.get("id")
+    name = user.get("username") or user.get("first_name") or "?"
+    prefix = "@" if user.get("username") else ""
+    return f"{prefix}{name}#{uid}"
+
+
 @router.get("/messages/{msg_id}")
 async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict:
     """Полный review payload: ad meta + client message + draft + deal_brief + related + lock + autopilot."""
@@ -254,3 +262,35 @@ async def ma_message_lock_state(msg_id: int, user: dict = Depends(verify_init_da
         "holder": st[0] if st else None,
         "remaining_min": operator_lock.remaining_min(msg_id),
     }
+
+@router.post("/messages/{msg_id}/lock/acquire")
+async def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict:
+    """Acquire lock on review card. 409 if held by someone else."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign_holder = telegram_bot._check_lock(msg_id, actor)
+    if foreign_holder is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "holder": foreign_holder,
+                "remaining_min": operator_lock.remaining_min(msg_id),
+            },
+        )
+    telegram_bot._acquire_lock(msg_id, actor)
+    return {
+        "holder": actor,
+        "remaining_min": operator_lock.remaining_min(msg_id),
+    }
+
+
+@router.post("/messages/{msg_id}/lock/release", status_code=204)
+async def ma_lock_release(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> None:
+    """Release lock. Permissive — does not check holder."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    telegram_bot._release_lock(msg_id)
+    return None
