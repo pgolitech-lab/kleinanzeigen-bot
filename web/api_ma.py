@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 import json
 
 import database as db
+import config
 from modules import operator_lock, telegram_bot
 import scheduler
 from modules import claude
@@ -597,3 +598,74 @@ async def ma_autopilot_stop(thread_id: str,
         raise HTTPException(404, "thread not found")
     db.stop_thread_autopilot(thread_id, "manual")
     return _thread_dict(thread_id)
+
+
+ALLOWED_SETTING_KEYS = {
+    "send_mode", "debug_email", "gmail_poll_interval_sec", "gmail_from_filter",
+    "inquiry_max_age_days",
+    "reminders_enabled", "reminder_after_days",
+    "polling_paused",
+    "telegram_authorized", "telegram_operator_dm_ids",
+    "max_discount_percent",
+    "claude_model", "system_prompt",
+    "chat_font_em", "chat_padding_v_rem", "chat_padding_h_rem",
+    "chat_max_width_pct", "chat_radius_rem", "chat_row_gap_rem",
+    "chat_meta_font_em", "chat_secondary_font_em",
+    "api_balance_snapshot_usd", "api_balance_snapshot_at",
+    "anthropic_api_key", "telegram_bot_token",
+    "google_drive_credentials_json", "google_drive_folder_id", "backup_interval_hours",
+    "web_port", "web_host",
+}
+
+SENSITIVE_KEYS = {
+    "anthropic_api_key", "telegram_bot_token",
+    "google_drive_credentials_json",
+}
+
+VALIDATORS = {
+    "send_mode": lambda v: v in {"disabled", "redirect", "production"},
+    "polling_paused": lambda v: v in {"0", "1"},
+    "reminders_enabled": lambda v: v in {"0", "1"},
+    "gmail_poll_interval_sec": lambda v: v.isdigit() and 10 <= int(v) <= 3600,
+    "inquiry_max_age_days": lambda v: v.isdigit() and 1 <= int(v) <= 365,
+    "max_discount_percent": lambda v: v.replace(".", "", 1).isdigit() and 0 <= float(v) <= 100,
+}
+
+
+def _mask_secret(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "•••••"
+    return "•••••" + value[-4:]
+
+
+class SettingPostBody(BaseModel):
+    key: str
+    value: str = Field(..., max_length=100000)
+
+
+@router.get("/settings")
+async def ma_settings_get(user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
+    """Все whitelist-настройки. Sensitive ключи замаскированы."""
+    out: dict[str, str] = {}
+    for key in sorted(ALLOWED_SETTING_KEYS):
+        raw = config.get(key) or ""
+        if key in SENSITIVE_KEYS:
+            out[key] = _mask_secret(raw)
+        else:
+            out[key] = raw
+    return out
+
+
+@router.post("/settings")
+async def ma_settings_post(body: SettingPostBody,
+                           user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Установить одно значение. Whitelist + per-key validator."""
+    if body.key not in ALLOWED_SETTING_KEYS:
+        raise HTTPException(400, f"key '{body.key}' is not in whitelist")
+    validator = VALIDATORS.get(body.key)
+    if validator and not validator(body.value):
+        raise HTTPException(400, f"invalid value for {body.key}")
+    db.set_setting(body.key, body.value)
+    return {"ok": True, "key": body.key, "value": body.value}
