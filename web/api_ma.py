@@ -600,6 +600,32 @@ async def ma_autopilot_stop(thread_id: str,
     return _thread_dict(thread_id)
 
 
+@router.post("/threads/{thread_id}/suggest-reply")
+async def ma_suggest_reply(thread_id: str,
+                            user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сгенерировать свежий draft для последнего incoming в треде."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    # Find latest direction='in' row
+    latest_in = None
+    for r in reversed(history):
+        if r["direction"] == "in":
+            latest_in = r
+            break
+    if latest_in is None:
+        raise HTTPException(404, "no incoming message in thread")
+
+    msg_id = latest_in["id"]
+    import asyncio
+    result = await asyncio.to_thread(scheduler.regenerate_draft, msg_id, "regen")
+    if result.get("kind") == "error":
+        raise HTTPException(500, result.get("message", "regenerate failed"))
+
+    telegram_bot.broadcast_after_external_action(msg_id)
+    return _thread_dict(thread_id)
+
+
 ALLOWED_SETTING_KEYS = {
     "send_mode", "debug_email", "gmail_poll_interval_sec", "gmail_from_filter",
     "inquiry_max_age_days",
