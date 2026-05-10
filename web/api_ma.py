@@ -559,6 +559,7 @@ async def ma_compose(thread_id: str, body: ComposeBody,
 class AutopilotStartBody(BaseModel):
     floor_eur: float = Field(..., gt=0, lt=100000)
     notify_mode: str
+    preview: dict[str, Any] | None = None  # optional preview to apply before start
 
     @field_validator("notify_mode")
     @classmethod
@@ -571,12 +572,33 @@ class AutopilotStartBody(BaseModel):
 @router.post("/threads/{thread_id}/autopilot/start")
 async def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
                               user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Запустить автопилот для треда."""
+    """Запустить автопилот для треда. Если preview передан — применяется к latest in-row."""
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
     actor = actor_from_user(user)
-    msg_id = history[-1]["id"]
+
+    # Find latest direction='in' row
+    latest_in = None
+    for r in reversed(history):
+        if r["direction"] == "in":
+            latest_in = r
+            break
+    msg_id = latest_in["id"] if latest_in else history[-1]["id"]
+
+    # Если preview передан — применяем как approved-draft
+    if body.preview and latest_in:
+        preview = body.preview
+        update_fields: dict[str, Any] = {"status": "approved"}
+        if "ru_text" in preview:
+            update_fields["ru_answer"] = preview["ru_text"]
+        if "client_text" in preview:
+            update_fields["de_answer"] = preview["client_text"]
+        if "ru_translation" in preview:
+            update_fields["ru_translation"] = preview["ru_translation"]
+        if "deal_brief" in preview and isinstance(preview["deal_brief"], dict):
+            update_fields["deal_brief_json"] = json.dumps(preview["deal_brief"], ensure_ascii=False)
+        db.update_message(msg_id, **update_fields)
 
     db.start_thread_autopilot(thread_id, body.floor_eur, body.notify_mode, actor)
 
@@ -587,6 +609,87 @@ async def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
             pass  # best-effort
 
     return _thread_dict(thread_id)
+
+
+class AutopilotPreviewBody(BaseModel):
+    floor_eur: float = Field(..., gt=0, lt=100000)
+    notify_mode: str
+
+    @field_validator("notify_mode")
+    @classmethod
+    def _check_notify_preview(cls, v: str) -> str:
+        if v not in {"silent", "notify"}:
+            raise ValueError("notify_mode must be 'silent' or 'notify'")
+        return v
+
+
+def _build_regen_context(msg_row: Any) -> tuple[Any, str, Any]:
+    """Minimal context loader for autopilot preview. Falls back to empty on any error."""
+    try:
+        from scheduler import _regen_context
+        return _regen_context(msg_row)
+    except Exception:
+        return [], "", []
+
+
+@router.post("/threads/{thread_id}/autopilot/preview")
+async def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
+                                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сгенерировать preview первого автопилот-ответа БЕЗ записи в БД."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    latest_in = None
+    for r in reversed(history):
+        if r["direction"] == "in":
+            latest_in = r
+            break
+    if latest_in is None:
+        raise HTTPException(404, "no incoming message in thread")
+
+    history_ctx, brief_text, lessons = _build_regen_context(latest_in)
+
+    import asyncio
+
+    def _get_field(row, key):
+        try:
+            return row[key] if key in row.keys() else ""
+        except Exception:
+            return ""
+
+    try:
+        result = await asyncio.to_thread(
+            claude.generate_autopilot_reply,
+            de_client_text=_get_field(latest_in, "de_client"),
+            ad_title=_get_field(latest_in, "ad_title"),
+            ad_price=_get_field(latest_in, "ad_price"),
+            ad_description=_get_field(latest_in, "ad_description"),
+            seller_name=_get_field(latest_in, "seller_name"),
+            history=history_ctx,
+            brief_text=brief_text,
+            lessons=lessons,
+            floor_eur=body.floor_eur,
+            last_our_price_eur=None,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"preview generation failed: {e}")
+
+    return {
+        "preview": {
+            "ru_text": result.get("ru_answer", ""),
+            "client_text": result.get("client_answer", ""),
+            "ru_translation": result.get("ru_translation", ""),
+            "deal_brief": {
+                "summary_ru": result.get("deal_summary_ru", ""),
+                "expected_next": result.get("expected_next", ""),
+                "negotiated_price_eur": result.get("negotiated_price_eur"),
+                "client_assessment": result.get("client_assessment", ""),
+            },
+            "should_stop": result.get("should_stop", False),
+            "stop_reason": result.get("stop_reason"),
+            "used_web_search": result.get("used_web_search", False),
+        }
+    }
 
 
 @router.post("/threads/{thread_id}/autopilot/stop")
