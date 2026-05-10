@@ -14,6 +14,8 @@ import json
 
 import database as db
 from modules import operator_lock, telegram_bot
+import scheduler
+from modules import claude
 from modules.tg_init_data import verify_init_data_dep
 
 
@@ -294,3 +296,65 @@ async def ma_lock_release(msg_id: int, user: dict = Depends(verify_init_data_dep
         raise HTTPException(404, "message not found")
     telegram_bot._release_lock(msg_id)
     return None
+
+
+def _check_actor_holds(msg_id: int, actor: str) -> "str | None":
+    return telegram_bot._check_lock(msg_id, actor)
+
+
+def _ensure_lock(msg_id: int, actor: str) -> None:
+    telegram_bot._acquire_lock(msg_id, actor)
+
+
+@router.post("/messages/{msg_id}/send")
+async def ma_send(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    if db.get_message(msg_id) is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    import asyncio
+    result = await asyncio.to_thread(scheduler.send_one, msg_id)
+    if result.get("kind") == "error":
+        raise HTTPException(500, result.get("message", "send failed"))
+
+    telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot._release_lock(msg_id)
+
+    fresh = db.get_message(msg_id)
+    return {"ok": True, "status": fresh["status"] if fresh else "sent"}
+
+
+@router.post("/messages/{msg_id}/skip")
+async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    if db.get_message(msg_id) is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    db.update_message(msg_id, status="skipped")
+    telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot._release_lock(msg_id)
+    return {"ok": True, "status": "skipped"}
+
+
+@router.post("/messages/{msg_id}/sold")
+async def ma_sold(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    if db.get_message(msg_id) is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    db.update_message(msg_id, status="skipped_sold")
+    telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot._release_lock(msg_id)
+    return {"ok": True, "status": "skipped_sold"}
