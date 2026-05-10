@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-19";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-19";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-19";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-19";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-19";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-19";
+import { api } from "../api.js?v=20260510-20";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-20";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-20";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-20";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-20";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-20";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -175,18 +175,6 @@ function backRow(threadId) {
   `);
 }
 
-function topActions(threadId, onSuggest, onCompose) {
-  const row = el(`
-    <div class="d-flex gap-2 mb-3 thread-top-actions flex-wrap">
-      <button class="btn btn-sm btn-outline-success suggest-btn flex-grow-1">🤖 Предложить ответ</button>
-      <button class="btn btn-sm btn-outline-primary compose-btn flex-grow-1">✉️ Написать клиенту</button>
-    </div>
-  `);
-  row.querySelector(".suggest-btn").addEventListener("click", () => onSuggest());
-  row.querySelector(".compose-btn").addEventListener("click", () => onCompose());
-  return row;
-}
-
 
 async function tryReleaseLock(msgId) {
   if (msgId === null) return;
@@ -269,39 +257,6 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     sortedEvents.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
   }
 
-  container.appendChild(topActions(
-    params.thread_id,
-    async () => {
-      const topRow = container.querySelector(".thread-top-actions");
-      const suggestBtn = topRow?.querySelector(".suggest-btn");
-      if (suggestBtn) {
-        suggestBtn.disabled = true;
-        suggestBtn.textContent = "🤖 Генерирую…";
-      }
-      try {
-        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {
-          method: "POST",
-        });
-        render(mount, params);
-      } catch (e) {
-        alert(`Ошибка: ${e.message ?? String(e)}`);
-        if (suggestBtn) {
-          suggestBtn.disabled = false;
-          suggestBtn.textContent = "🤖 Предложить ответ";
-        }
-      }
-    },
-    () => {
-      const topRow = container.querySelector(".thread-top-actions");
-      const composeForm = buildComposeForm({
-        threadId: params.thread_id,
-        onSubmitComplete: () => render(mount, params),
-        onCancel: () => render(mount, params),
-      });
-      if (topRow) topRow.replaceWith(composeForm);
-    },
-  ));
-
   if (review) {
     const draftBlock = pendingDraftBlock(review);
     container.appendChild(draftBlock);
@@ -344,6 +299,35 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
               onError: (msg) => alert(`Ошибка: ${msg}`),
             });
             if (oldGrid && form) oldGrid.replaceWith(form);
+          },
+          onSuggest: async () => {
+            const gridEl = container.querySelector(".action-grid");
+            const sBtn = gridEl?.querySelector(".suggest-btn");
+            if (sBtn) {
+              sBtn.disabled = true;
+              sBtn.textContent = "🤖 Генерирую…";
+            }
+            try {
+              await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {
+                method: "POST",
+              });
+              render(mount, params);
+            } catch (e) {
+              alert(`Ошибка: ${e.message ?? String(e)}`);
+              if (sBtn) {
+                sBtn.disabled = false;
+                sBtn.textContent = "🤖 Предложить";
+              }
+            }
+          },
+          onCompose: () => {
+            const gridEl = container.querySelector(".action-grid");
+            const composeForm = buildComposeForm({
+              threadId: params.thread_id,
+              onSubmitComplete: () => render(mount, params),
+              onCancel: () => render(mount, params),
+            });
+            if (gridEl && composeForm) gridEl.replaceWith(composeForm);
           },
         });
       }

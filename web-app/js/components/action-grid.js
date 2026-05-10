@@ -1,7 +1,7 @@
 // Action grid — sticky-bottom компонент с inline confirm state machine.
 
-import { api } from "../api.js?v=20260510-19";
-import { el } from "../utils.js?v=20260510-19";
+import { api } from "../api.js?v=20260510-20";
+import { el } from "../utils.js?v=20260510-20";
 
 const CONFIRM_TIMEOUT_MS = 5000;
 
@@ -22,14 +22,20 @@ const ACTIONS = {
 };
 
 
-export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest}) {
+export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest, onSuggest, onCompose}) {
   /**
    * onActionComplete(action_key, response_body) — после успешного API call
    * onError(action_key, message) — при HTTP error
    * onEditRequest(field) — оператор тапнул edit-* / price / instruction
+   * onSuggest() — кнопка "🤖 Предложить ответ"
+   * onCompose() — кнопка "✉️ Написать клиенту"
    */
   const grid = el(`
     <div class="action-grid mt-3">
+      <div class="row g-2 mb-2">
+        <div class="col-6"><button class="btn btn-outline-success w-100 suggest-btn">🤖 Предложить</button></div>
+        <div class="col-6"><button class="btn btn-outline-primary w-100 compose-btn">✉️ Написать</button></div>
+      </div>
       <div class="d-grid mb-2">
         <button data-action="send" class="btn btn-primary">✅ ОТПРАВИТЬ</button>
       </div>
@@ -133,6 +139,15 @@ export function buildActionGrid({msgId, onActionComplete, onError, onEditRequest
     } else {
       startConfirm(actionKey);
     }
+  });
+
+  grid.querySelector(".suggest-btn").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (onSuggest) onSuggest();
+  });
+  grid.querySelector(".compose-btn").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (onCompose) onCompose();
   });
 
   return grid;
