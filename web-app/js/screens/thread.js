@@ -1,9 +1,9 @@
-import { api } from "../api.js?v=20260510-13";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-13";
-import { buildActionGrid } from "../components/action-grid.js?v=20260510-13";
-import { buildEditForm } from "../components/edit-form.js?v=20260510-13";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-13";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-13";
+import { api } from "../api.js?v=20260510-14";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-14";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-14";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-14";
+import { buildComposeForm } from "../components/compose-form.js?v=20260510-14";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-14";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -201,7 +201,8 @@ export async function render(mount, params) {
   setLoading(mount, "Загружаю тред…");
   try {
     const data = await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}`);
-    const latestPendingMsgId = findLatestPending(data.events);
+    // If deep-linked via /thread/{id}/msg/{N} — focus on that msg_id, else find latest pending
+    const latestPendingMsgId = params.focus_msg_id ? Number(params.focus_msg_id) : findLatestPending(data.events);
 
     let review = null;
     let acquired = false;

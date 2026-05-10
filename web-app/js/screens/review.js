@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260510-13";
-import { setLoading, setError } from "../utils.js?v=20260510-13";
+import { api } from "../api.js?v=20260510-14";
+import { setLoading, setError } from "../utils.js?v=20260510-14";
 
 export async function render(mount, params) {
   setLoading(mount, "Открываю карточку…");
@@ -9,7 +9,7 @@ export async function render(mount, params) {
       setError(mount, "Тред не найден");
       return;
     }
-    location.hash = `#/thread/${encodeURIComponent(review.thread_id)}`;
+    location.hash = `#/thread/${encodeURIComponent(review.thread_id)}/msg/${encodeURIComponent(params.msg_id)}`;
   } catch (e) {
     setError(mount, e.message ?? String(e));
   }
