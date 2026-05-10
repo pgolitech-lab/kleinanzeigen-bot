@@ -527,3 +527,30 @@ async def ma_instruction(msg_id: int, body: InstructionBody,
     _apply_regenerate_result(msg_id, result)
     telegram_bot.broadcast_after_external_action(msg_id)
     return _message_review_dict(msg_id)
+
+
+class ComposeBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+@router.post("/threads/{thread_id}/compose")
+async def ma_compose(thread_id: str, body: ComposeBody,
+                     user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Operator-initiated message in thread (compose mode)."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    source_msg_id = history[-1]["id"]
+
+    import asyncio
+    result = await asyncio.to_thread(
+        scheduler.send_manual_compose, source_msg_id, body.text
+    )
+    if result.get("kind") == "error":
+        raise HTTPException(500, result.get("message", "compose failed"))
+
+    return {
+        "ok": True,
+        "sent_msg_id": result.get("message_id"),
+        "thread_id": thread_id,
+    }
