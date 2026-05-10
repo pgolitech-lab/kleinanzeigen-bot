@@ -251,3 +251,65 @@ def test_edit_ru_too_long_422(client):
                  json={"text": "x" * 5000},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 422
+
+
+def test_price_success(client):
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.regenerate_with_price.return_value = {
+        "ru_answer": "согласен на 1400",
+        "client_answer": "akzeptiere 1400",
+        "ru_translation": "принимаю 1400",
+        "deal_summary_ru": "", "expected_next": "",
+        "negotiated_price_eur": 1400, "client_assessment": "",
+    }
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/price",
+                 json={"eur": 1400},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    args, kwargs = mclaude.regenerate_with_price.call_args
+    assert args[1] == 1400
+    mtb.broadcast_after_external_action.assert_called_once_with(123)
+
+
+def test_price_invalid_negative_422(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/price",
+                 json={"eur": -10},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
+
+
+def test_price_invalid_too_high_422(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/price",
+                 json={"eur": 999999},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
+
+
+def test_instruction_success(client):
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.regenerate_with_instruction.return_value = {
+        "ru_answer": "x", "client_answer": "y", "ru_translation": "z",
+        "deal_summary_ru": "", "expected_next": "",
+        "negotiated_price_eur": None, "client_assessment": "",
+    }
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/instruction",
+                 json={"text": "Скажи что доставим завтра"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    args, kwargs = mclaude.regenerate_with_instruction.call_args
+    assert args[1] == "Скажи что доставим завтра"
+
+
+def test_instruction_empty_422(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/instruction",
+                 json={"text": ""},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422

@@ -475,3 +475,55 @@ async def ma_edit_de(msg_id: int, body: EditTextBody,
                       status="edited")
     telegram_bot.broadcast_after_external_action(msg_id)
     return _message_review_dict(msg_id)
+
+
+class PriceBody(BaseModel):
+    eur: float = Field(..., gt=0, lt=100000)
+
+
+class InstructionBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000)
+
+
+@router.post("/messages/{msg_id}/price")
+async def ma_price(msg_id: int, body: PriceBody,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Регенерировать с конкретной ценой от оператора."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    import asyncio
+    result = await asyncio.to_thread(
+        claude.regenerate_with_price, row, body.eur
+    )
+    _apply_regenerate_result(msg_id, result)
+    telegram_bot.broadcast_after_external_action(msg_id)
+    return _message_review_dict(msg_id)
+
+
+@router.post("/messages/{msg_id}/instruction")
+async def ma_instruction(msg_id: int, body: InstructionBody,
+                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Регенерировать со свободной инструкцией."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    import asyncio
+    result = await asyncio.to_thread(
+        claude.regenerate_with_instruction, row, body.text
+    )
+    _apply_regenerate_result(msg_id, result)
+    telegram_bot.broadcast_after_external_action(msg_id)
+    return _message_review_dict(msg_id)
