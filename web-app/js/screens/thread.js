@@ -3,6 +3,7 @@ import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=2026051
 import { buildActionGrid } from "../components/action-grid.js?v=20260510-11";
 import { buildEditForm } from "../components/edit-form.js?v=20260510-11";
 import { buildComposeForm } from "../components/compose-form.js?v=20260510-12";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-12";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -303,6 +304,38 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       container.appendChild(warn);
     }
   }
+
+  // Autopilot status block — viewable in any thread (with or without pending)
+  const autopilotState = review?.autopilot ?? (
+    data.header.is_autopilot ? {active: true} : null
+  );
+
+  const apStatusContainer = el(`<div class="ap-wrap"></div>`);
+
+  function renderApStatus() {
+    apStatusContainer.replaceChildren(buildAutopilotStatus({
+      autopilotState,
+      onStop: async () => {
+        if (!confirm("Остановить автопилот?")) return;
+        try {
+          await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/autopilot/stop`, {method: "POST"});
+          render(mount, params);
+        } catch (e) {
+          alert(`Ошибка: ${e.message ?? String(e)}`);
+        }
+      },
+      onStart: () => {
+        const form = buildAutopilotForm({
+          threadId: params.thread_id,
+          onSubmitComplete: () => render(mount, params),
+          onCancel: () => renderApStatus(),
+        });
+        apStatusContainer.replaceChildren(form);
+      },
+    }));
+  }
+  renderApStatus();
+  container.appendChild(apStatusContainer);
 
   container.appendChild(backRow(params.thread_id, () => {
     // Replace bottom row with compose form
