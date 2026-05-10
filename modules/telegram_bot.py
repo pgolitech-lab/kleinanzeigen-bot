@@ -23,6 +23,7 @@ from telegram import (
     KeyboardButton,
     ReplyKeyboardMarkup,
     Update,
+    WebAppInfo,
 )
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -1244,7 +1245,7 @@ def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
     )
     kb = {
         "inline_keyboard": [
-            [{"text": "📋 Открыть карточку треда", "callback_data": f"pipe:{msg_id}"}],
+            [{"text": "📋 Открыть карточку треда", "web_app": {"url": _ma_deep_link(f"thread_{msg['gmail_thread_id']}")}}],
             [{"text": "↩ Назад к pipeline", "callback_data": f"back:{msg_id}"}],
         ]
     }
@@ -1869,7 +1870,7 @@ def _pipeline_thread_card(r: sqlite3.Row, n: int, marker: str) -> tuple[str, Inl
         button_label = button_label[:63] + "…"
 
     kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton(button_label, callback_data=f"pipe:{r['id']}")
+        InlineKeyboardButton(button_label, web_app=WebAppInfo(url=_ma_deep_link(f"thread_{r['gmail_thread_id']}")))
     ]])
     return text, kb
 
