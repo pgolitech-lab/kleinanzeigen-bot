@@ -42,6 +42,57 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
 
+# Mini App URL для deep-link buttons. Pages serves SPA из main:/web-app/.
+MA_BASE_URL = "https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/"
+
+
+def _ma_deep_link(start_param: str) -> str:
+    """Сформировать URL для web_app кнопки. start_param формата 'review_<msg_id>' / 'thread_<id>'."""
+    return f"{MA_BASE_URL}?tgWebAppStartParam={start_param}"
+
+
+def _minicard_text(msg) -> str:
+    """Компактный текст для bot-уведомления о новом draft / обновления после MA-action.
+
+    ~5 строк вместо 30 в полной review-карточке.
+    """
+    buyer = msg["buyer_display_name"] if "buyer_display_name" in msg.keys() else None
+    if not buyer:
+        buyer = "?"
+    ad_title = msg["ad_title"] if "ad_title" in msg.keys() else None
+    if not ad_title:
+        ad_title = "(без названия)"
+    ad_price = msg["ad_price"] if "ad_price" in msg.keys() else None
+    if not ad_price:
+        ad_price = "?"
+    de_client = msg["de_client"] if "de_client" in msg.keys() else ""
+    status = msg["status"] if "status" in msg.keys() else ""
+
+    status_emoji = {
+        "pending": "📨", "new": "📨", "edited": "✏️", "approved": "👌",
+        "sent": "✅", "sent_debug": "🟨", "skipped": "❌", "skipped_sold": "💰",
+    }.get(status or "", "📨")
+
+    snippet = (de_client or "")[:160].replace("\n", " ").strip()
+    if len(de_client or "") > 160:
+        snippet += "…"
+
+    text = f"{status_emoji} <b>{_html(buyer)}</b>\n"
+    text += f"🏷 {_html(ad_title)} · {_html(ad_price)}"
+    if snippet:
+        text += f"\n💬 {_html(snippet)}"
+    return text
+
+
+def _ma_review_keyboard(msg_id: int) -> dict:
+    """Single-button inline keyboard — открывает MA review screen."""
+    return {
+        "inline_keyboard": [[{
+            "text": "📋 Открыть в MA",
+            "web_app": {"url": _ma_deep_link(f"review_{msg_id}")},
+        }]]
+    }
+
 
 # ============================================================
 # HTTP API (sync) — для отправки уведомлений из scheduler-а
@@ -1246,18 +1297,8 @@ def send_for_review(message_id: int) -> Optional[int]:
         logger.warning("send_for_review: сообщение %s не найдено в БД", message_id)
         return None
 
-    text = _truncate_html_safe(_format_review_text(msg))
-    # Если автопилот активен для треда — урезанная клавиатура (только Stop + Back)
-    ap = db.get_thread_autopilot(msg["gmail_thread_id"] or "")
-    if ap and ap["active"]:
-        kb_obj = _autopilot_active_keyboard(message_id)
-        # Конвертируем в dict для _http_post (sync API)
-        kb = {"inline_keyboard": [
-            [{"text": btn.text, "callback_data": btn.callback_data} for btn in row]
-            for row in kb_obj.inline_keyboard
-        ]}
-    else:
-        kb = _review_keyboard(message_id, msg["status"])
+    text = _minicard_text(msg)
+    kb = _ma_review_keyboard(message_id)
     dm_ids = config.telegram_operator_dm_ids()
     targets = dm_ids if dm_ids else [config.telegram_chat_id()]
 
