@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260510-7";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-7";
+import { api } from "../api.js?v=20260510-8";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-8";
 
 function threadRow(t) {
   const row = el(`

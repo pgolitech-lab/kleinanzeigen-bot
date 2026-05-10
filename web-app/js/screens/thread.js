@@ -1,8 +1,12 @@
-import { api } from "../api.js?v=20260510-7";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-7";
+import { api } from "../api.js?v=20260510-8";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-8";
+import { buildActionGrid } from "../components/action-grid.js?v=20260510-8";
+import { buildEditForm } from "../components/edit-form.js?v=20260510-8";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
+// Module-state для lock release at unmount.
+let _heldMsgId = null;
 
 function findLatestPending(events) {
   let candidate = null;
@@ -13,7 +17,6 @@ function findLatestPending(events) {
   }
   return candidate;
 }
-
 
 function threadHeader(header, lock) {
   const card = el(`
@@ -55,7 +58,6 @@ function threadHeader(header, lock) {
   return card;
 }
 
-
 function eventBubble(event, latestPendingMsgId) {
   const isIn = event.kind === "in";
   const align = isIn ? "" : "ms-auto";
@@ -86,7 +88,6 @@ function eventBubble(event, latestPendingMsgId) {
   return bubble;
 }
 
-
 function relatedBlock(related) {
   if (!related?.matches?.length) return null;
   const block = el(`
@@ -106,10 +107,9 @@ function relatedBlock(related) {
   return block;
 }
 
-
 function pendingDraftBlock(review) {
   const block = el(`
-    <div class="border-top pt-3 mt-3">
+    <div class="border-top pt-3 mt-3 pending-draft">
       <div class="text-muted small mb-2 fw-semibold draft-header"></div>
       <div class="ru-answer-block mb-2">
         <div class="text-muted small">RU (идея от GPT)</div>
@@ -147,42 +147,152 @@ function pendingDraftBlock(review) {
   return block;
 }
 
+function lockedByOtherBanner(lock, onRetry) {
+  const block = el(`
+    <div class="alert alert-warning mt-3">
+      <div class="mb-2"><strong>⚠️ Карточка занята оператором <span class="holder"></span>.</strong></div>
+      <div class="small text-muted mb-2">Действия недоступны (осталось ~<span class="mins"></span> мин).</div>
+      <button class="btn btn-sm btn-outline-primary retry-btn">↻ Проверить снова</button>
+    </div>
+  `);
+  block.querySelector(".holder").textContent = lock.holder ?? "?";
+  block.querySelector(".mins").textContent = String(lock.remaining_min ?? 0);
+  block.querySelector(".retry-btn").addEventListener("click", onRetry);
+  return block;
+}
 
 function backToPipeline() {
-  return el(`<a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ К pipeline</a>`);
+  return el(`<a class="btn btn-sm btn-outline-secondary mt-3" href="#/pipeline">↩ К pipeline</a>`);
+}
+
+
+async function tryReleaseLock(msgId) {
+  if (msgId === null) return;
+  try {
+    await api(`/api/ma/messages/${msgId}/lock/release`, {method: "POST"});
+  } catch (e) {
+    console.warn("[thread] lock release failed:", e);
+  }
 }
 
 
 export async function render(mount, params) {
+  // Cleanup: release предыдущий lock (если был на другом thread)
+  if (_heldMsgId !== null) {
+    await tryReleaseLock(_heldMsgId);
+    _heldMsgId = null;
+  }
+
   setLoading(mount, "Загружаю тред…");
   try {
     const data = await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}`);
     const latestPendingMsgId = findLatestPending(data.events);
 
     let review = null;
+    let acquired = false;
+    let acquireError = null;
+
     if (latestPendingMsgId !== null) {
       try {
         review = await api(`/api/ma/messages/${latestPendingMsgId}`);
       } catch (e) {
         console.warn("[thread] review fetch failed:", e);
       }
+
+      try {
+        const lockRes = await api(`/api/ma/messages/${latestPendingMsgId}/lock/acquire`, {method: "POST"});
+        acquired = true;
+        _heldMsgId = latestPendingMsgId;
+        if (review) {
+          review.lock = lockRes;
+        }
+      } catch (e) {
+        if (e.message && e.message.includes("HTTP 409")) {
+          acquireError = "locked";
+        } else {
+          acquireError = "network";
+          console.warn("[thread] lock acquire failed:", e);
+        }
+      }
     }
 
-    const container = el(`<div></div>`);
-    container.appendChild(threadHeader(data.header, review?.lock));
-    const related = relatedBlock(data.related);
-    if (related) container.appendChild(related);
-    if (data.events.length === 0) {
-      container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
-    } else {
-      data.events.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
-    }
-    if (review) {
-      container.appendChild(pendingDraftBlock(review));
-    }
-    container.appendChild(backToPipeline());
-    mount.replaceChildren(container);
+    renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError);
+
   } catch (e) {
     setError(mount, e.message ?? String(e));
   }
 }
+
+
+function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError) {
+  const container = el(`<div></div>`);
+
+  container.appendChild(threadHeader(data.header, review?.lock ?? null));
+  const related = relatedBlock(data.related);
+  if (related) container.appendChild(related);
+  if (data.events.length === 0) {
+    container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
+  } else {
+    data.events.forEach(e => container.appendChild(eventBubble(e, latestPendingMsgId)));
+  }
+
+  if (review) {
+    const draftBlock = pendingDraftBlock(review);
+    container.appendChild(draftBlock);
+
+    if (acquireError === "locked" && review.lock) {
+      container.appendChild(lockedByOtherBanner(review.lock, () => render(mount, params)));
+    } else if (acquired) {
+      const grid = buildActionGrid({
+        msgId: latestPendingMsgId,
+        onActionComplete: (action, res) => {
+          render(mount, params);
+        },
+        onError: (action, message) => {
+          alert(`Ошибка: ${message}`);
+        },
+        onEditRequest: (field) => {
+          const oldGrid = container.querySelector(".action-grid");
+          const form = buildEditForm({
+            msgId: latestPendingMsgId,
+            field,
+            review,
+            onSubmitComplete: () => render(mount, params),
+            onCancel: () => render(mount, params),
+            onError: (msg) => alert(`Ошибка: ${msg}`),
+          });
+          if (oldGrid && form) oldGrid.replaceWith(form);
+        },
+      });
+      container.appendChild(grid);
+    } else if (acquireError === "network") {
+      const warn = el(`<p class="text-warning small mt-3">⚠️ Не удалось взять lock — действия недоступны. <a href="#" class="reload-link">Перезагрузить</a></p>`);
+      warn.querySelector(".reload-link").addEventListener("click", (e) => {
+        e.preventDefault();
+        render(mount, params);
+      });
+      container.appendChild(warn);
+    }
+  }
+
+  container.appendChild(backToPipeline());
+  mount.replaceChildren(container);
+}
+
+
+// Lock release on navigation away
+window.addEventListener("hashchange", () => {
+  if (_heldMsgId !== null && !location.hash.startsWith("#/thread/")) {
+    const msgId = _heldMsgId;
+    _heldMsgId = null;
+    tryReleaseLock(msgId);
+  }
+});
+
+// Lock release on TG WebApp close / page hide (best-effort via sendBeacon)
+window.addEventListener("pagehide", () => {
+  if (_heldMsgId !== null && navigator.sendBeacon) {
+    // sendBeacon без auth header — backup; primary защита auto-expire 5 мин
+    navigator.sendBeacon(`/api/ma/messages/${_heldMsgId}/lock/release`);
+  }
+});
