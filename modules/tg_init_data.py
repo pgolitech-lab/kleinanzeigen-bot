@@ -29,6 +29,8 @@ def verify_init_data(raw: str) -> dict:
     """
     parsed = parse_qs(raw, strict_parsing=False, keep_blank_values=True)
     if "hash" not in parsed or "user" not in parsed or "auth_date" not in parsed:
+        import logging as _lg
+        _lg.getLogger("init_data_debug").warning("401 missing fields keys=%s", list(parsed.keys()))
         raise HTTPException(401, "init_data malformed: missing required field")
 
     received_hash = parsed.pop("hash")[0]
@@ -41,6 +43,8 @@ def verify_init_data(raw: str) -> dict:
     # Future auth_date с small clock-skew tolerance считаем валидным;
     # past — только в пределах AUTH_DATE_MAX_AGE_SEC.
     if auth_date > now + 60 or now - auth_date > AUTH_DATE_MAX_AGE_SEC:
+        import logging as _lg
+        _lg.getLogger("init_data_debug").warning("401 expired auth_date=%s now=%s diff=%s", auth_date, int(now), int(now)-auth_date)
         raise HTTPException(401, "init_data expired or future-dated")
 
     # data-check-string: k=v\nk=v... отсортированных по ключу.
@@ -52,8 +56,12 @@ def verify_init_data(raw: str) -> dict:
 
     # Bug fix: non-ASCII hash crashes compare_digest with TypeError → guard first.
     if not received_hash.isascii():
+        import logging as _lg
+        _lg.getLogger("init_data_debug").warning("401 hash mismatch got=%s expected=%s", received_hash[:16], expected_hash[:16])
         raise HTTPException(401, "init_data: hash mismatch")
     if not hmac.compare_digest(expected_hash, received_hash):
+        import logging as _lg
+        _lg.getLogger("init_data_debug").warning("401 hash compare fail got=%s expected=%s url_keys=%s", received_hash[:16], expected_hash[:16], list(parsed.keys()))
         raise HTTPException(401, "init_data: hash mismatch")
 
     try:

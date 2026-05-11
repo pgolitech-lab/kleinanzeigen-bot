@@ -52,37 +52,147 @@ def _ma_deep_link(start_param: str) -> str:
     return f"{MA_BASE_URL}?tgWebAppStartParam={start_param}"
 
 
-def _minicard_text(msg) -> str:
-    """Компактный текст для bot-уведомления о новом draft / обновления после MA-action.
+def _safe(row, key, default=None):
+    if row is None:
+        return default
+    try:
+        return row[key] if key in row.keys() else default
+    except Exception:
+        return default
 
-    ~5 строк вместо 30 в полной review-карточке.
+
+def _minicard_text(msg) -> str:
+    """Thread-state мини-карточка: показывает АКТУАЛЬНОЕ состояние треда.
+
+    Обновляется после каждого incoming/outgoing event через broadcast_thread_state.
     """
-    buyer = msg["buyer_display_name"] if "buyer_display_name" in msg.keys() else None
-    if not buyer:
-        buyer = "?"
-    ad_title = msg["ad_title"] if "ad_title" in msg.keys() else None
-    if not ad_title:
-        ad_title = "(без названия)"
-    ad_price = msg["ad_price"] if "ad_price" in msg.keys() else None
-    if not ad_price:
-        ad_price = "?"
-    de_client = msg["de_client"] if "de_client" in msg.keys() else ""
-    status = msg["status"] if "status" in msg.keys() else ""
+    thread_id = _safe(msg, "gmail_thread_id") or ""
+    history = db.thread_history(thread_id) if thread_id else [msg]
+    if not history:
+        history = [msg]
+
+    # Latest in-row для buyer/ad/deal_brief/status
+    latest_in = None
+    for r in reversed(history):
+        if _safe(r, "direction") == "in":
+            latest_in = r
+            break
+    if latest_in is None:
+        latest_in = msg
+
+    buyer = _safe(latest_in, "buyer_display_name") or "?"
+    ad_title = _safe(latest_in, "ad_title") or "(без названия)"
+    ad_price = _safe(latest_in, "ad_price") or "?"
+    status = _safe(latest_in, "status") or ""
+
+    # Latest event chronologically (in или out)
+    latest_event = None  # (kind, text, ts)
+    for r in history:
+        d = _safe(r, "direction")
+        if d == "in" and _safe(r, "de_client"):
+            ts = (_safe(r, "created_at") or "")[:16]
+            latest_event = ("in", _safe(r, "de_client"), ts)
+        elif d == "out" and _safe(r, "de_answer") and _safe(r, "status") in ("sent", "sent_debug"):
+            ts = (_safe(r, "sent_at") or _safe(r, "created_at") or "")[:16]
+            latest_event = ("out", _safe(r, "de_answer"), ts)
+
+    # deal_brief из latest in-row
+    deal_brief = None
+    raw = _safe(latest_in, "deal_brief_json")
+    if raw:
+        try:
+            d = json.loads(raw)
+            summary = (d.get("summary_ru") or "").strip()
+            price = d.get("negotiated_price_eur")
+            assess = (d.get("client_assessment") or "").strip()
+            parts = []
+            if isinstance(price, (int, float)) and price > 0:
+                parts.append(f"💰 {int(price)}€")
+            if assess:
+                parts.append(f"🏷 {assess}")
+            if summary:
+                deal_brief = summary + (" · " + " · ".join(parts) if parts else "")
+            elif parts:
+                deal_brief = " · ".join(parts)
+        except Exception:
+            pass
+
+    # Sold-цена явная — приоритет
+    sold_price = _safe(latest_in, "sold_price_eur")
+    if sold_price is not None:
+        status = "skipped_sold"
 
     status_emoji = {
         "pending": "📨", "new": "📨", "edited": "✏️", "approved": "👌",
         "sent": "✅", "sent_debug": "🟨", "skipped": "❌", "skipped_sold": "💰",
+        "deferred": "⏸",
     }.get(status or "", "📨")
 
-    snippet = (de_client or "")[:160].replace("\n", " ").strip()
-    if len(de_client or "") > 160:
-        snippet += "…"
+    lines = [f"{status_emoji} <b>{_html(buyer)}</b>"]
+    lines.append(f"🏷 {_html(ad_title)} · {_html(ad_price)}")
 
-    text = f"{status_emoji} <b>{_html(buyer)}</b>\n"
-    text += f"🏷 {_html(ad_title)} · {_html(ad_price)}"
-    if snippet:
-        text += f"\n💬 {_html(snippet)}"
-    return text
+    if latest_event:
+        kind, body, ts = latest_event
+        snippet = (body or "")[:160].replace("\n", " ").strip()
+        if len(body or "") > 160:
+            snippet += "…"
+        arrow = "👤" if kind == "in" else "📤"
+        hhmm = ""
+        if ts:
+            try:
+                # iso 'YYYY-MM-DDTHH:MM' → 'DD.MM HH:MM'
+                from datetime import datetime as _dt
+                d_ = _dt.fromisoformat(ts.replace("Z", "")[:16])
+                hhmm = d_.strftime("%d.%m %H:%M") + " "
+            except Exception:
+                pass
+        lines.append(f"{arrow} <i>{_html(hhmm)}</i>{_html(snippet)}")
+
+    if deal_brief:
+        lines.append(f"💡 {_html(deal_brief)}")
+
+    if sold_price is not None:
+        lines.append(f"💰 <b>Продано за {int(sold_price)}€</b>")
+
+    return "\n".join(lines)
+
+
+def broadcast_thread_state(gmail_thread_id: str) -> None:
+    """Обновить ТЕКСТ всех мини-карточек треда (любая msg_id) — thread-state.
+
+    Используется после incoming/outgoing event'а, чтобы все исторические карточки
+    показывали актуальное состояние переговоров. Best-effort; ошибки в log.
+    """
+    if not gmail_thread_id:
+        return
+    history = db.thread_history(gmail_thread_id)
+    if not history:
+        return
+    # Любая row подойдёт — _minicard_text смотрит полную историю
+    msg = history[-1]
+    try:
+        text = _minicard_text(msg)
+    except Exception:
+        logger.exception("broadcast_thread_state: _minicard_text failed")
+        return
+    text = _truncate_html_safe(text)
+
+    dispatches = db.list_thread_dispatches(gmail_thread_id)
+    for d in dispatches:
+        try:
+            _http_post_single("editMessageText", {
+                "chat_id": d["chat_id"],
+                "message_id": d["tg_msg_id"],
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+        except Exception as e:
+            msg_l = str(e).lower()
+            if "not modified" in msg_l or "message to edit not found" in msg_l:
+                continue
+            logger.warning("broadcast_thread_state edit failed chat=%s tgmsg=%s: %s",
+                           d["chat_id"], d["tg_msg_id"], e)
 
 
 def _ma_review_keyboard(msg_id: int) -> dict:
@@ -519,12 +629,10 @@ def _truncate_html_safe(text: str, limit: int = 4000, suffix: str = "\n\n<i>…(
 
 
 def broadcast_after_external_action(msg_id: int) -> None:
-    """Sync обновление всех DM-копий review-карточки после внешнего действия (MA).
+    """Sync обновление всех DM-копий мини-карточек ТРЕДА после внешнего действия.
 
-    Best-effort: log + return на любой ошибке. Обновляет только text — keyboard
-    остаётся прежним (бот пересоберёт его при следующем взаимодействии).
-
-    Используется из web/api_ma.py POST endpoint'ов.
+    Делегирует в broadcast_thread_state — все исторические карточки треда
+    показывают одинаковый thread-state. Best-effort.
     """
     try:
         msg = db.get_message(msg_id)
@@ -533,42 +641,27 @@ def broadcast_after_external_action(msg_id: int) -> None:
         return
     if not msg:
         return
+    thread_id = msg["gmail_thread_id"] if "gmail_thread_id" in msg.keys() else None
+    if thread_id:
+        broadcast_thread_state(thread_id)
+        return
 
+    # Fallback (legacy без thread_id): обновить только эту карточку
     try:
-        text = _minicard_text(msg)
+        text = _truncate_html_safe(_minicard_text(msg))
     except Exception:
-        logger.exception("broadcast_after_external_action: _minicard_text failed")
         return
-    text = _truncate_html_safe(text)
-
-    dispatches = db.list_card_dispatches(msg_id)
-    if not dispatches:
-        # Fallback на legacy telegram_message_id
-        if msg["telegram_message_id"]:
-            try:
-                _http_post_single("editMessageText", {
-                    "chat_id": int(config.telegram_chat_id()),
-                    "message_id": msg["telegram_message_id"],
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                })
-            except Exception:
-                logger.warning("broadcast_after_external_action legacy edit failed")
-        return
-
-    for d in dispatches:
+    if msg["telegram_message_id"]:
         try:
             _http_post_single("editMessageText", {
-                "chat_id": d["chat_id"],
-                "message_id": d["tg_msg_id"],
+                "chat_id": int(config.telegram_chat_id()),
+                "message_id": msg["telegram_message_id"],
                 "text": text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             })
         except Exception:
-            logger.warning("broadcast_after_external_action edit failed: chat=%s msg=%s",
-                           d["chat_id"], d["tg_msg_id"])
+            pass
 
 
 def refresh_pipeline_for_active_chats() -> None:

@@ -145,6 +145,9 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
 
 @router.get("/threads/{thread_id}")
 async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    import logging as _lg
+    _lg.getLogger("web.api_ma").info("ma_thread ok thread=%s user=%s",
+                                     thread_id[:20], user.get("id"))
     return _thread_dict(thread_id)
 
 

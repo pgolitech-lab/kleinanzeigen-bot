@@ -497,6 +497,19 @@ def list_card_dispatches(message_id: int) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def list_thread_dispatches(gmail_thread_id: str) -> list[sqlite3.Row]:
+    """Все fanout-копии всех мини-карточек треда (для broadcast thread-state)."""
+    if not gmail_thread_id:
+        return []
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT cd.* FROM card_dispatches cd "
+            "JOIN messages m ON m.id = cd.message_id "
+            "WHERE m.gmail_thread_id = ? ORDER BY cd.id",
+            (gmail_thread_id,),
+        ).fetchall()
+
+
 # --- CLOSED THREADS ---
 
 def close_thread(gmail_thread_id: str, closed_by: Optional[str] = None) -> None:
