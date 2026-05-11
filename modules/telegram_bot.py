@@ -571,6 +571,101 @@ def broadcast_after_external_action(msg_id: int) -> None:
                            d["chat_id"], d["tg_msg_id"])
 
 
+def refresh_pipeline_for_active_chats() -> None:
+    """Sync re-render всех активных pipeline-сообщений по DM-чатам операторов.
+
+    Использует ordered list из `_CHAT_PIPELINE_MSGS` (заполнен в `_on_pipeline`
+    и в callback `back`). Для каждого чата:
+      - regenerate `_format_pipeline_messages()` (свежий снимок БД)
+      - edit text+reply_markup по индексам в `_http_post_single`
+      - count grow → append через sendMessage
+      - count shrink → deleteMessage избытка
+    Best-effort: все ошибки логируем warning, continue.
+
+    Вызывается из scheduler после incoming/outgoing event и из MA endpoints
+    после `broadcast_after_external_action`.
+    """
+    if not _CHAT_PIPELINE_MSGS:
+        return
+    try:
+        messages = _format_pipeline_messages()
+    except Exception:
+        logger.exception("refresh_pipeline: _format_pipeline_messages failed")
+        return
+
+    new_count = len(messages)
+    for chat_id, old_ids in list(_CHAT_PIPELINE_MSGS.items()):
+        if not old_ids:
+            continue
+        try:
+            common = min(new_count, len(old_ids))
+            # 1) Edit overlapping positions
+            for i in range(common):
+                text, kb = messages[i]
+                text = _truncate_html_safe(text)
+                payload: dict[str, Any] = {
+                    "chat_id": chat_id,
+                    "message_id": old_ids[i],
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                }
+                # Inline keyboard (web_app buttons на карточках). Index 0 = header
+                # без kb; persistent ReplyKb всё равно через editMessageText не меняется.
+                if kb is not None:
+                    try:
+                        payload["reply_markup"] = kb.to_dict() if hasattr(kb, "to_dict") else kb
+                    except Exception:
+                        pass
+                try:
+                    _http_post_single("editMessageText", payload)
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "not modified" in msg or "message is not modified" in msg:
+                        continue
+                    if "message to edit not found" in msg or "message_id_invalid" in msg:
+                        logger.info("refresh_pipeline: msg %s gone in chat %s — skip", old_ids[i], chat_id)
+                        continue
+                    logger.warning("refresh_pipeline edit failed chat=%s msg=%s: %s",
+                                   chat_id, old_ids[i], e)
+
+            # 2) Grow: send extras
+            new_ordered = list(old_ids[:common])
+            for i in range(common, new_count):
+                text, kb = messages[i]
+                text = _truncate_html_safe(text)
+                payload = {
+                    "chat_id": chat_id, "text": text,
+                    "parse_mode": "HTML", "disable_web_page_preview": True,
+                }
+                if kb is not None:
+                    try:
+                        payload["reply_markup"] = kb.to_dict() if hasattr(kb, "to_dict") else kb
+                    except Exception:
+                        pass
+                try:
+                    r = _http_post_single("sendMessage", payload)
+                    sent_id = (r or {}).get("message_id")
+                    if sent_id:
+                        new_ordered.append(int(sent_id))
+                        _track_msg(chat_id, int(sent_id))
+                except Exception as e:
+                    logger.warning("refresh_pipeline send extra failed chat=%s: %s", chat_id, e)
+
+            # 3) Shrink: delete excess
+            for i in range(new_count, len(old_ids)):
+                try:
+                    _http_post_single("deleteMessage", {
+                        "chat_id": chat_id, "message_id": old_ids[i],
+                    })
+                except Exception:
+                    pass
+
+            _CHAT_PIPELINE_MSGS[chat_id] = new_ordered
+        except Exception:
+            logger.exception("refresh_pipeline: chat=%s unexpected", chat_id)
+
+
 async def _safe_edit(query, text: str, reply_markup=None) -> None:
     """Edit текущей карточки. Длинный HTML — auto-truncate. 'not modified' — silent."""
     text = _truncate_html_safe(text)
@@ -792,6 +887,10 @@ def send_for_review(message_id: int) -> Optional[int]:
 # Очищается полностью при /pipeline вызове.
 _CHAT_TRACKED_MSGS: dict[int, set[int]] = {}
 
+# Ordered список pipeline-сообщений по chat_id (header=0, cards=1..N) — нужен
+# для in-place edit при auto-refresh (см. refresh_pipeline_for_active_chats).
+_CHAT_PIPELINE_MSGS: dict[int, list[int]] = {}
+
 
 def _track_msg(chat_id: Any, msg_id: Optional[int]) -> None:
     """Запомнить message_id чтобы удалить при следующем /pipeline вызове."""
@@ -799,6 +898,14 @@ def _track_msg(chat_id: Any, msg_id: Optional[int]) -> None:
         return
     try:
         _CHAT_TRACKED_MSGS.setdefault(int(chat_id), set()).add(int(msg_id))
+    except (TypeError, ValueError):
+        pass
+
+
+def _remember_pipeline_msgs(chat_id: Any, msg_ids: list[int]) -> None:
+    """Сохранить ordered список pipeline message_ids для последующего in-place refresh."""
+    try:
+        _CHAT_PIPELINE_MSGS[int(chat_id)] = [int(m) for m in msg_ids if m]
     except (TypeError, ValueError):
         pass
 
@@ -1580,6 +1687,7 @@ async def _on_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # «Запустить бота» CTA-плейсхолдера от Telegram). ПОТОМ удаляем старое.
     messages = _format_pipeline_messages()
     persistent_kb = _persistent_menu_keyboard()
+    pipeline_ids: list[int] = []
     for i, (text, kb) in enumerate(messages):
         kwargs: dict[str, Any] = {
             "chat_id": chat_id, "text": text,
@@ -1593,8 +1701,11 @@ async def _on_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             msg = await context.bot.send_message(**kwargs)
             if msg:
                 _track_msg(chat_id, msg.message_id)
+                pipeline_ids.append(msg.message_id)
         except Exception:
             logger.exception("Не удалось послать pipeline-сообщение")
+
+    _remember_pipeline_msgs(chat_id, pipeline_ids)
 
     # Теперь удаляем старое: tracked-минус-новый-pipeline + sweep назад от trigger
     # (новый pipeline имеет msg_id > trigger_msg_id, в sweep не попадёт)
@@ -1800,6 +1911,7 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         messages = _format_pipeline_messages()
         persistent_kb = _persistent_menu_keyboard()
         new_ids: set[int] = set()
+        ordered_ids: list[int] = []
         for i, (text, kb) in enumerate(messages):
             kwargs: dict[str, Any] = {
                 "chat_id": chat_id, "text": text,
@@ -1814,8 +1926,10 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 if m:
                     _track_msg(chat_id, m.message_id)
                     new_ids.add(m.message_id)
+                    ordered_ids.append(m.message_id)
             except Exception:
                 logger.exception("back→pipeline send failed")
+        _remember_pipeline_msgs(chat_id, ordered_ids)
 
         # 2) Удаляем старое: tracked минус new_ids + sweep назад от clicked
         if chat_id in _CHAT_TRACKED_MSGS:

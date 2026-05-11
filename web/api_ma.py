@@ -341,6 +341,7 @@ async def ma_send(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
         raise HTTPException(500, result.get("message", "send failed"))
 
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
 
     fresh = db.get_message(msg_id)
@@ -359,6 +360,7 @@ async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
 
     db.update_message(msg_id, status="skipped")
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
     return {"ok": True, "status": "skipped"}
 
@@ -375,6 +377,7 @@ async def ma_sold(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
 
     db.update_message(msg_id, status="skipped_sold")
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
     return {"ok": True, "status": "skipped_sold"}
 
@@ -417,6 +420,7 @@ async def ma_regenerate(msg_id: int, body: RegenerateBody,
     )
     _apply_regenerate_result(msg_id, result)
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
 
     return _message_review_dict(msg_id)
 
@@ -449,6 +453,7 @@ async def ma_edit_ru(msg_id: int, body: EditTextBody,
     db.update_message(msg_id, ru_answer=body.text, de_answer=de_text,
                       ru_translation=ru_back, status="edited")
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
@@ -473,6 +478,7 @@ async def ma_edit_de(msg_id: int, body: EditTextBody,
     db.update_message(msg_id, de_answer=body.text, ru_translation=ru_back,
                       status="edited")
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
@@ -503,6 +509,7 @@ async def ma_price(msg_id: int, body: PriceBody,
     )
     _apply_regenerate_result(msg_id, result)
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
@@ -525,6 +532,7 @@ async def ma_instruction(msg_id: int, body: InstructionBody,
     )
     _apply_regenerate_result(msg_id, result)
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
@@ -547,6 +555,8 @@ async def ma_compose(thread_id: str, body: ComposeBody,
     )
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "compose failed"))
+
+    telegram_bot.refresh_pipeline_for_active_chats()
 
     return {
         "ok": True,
@@ -607,6 +617,8 @@ async def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
             telegram_bot.send_autopilot_start_notification(msg_id, body.floor_eur, actor)
         except Exception:
             pass  # best-effort
+
+    telegram_bot.refresh_pipeline_for_active_chats()
 
     return _thread_dict(thread_id)
 
@@ -700,6 +712,7 @@ async def ma_autopilot_stop(thread_id: str,
     if not history:
         raise HTTPException(404, "thread not found")
     db.stop_thread_autopilot(thread_id, "manual")
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _thread_dict(thread_id)
 
 
@@ -711,6 +724,7 @@ async def ma_thread_wait(thread_id: str,
         raise HTTPException(404, "thread not found")
     actor = actor_from_user(user)
     db.mark_thread_waiting(thread_id, marked_by=actor)
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _thread_dict(thread_id)
 
 
@@ -737,6 +751,7 @@ async def ma_suggest_reply(thread_id: str,
         raise HTTPException(500, result.get("message", "regenerate failed"))
 
     telegram_bot.broadcast_after_external_action(msg_id)
+    telegram_bot.refresh_pipeline_for_active_chats()
     return _thread_dict(thread_id)
 
 

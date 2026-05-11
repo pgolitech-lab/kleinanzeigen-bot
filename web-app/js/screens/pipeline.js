@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260510-23";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-23";
+import { api } from "../api.js?v=20260511-1";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-1";
 
 function threadCard(thread) {
   const card = el(`
@@ -65,8 +65,29 @@ function sectionBlock(title, color, threads) {
   return sec;
 }
 
-export async function render(mount, params) {
-  setLoading(mount, "Загружаю pipeline…");
+// Singleton lifecycle: один auto-refresh handle на весь screen-mount.
+// Очищается при навигации (hashchange — router вызовет render следующего экрана).
+let _autoRefreshTimer = null;
+let _visibilityHandler = null;
+let _hashHandler = null;
+const REFRESH_MS = 20000;
+
+function teardownAutoRefresh() {
+  if (_autoRefreshTimer) {
+    clearInterval(_autoRefreshTimer);
+    _autoRefreshTimer = null;
+  }
+  if (_visibilityHandler) {
+    document.removeEventListener("visibilitychange", _visibilityHandler);
+    _visibilityHandler = null;
+  }
+  if (_hashHandler) {
+    window.removeEventListener("hashchange", _hashHandler);
+    _hashHandler = null;
+  }
+}
+
+async function fetchAndPaint(mount, params) {
   try {
     const data = await api("/api/ma/pipeline");
     const container = el(`<div></div>`);
@@ -76,7 +97,7 @@ export async function render(mount, params) {
         <a class="btn btn-sm btn-outline-secondary" href="#/settings">⚙</a>
       </div>
     `);
-    headerRow.querySelector(".refresh-btn").addEventListener("click", () => render(mount, params));
+    headerRow.querySelector(".refresh-btn").addEventListener("click", () => fetchAndPaint(mount, params));
     container.appendChild(headerRow);
     container.appendChild(sectionBlock("ждут нас", "🔴", data.red ?? []));
     container.appendChild(sectionBlock("ждём клиента", "🟢", data.green ?? []));
@@ -84,4 +105,28 @@ export async function render(mount, params) {
   } catch (e) {
     setError(mount, e.message ?? String(e));
   }
+}
+
+export async function render(mount, params) {
+  teardownAutoRefresh();
+  setLoading(mount, "Загружаю pipeline…");
+  await fetchAndPaint(mount, params);
+
+  // Polling: каждые 20с фон, плюс при возврате видимости.
+  _autoRefreshTimer = setInterval(() => {
+    if (document.visibilityState === "visible") fetchAndPaint(mount, params);
+  }, REFRESH_MS);
+
+  _visibilityHandler = () => {
+    if (document.visibilityState === "visible") fetchAndPaint(mount, params);
+  };
+  document.addEventListener("visibilitychange", _visibilityHandler);
+
+  // При навигации на другой экран — clean up timer.
+  _hashHandler = () => {
+    if (!location.hash.startsWith("#/pipeline") && location.hash !== "#/" && location.hash !== "") {
+      teardownAutoRefresh();
+    }
+  };
+  window.addEventListener("hashchange", _hashHandler);
 }

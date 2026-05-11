@@ -681,6 +681,10 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 telegram_bot.send_for_review(inserted_id)
             except Exception:
                 pass
+        try:
+            telegram_bot.refresh_pipeline_for_active_chats()
+        except Exception:
+            logger.exception("refresh_pipeline after autopilot-incoming fail")
         return
 
     # ───── Manual flow: дешёвый Haiku-перевод incoming → ru_client (для оператора).
@@ -714,6 +718,11 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     except Exception as e:
         logger.exception("Не удалось послать оператору msg=%s: %s", inserted_id, e)
         return
+
+    try:
+        telegram_bot.refresh_pipeline_for_active_chats()
+    except Exception:
+        logger.exception("refresh_pipeline after incoming fail")
 
     if not force:
         try:
@@ -935,6 +944,10 @@ def drain_deferred_thread(thread_id: str) -> int:
             "drain_deferred: подняли %d отложенных карточек в треде %s",
             raised, thread_id,
         )
+        try:
+            telegram_bot.refresh_pipeline_for_active_chats()
+        except Exception:
+            logger.exception("refresh_pipeline after drain_deferred fail")
     return raised
 
 
@@ -1135,6 +1148,10 @@ def _send_reply(msg: Any) -> dict[str, Any]:
             f"📝 Тема: {actual_subject}\n"
             f"🕒 {sent_at}"
         )
+    try:
+        telegram_bot.refresh_pipeline_for_active_chats()
+    except Exception:
+        logger.exception("refresh_pipeline after send_reply fail")
     return {
         "kind": "sent", "mode": mode,
         "to": actual_to, "real_to": to_email,
