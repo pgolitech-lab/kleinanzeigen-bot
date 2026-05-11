@@ -1,7 +1,8 @@
 // Compose form для operator-initiated message в тред.
 
-import { api } from "../api.js?v=20260510-23";
-import { el } from "../utils.js?v=20260510-23";
+import { api } from "../api.js?v=20260511-2";
+import { el } from "../utils.js?v=20260511-2";
+import { tg } from "../tg.js?v=20260511-2";
 
 
 export function buildComposeForm({threadId, onSubmitComplete, onCancel}) {
@@ -42,7 +43,18 @@ export function buildComposeForm({threadId, onSubmitComplete, onCancel}) {
         method: "POST",
         body: {text},
       });
-      onSubmitComplete(res);
+      try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (e) {}
+      try {
+        tg?.showPopup?.({
+          title: "Сообщение отправлено",
+          message: "Письмо ушло клиенту.",
+          buttons: [{type: "ok"}],
+        }, () => onSubmitComplete(res));
+        // Fallback если showPopup недоступен — сразу re-render
+        if (!tg?.showPopup) onSubmitComplete(res);
+      } catch (e) {
+        onSubmitComplete(res);
+      }
     } catch (e) {
       errEl.textContent = e.message ?? String(e);
       errEl.classList.remove("d-none");

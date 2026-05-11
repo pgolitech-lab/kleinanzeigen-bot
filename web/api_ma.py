@@ -571,11 +571,35 @@ async def ma_compose(thread_id: str, body: ComposeBody,
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "compose failed"))
 
+    # Compose уже отправил клиенту — pending drafts в этом треде больше не нужны.
+    # Без этого они висят в pipeline как «есть готовый черновик» бесконечно.
+    closed_drafts: list[int] = []
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM messages WHERE gmail_thread_id=? AND direction='in' "
+            "AND status IN ('pending','new','edited','approved')",
+            (thread_id,),
+        ).fetchall()
+        closed_drafts = [r["id"] for r in rows]
+        if closed_drafts:
+            conn.execute(
+                "UPDATE messages SET status='skipped' WHERE gmail_thread_id=? "
+                "AND direction='in' AND status IN ('pending','new','edited','approved')",
+                (thread_id,),
+            )
+
+    # Broadcast обновление текстов мини-карточек у закрытых drafts
+    for mid in closed_drafts:
+        try:
+            telegram_bot.broadcast_after_external_action(mid)
+        except Exception:
+            pass
     telegram_bot.refresh_pipeline_for_active_chats()
 
     return {
         "ok": True,
         "sent_msg_id": result.get("message_id"),
+        "closed_drafts": closed_drafts,
         "thread_id": thread_id,
     }
 

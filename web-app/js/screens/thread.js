@@ -2,7 +2,7 @@ import { api } from "../api.js?v=20260510-23";
 import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260510-23";
 import { buildActionGrid } from "../components/action-grid.js?v=20260511-1";
 import { buildEditForm } from "../components/edit-form.js?v=20260510-23";
-import { buildComposeForm } from "../components/compose-form.js?v=20260510-23";
+import { buildComposeForm } from "../components/compose-form.js?v=20260511-2";
 import { buildSuggestForm } from "../components/suggest-form.js?v=20260510-23";
 import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260510-23";
 

@@ -32,6 +32,11 @@ def client():
             _row(id=42, direction="in", gmail_thread_id="abc", status="sent"),
         ]
         msched.send_manual_compose.return_value = {"kind": "ok", "message_id": 99}
+        # db.get_conn() context manager returning a MagicMock conn whose
+        # execute(...).fetchall() yields an empty list (no pending drafts to skip).
+        conn_cm = MagicMock()
+        conn_cm.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        mdb.get_conn.return_value = conn_cm
         from web.app import app
         yield TestClient(app), mdb, msched
 
@@ -45,7 +50,26 @@ def test_compose_success(client):
     assert res.status_code == 200
     body = res.json()
     assert body["ok"] is True
+    assert body["closed_drafts"] == []
     msched.send_manual_compose.assert_called_once_with(42, "Здравствуйте, у меня вопрос...")
+
+
+def test_compose_closes_pending_drafts(client):
+    """После успешного compose — pending in-rows треда → status='skipped'."""
+    c, mdb, msched = client
+    # Simulate two pending drafts to be closed
+    conn_cm = MagicMock()
+    pending_rows = [_row(id=1965), _row(id=1970)]
+    conn_cm.__enter__.return_value.execute.return_value.fetchall.return_value = pending_rows
+    mdb.get_conn.return_value = conn_cm
+
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/threads/abc/compose",
+                 json={"text": "manual reply"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body["closed_drafts"]) == {1965, 1970}
 
 
 def test_compose_404_thread_missing(client):
