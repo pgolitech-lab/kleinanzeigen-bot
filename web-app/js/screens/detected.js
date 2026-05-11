@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260511-5";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-5";
+import { api } from "../api.js?v=20260511-6";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-6";
 
 function eur(n) {
   if (n == null) return "—";
@@ -38,7 +38,7 @@ function detectionCard(d, onApply, onReject) {
         <div class="d-flex gap-2">
           <button class="btn btn-sm btn-success flex-grow-1 apply-btn">✅ Принять</button>
           <button class="btn btn-sm btn-outline-danger reject-btn">❌ Отклонить</button>
-          <a class="btn btn-sm btn-outline-secondary" target="_blank" href="#/thread/" data-thread>📂 Тред</a>
+          <a class="btn btn-sm btn-outline-secondary" href="#/thread/" data-thread>📂 Тред</a>
         </div>
       </div>
     </div>
