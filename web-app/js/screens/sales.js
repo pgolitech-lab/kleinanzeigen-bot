@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260511-5";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-5";
+import { api } from "../api.js?v=20260511-7";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-7";
 
 const PERIODS = [
   {key: "all",   label: "Все время"},
@@ -21,6 +21,102 @@ const state = {
   q: "",
   group_by: "day",
 };
+
+function buildAddSaleForm(accounts, onSubmitOk, onCancel) {
+  const today = new Date().toISOString().slice(0, 10);
+  const form = el(`
+    <div class="card border-success">
+      <div class="card-body p-3">
+        <div class="fw-semibold mb-2">➕ Новая продажа (вне бота)</div>
+        <div class="row g-2">
+          <div class="col-12">
+            <input type="text" class="form-control form-control-sm ad-title" placeholder="Название товара" maxlength="200">
+          </div>
+          <div class="col-7">
+            <input type="number" inputmode="decimal" min="0" step="0.01" class="form-control form-control-sm sold-price" placeholder="Цена продажи €" autofocus>
+          </div>
+          <div class="col-5">
+            <input type="date" class="form-control form-control-sm sold-date" value="${today}">
+          </div>
+          <div class="col-12">
+            <select class="form-select form-select-sm account-select"></select>
+          </div>
+          <div class="col-12">
+            <input type="text" class="form-control form-control-sm ad-price-listed" placeholder="(опц.) исходная цена объявления">
+          </div>
+          <div class="col-12">
+            <input type="text" class="form-control form-control-sm buyer-name" placeholder="(опц.) имя покупателя">
+          </div>
+          <div class="col-12">
+            <textarea class="form-control form-control-sm notes" rows="2" placeholder="(опц.) заметки"></textarea>
+          </div>
+        </div>
+        <div class="form-error text-danger small mt-2 d-none"></div>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn btn-sm btn-success flex-grow-1 save-btn">✅ Сохранить</button>
+          <button class="btn btn-sm btn-outline-secondary cancel-btn">Отмена</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const accSel = form.querySelector(".account-select");
+  if (!accounts.length) {
+    accSel.appendChild(el(`<option value="">— нет активных аккаунтов —</option>`));
+  } else {
+    for (const a of accounts) {
+      const opt = el(`<option></option>`);
+      opt.value = String(a.id);
+      opt.textContent = a.name;
+      accSel.appendChild(opt);
+    }
+  }
+
+  const errEl = form.querySelector(".form-error");
+
+  form.querySelector(".cancel-btn").addEventListener("click", () => onCancel());
+
+  form.querySelector(".save-btn").addEventListener("click", async () => {
+    errEl.classList.add("d-none");
+    const title = form.querySelector(".ad-title").value.trim();
+    const priceRaw = form.querySelector(".sold-price").value.trim().replace(",", ".");
+    const price = Number(priceRaw);
+    const date = form.querySelector(".sold-date").value;
+    const accId = form.querySelector(".account-select").value;
+    const adPrice = form.querySelector(".ad-price-listed").value.trim() || null;
+    const buyer = form.querySelector(".buyer-name").value.trim() || null;
+    const notes = form.querySelector(".notes").value.trim() || null;
+
+    if (!title) { errEl.textContent = "Название обязательно"; errEl.classList.remove("d-none"); return; }
+    if (!Number.isFinite(price) || price < 0) { errEl.textContent = "Некорректная цена"; errEl.classList.remove("d-none"); return; }
+    if (!date) { errEl.textContent = "Дата обязательна"; errEl.classList.remove("d-none"); return; }
+    if (!accId) { errEl.textContent = "Выбери аккаунт"; errEl.classList.remove("d-none"); return; }
+
+    form.querySelectorAll("button").forEach(b => b.disabled = true);
+    try {
+      await api("/api/ma/sales/manual", {
+        method: "POST",
+        body: {
+          account_id: Number(accId),
+          ad_title: title,
+          ad_price: adPrice,
+          sold_price_eur: price,
+          sold_at: date,
+          buyer_name: buyer,
+          notes,
+        },
+      });
+      onSubmitOk();
+    } catch (e) {
+      errEl.textContent = e.message ?? String(e);
+      errEl.classList.remove("d-none");
+      form.querySelectorAll("button").forEach(b => b.disabled = false);
+    }
+  });
+
+  return form;
+}
+
 
 function eur(n) {
   if (n == null) return "—";
@@ -227,12 +323,29 @@ function render(mount, data) {
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h5 class="mb-0">💰 Продажи</h5>
       <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-success add-sale-btn">➕ Добавить</button>
         <a class="btn btn-sm btn-outline-warning" href="#/detected">🔍 Review</a>
         <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ Pipeline</a>
       </div>
     </div>
   `);
   root.appendChild(header);
+
+  const formSlot = el(`<div class="add-sale-slot mb-3"></div>`);
+  root.appendChild(formSlot);
+
+  header.querySelector(".add-sale-btn").addEventListener("click", () => {
+    if (formSlot.children.length) {
+      formSlot.replaceChildren();  // toggle off
+      return;
+    }
+    formSlot.appendChild(buildAddSaleForm(data.accounts || [], () => {
+      formSlot.replaceChildren();
+      load(mount);  // re-fetch
+    }, () => {
+      formSlot.replaceChildren();
+    }));
+  });
 
   const bar = controlsBar(data.accounts || []);
   root.appendChild(bar);

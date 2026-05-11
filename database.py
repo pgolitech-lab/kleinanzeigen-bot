@@ -1351,6 +1351,40 @@ def apply_detection_to_messages(
     return {"thread_id": thread_id, "msg_id": msg_id, "price": float(price)}
 
 
+def add_manual_sale(
+    *,
+    account_id: int,
+    ad_title: str,
+    ad_price: Optional[str],
+    sold_price_eur: float,
+    sold_at: str,
+    buyer_name: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    """Создать manual sale-запись (сделка вне бота, без gmail_thread_id из переписки).
+
+    Вставляет в messages синтетическую row direction='in', status='skipped_sold',
+    gmail_thread_id='manual-<timestamp>-<rowid>'. После — close_thread чтобы запись
+    не попала в pipeline.
+    """
+    import uuid
+    now_iso = datetime.utcnow().isoformat()
+    synthetic_thread = f"manual-{uuid.uuid4().hex[:16]}"
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO messages (account_id, direction, status, gmail_thread_id, "
+            "ad_title, ad_price, buyer_display_name, sold_price_eur, sold_at, "
+            "extra_notes, created_at) "
+            "VALUES (?, 'in', 'skipped_sold', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (account_id, synthetic_thread, ad_title, ad_price, buyer_name,
+             float(sold_price_eur), sold_at, notes, now_iso),
+        )
+        msg_id = cur.lastrowid
+
+    close_thread(synthetic_thread, closed_by="manual-sale")
+    return {"msg_id": msg_id, "thread_id": synthetic_thread}
+
+
 def reject_detection(detection_id: int) -> None:
     with get_conn() as conn:
         conn.execute(

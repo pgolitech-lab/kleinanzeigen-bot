@@ -1,4 +1,4 @@
-import { initData, close } from "./tg.js?v=20260510-23";
+import { initData, close } from "./tg.js?v=20260511-7";
 
 // Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
 // Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.
@@ -31,6 +31,10 @@ export async function api(path, { method = "GET", body = null, headers = {} } = 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  // 204 No Content (например /lock/release, /reject) — нет JSON body
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return null;
   }
   return res.json();
 }

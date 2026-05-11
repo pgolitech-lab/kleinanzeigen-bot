@@ -1018,6 +1018,41 @@ async def ma_detection_reject(detection_id: int,
     db.reject_detection(detection_id)
 
 
+class ManualSaleBody(BaseModel):
+    account_id: int = Field(..., gt=0)
+    ad_title: str = Field(..., min_length=1, max_length=200)
+    ad_price: str | None = Field(None, max_length=50)
+    sold_price_eur: float = Field(..., ge=0, lt=1000000)
+    sold_at: str = Field(..., description="ISO date or datetime")
+    buyer_name: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=500)
+
+
+@router.post("/sales/manual")
+async def ma_sales_manual(body: ManualSaleBody,
+                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Зафиксировать продажу совершённую ВНЕ бота (по телефону / лично).
+
+    Создаёт synthetic messages-row с gmail_thread_id='manual-<uuid>'. Сделка
+    появляется в Sales-экране наравне с обычными.
+    """
+    # Normalize sold_at: если только дата (YYYY-MM-DD), добавляем T12:00:00
+    sold_at = body.sold_at.strip()
+    if len(sold_at) == 10 and sold_at.count("-") == 2:
+        sold_at = f"{sold_at}T12:00:00"
+
+    result = db.add_manual_sale(
+        account_id=body.account_id,
+        ad_title=body.ad_title,
+        ad_price=body.ad_price,
+        sold_price_eur=body.sold_price_eur,
+        sold_at=sold_at,
+        buyer_name=body.buyer_name,
+        notes=body.notes,
+    )
+    return {"ok": True, **result}
+
+
 ALLOWED_SETTING_KEYS = {
     "send_mode", "debug_email", "gmail_poll_interval_sec", "gmail_from_filter",
     "inquiry_max_age_days",
