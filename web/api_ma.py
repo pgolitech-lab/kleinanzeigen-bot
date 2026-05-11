@@ -857,11 +857,13 @@ def _period_window(period: str, *, custom_from: "str | None", custom_to: "str | 
 
 
 def _bucket_label(iso_ts: str, granularity: str) -> str:
-    """ISO timestamp → бакет-label по granularity (week/month/year)."""
+    """ISO timestamp → бакет-label по granularity (day/week/month/year)."""
     try:
         d = _dt.fromisoformat(iso_ts.replace("Z", "+00:00").split("+")[0])
     except Exception:
         return "?"
+    if granularity == "day":
+        return d.strftime("%Y-%m-%d")
     if granularity == "week":
         iso_year, iso_week, _ = d.isocalendar()
         return f"{iso_year}-W{iso_week:02d}"
@@ -884,7 +886,7 @@ async def ma_sales(
 ) -> dict[str, Any]:
     """Все продажи (in-one-pot из всех аккаунтов) + сводка + breakdown по периоду."""
     period = period if period in {"all", "week", "month", "year", "custom"} else "all"
-    group_by = group_by if group_by in {"week", "month", "year"} else "month"
+    group_by = group_by if group_by in {"day", "week", "month", "year"} else "month"
     period_from, period_to = _period_window(period, custom_from=from_, custom_to=to_)
 
     raw = db.list_sales(

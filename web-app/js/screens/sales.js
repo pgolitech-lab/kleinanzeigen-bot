@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260511-2";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-2";
+import { api } from "../api.js?v=20260511-3";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-3";
 
 const PERIODS = [
   {key: "all",   label: "Все время"},
@@ -9,6 +9,7 @@ const PERIODS = [
 ];
 
 const GROUPS = [
+  {key: "day",   label: "по дням"},
   {key: "week",  label: "по неделям"},
   {key: "month", label: "по месяцам"},
   {key: "year",  label: "по годам"},
@@ -18,7 +19,7 @@ const state = {
   period: "month",
   account_id: "",
   q: "",
-  group_by: "month",
+  group_by: "day",
 };
 
 function eur(n) {
@@ -79,23 +80,22 @@ function breakdownTable(breakdown, groupBy) {
 function saleCard(sale) {
   const a = el(`
     <a class="list-group-item list-group-item-action py-2" role="button">
-      <div class="d-flex justify-content-between align-items-start gap-2">
-        <div class="flex-grow-1 min-w-0">
-          <div class="d-flex align-items-baseline gap-2">
-            <div class="fw-semibold price"></div>
-            <small class="text-muted disc"></small>
-          </div>
-          <div class="title small text-truncate"></div>
-          <div class="meta text-muted small text-truncate"></div>
+      <div class="title fw-semibold mb-1"></div>
+      <div class="d-flex justify-content-between align-items-baseline gap-2">
+        <div class="d-flex align-items-baseline gap-2 flex-wrap">
+          <div class="fs-5 fw-bold text-success price"></div>
+          <small class="text-muted disc"></small>
         </div>
-        <div class="text-end small text-muted flex-shrink-0">
-          <div class="when"></div>
-          <div class="account"></div>
-        </div>
+        <small class="text-muted when"></small>
+      </div>
+      <div class="d-flex justify-content-between gap-2 mt-1">
+        <small class="text-muted meta text-truncate"></small>
+        <small class="text-muted account flex-shrink-0"></small>
       </div>
     </a>
   `);
   a.href = `#/thread/${encodeURIComponent(sale.thread_id)}`;
+  a.querySelector(".title").textContent = sale.ad_title;
   a.querySelector(".price").textContent = eur(sale.sold_price_eur);
 
   if (sale.discount_eur != null) {
@@ -106,7 +106,6 @@ function saleCard(sale) {
     a.querySelector(".disc").textContent = `(в объявлении: ${sale.ad_price_listed})`;
   }
 
-  a.querySelector(".title").textContent = sale.ad_title;
   const metaParts = [];
   if (sale.buyer_display_name) metaParts.push(`👤 ${sale.buyer_display_name}`);
   a.querySelector(".meta").textContent = metaParts.join(" · ");
