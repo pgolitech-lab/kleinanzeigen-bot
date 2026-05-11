@@ -162,6 +162,27 @@ def init_db() -> None:
         _add_column_if_missing(conn, "messages", "sold_price_eur", "REAL")
         # Момент фиксации продажи в MA (sold-action). NULL для рядов проданных до фичи.
         _add_column_if_missing(conn, "messages", "sold_at", "TEXT")
+        # Detected sales — кандидаты из LLM-сканирования старой переписки. Auto-commit
+        # high-confidence сразу в messages; low/medium — review в MA.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS detected_sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmail_thread_id TEXT NOT NULL UNIQUE,
+                is_sale INTEGER NOT NULL,
+                confidence TEXT NOT NULL,         -- 'high' | 'medium' | 'low'
+                sold_price_eur REAL,
+                detected_ad_title TEXT,
+                detected_sold_at TEXT,            -- ISO date (YYYY-MM-DD)
+                evidence TEXT,
+                model TEXT,
+                tokens_in INTEGER DEFAULT 0,
+                tokens_out INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0,
+                applied_at TEXT,                  -- ISO когда применено к messages
+                rejected_at TEXT,                 -- ISO когда отклонено оператором
+                created_at TEXT NOT NULL
+            )
+        """)
         # thread_autopilot — состояние авто-пилота per-thread.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS thread_autopilot (
@@ -1187,6 +1208,142 @@ def list_sales(
     with get_conn() as conn:
         rows = conn.execute(sql, args).fetchall()
     return [dict(r) for r in rows]
+
+
+def record_detection(
+    *,
+    gmail_thread_id: str,
+    is_sale: bool,
+    confidence: str,
+    sold_price_eur: Optional[float],
+    detected_ad_title: Optional[str],
+    detected_sold_at: Optional[str],
+    evidence: Optional[str],
+    model: Optional[str],
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    cost_usd: float = 0.0,
+) -> int:
+    """UPSERT detection-результат. Возвращает row id."""
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO detected_sales (gmail_thread_id, is_sale, confidence, "
+            "sold_price_eur, detected_ad_title, detected_sold_at, evidence, "
+            "model, tokens_in, tokens_out, cost_usd, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(gmail_thread_id) DO UPDATE SET "
+            "is_sale=excluded.is_sale, confidence=excluded.confidence, "
+            "sold_price_eur=excluded.sold_price_eur, "
+            "detected_ad_title=excluded.detected_ad_title, "
+            "detected_sold_at=excluded.detected_sold_at, "
+            "evidence=excluded.evidence, model=excluded.model, "
+            "tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out, "
+            "cost_usd=excluded.cost_usd",
+            (gmail_thread_id, 1 if is_sale else 0, confidence, sold_price_eur,
+             detected_ad_title, detected_sold_at, evidence, model,
+             tokens_in, tokens_out, cost_usd, now),
+        )
+        return cur.lastrowid
+
+
+def list_pending_detections(*, include_rejected: bool = False) -> list[sqlite3.Row]:
+    """Detection-кандидаты ожидающие review (is_sale=1 AND applied_at IS NULL AND rejected_at IS NULL).
+
+    JOIN-ит ad_title/ad_price/buyer_display_name из последнего in-row треда для контекста.
+    """
+    extra = "" if include_rejected else "AND ds.rejected_at IS NULL"
+    sql = f"""
+        SELECT ds.*,
+               m.ad_title AS thread_ad_title,
+               m.ad_price AS thread_ad_price,
+               m.ad_url   AS thread_ad_url,
+               m.buyer_display_name,
+               m.buyer_name,
+               m.account_id,
+               a.name AS account_name
+          FROM detected_sales ds
+          LEFT JOIN messages m ON m.id = (
+              SELECT id FROM messages WHERE gmail_thread_id = ds.gmail_thread_id
+               AND direction='in' ORDER BY created_at DESC LIMIT 1
+          )
+          LEFT JOIN accounts a ON a.id = m.account_id
+         WHERE ds.is_sale = 1
+           AND ds.applied_at IS NULL
+           {extra}
+         ORDER BY
+           CASE ds.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+           ds.detected_sold_at DESC
+    """
+    with get_conn() as conn:
+        return conn.execute(sql).fetchall()
+
+
+def apply_detection_to_messages(
+    detection_id: int,
+    *,
+    sold_price_eur: Optional[float] = None,
+) -> dict[str, Any]:
+    """Применить detection к messages: помечает latest in-row треда как skipped_sold,
+    записывает sold_price_eur (с возможностью override) + sold_at (detected или now),
+    закрывает тред в closed_threads. Возвращает {thread_id, msg_id, price}.
+    """
+    with get_conn() as conn:
+        det = conn.execute(
+            "SELECT * FROM detected_sales WHERE id = ?", (detection_id,)
+        ).fetchone()
+        if not det:
+            raise ValueError(f"detection {detection_id} not found")
+        if det["applied_at"]:
+            raise ValueError(f"detection {detection_id} already applied")
+        thread_id = det["gmail_thread_id"]
+        price = sold_price_eur if sold_price_eur is not None else det["sold_price_eur"]
+        if price is None:
+            raise ValueError("no price provided and detection has no price")
+
+        # Найти latest in-row для маркировки
+        row = conn.execute(
+            "SELECT id FROM messages WHERE gmail_thread_id = ? AND direction='in' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"no in-row found in thread {thread_id}")
+        msg_id = row["id"]
+
+        # sold_at: предпочитаем detected ISO-date + 12:00:00, fallback now
+        if det["detected_sold_at"]:
+            sold_at = f"{det['detected_sold_at']}T12:00:00"
+        else:
+            sold_at = datetime.utcnow().isoformat()
+
+        conn.execute(
+            "UPDATE messages SET status='skipped_sold', sold_price_eur=?, sold_at=? WHERE id=?",
+            (float(price), sold_at, msg_id),
+        )
+        # Pending in-rows этого же треда → skipped (на случай legacy состояний)
+        conn.execute(
+            "UPDATE messages SET status='skipped' "
+            "WHERE gmail_thread_id=? AND direction='in' AND id != ? "
+            "AND status IN ('pending','new','edited','approved')",
+            (thread_id, msg_id),
+        )
+        conn.execute(
+            "UPDATE detected_sales SET applied_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), detection_id),
+        )
+
+    # close_thread в своей транзакции
+    close_thread(thread_id, closed_by="detected-sale")
+    return {"thread_id": thread_id, "msg_id": msg_id, "price": float(price)}
+
+
+def reject_detection(detection_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE detected_sales SET rejected_at=? WHERE id=? AND applied_at IS NULL",
+            (datetime.utcnow().isoformat(), detection_id),
+        )
 
 
 def mark_thread_sold(

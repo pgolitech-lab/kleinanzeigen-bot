@@ -966,6 +966,58 @@ async def ma_sales(
     }
 
 
+# ──────────────────────── DETECTED SALES (LLM-сканер) ────────────────────────
+
+@router.get("/detected-sales")
+async def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Список pending detections для review-экрана."""
+    rows = db.list_pending_detections()
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        ad_price_raw = r["thread_ad_price"]
+        listed = _parse_listed_price_eur(ad_price_raw)
+        sold = float(r["sold_price_eur"]) if r["sold_price_eur"] is not None else None
+        discount_eur = (listed - sold) if (listed is not None and sold is not None) else None
+        items.append({
+            "id": r["id"],
+            "thread_id": r["gmail_thread_id"],
+            "confidence": r["confidence"],
+            "sold_price_eur": sold,
+            "detected_ad_title": r["detected_ad_title"],
+            "detected_sold_at": r["detected_sold_at"],
+            "evidence": r["evidence"],
+            "thread_ad_title": r["thread_ad_title"] or "(без названия)",
+            "thread_ad_price": ad_price_raw,
+            "thread_ad_price_eur": listed,
+            "discount_eur": round(discount_eur, 2) if discount_eur is not None else None,
+            "buyer_display_name": r["buyer_display_name"] or r["buyer_name"],
+            "account_name": r["account_name"] or "?",
+        })
+    return {"items": items, "count": len(items)}
+
+
+class DetectionApplyBody(BaseModel):
+    price_eur: float | None = Field(None, ge=0, lt=1000000)
+
+
+@router.post("/detected-sales/{detection_id}/apply")
+async def ma_detection_apply(detection_id: int, body: DetectionApplyBody,
+                              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Применить detection — записывает в messages + close_thread."""
+    try:
+        applied = db.apply_detection_to_messages(detection_id, sold_price_eur=body.price_eur)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    telegram_bot.refresh_pipeline_for_active_chats()
+    return {"ok": True, **applied}
+
+
+@router.post("/detected-sales/{detection_id}/reject", status_code=204)
+async def ma_detection_reject(detection_id: int,
+                               user: dict = Depends(verify_init_data_dep)) -> None:
+    db.reject_detection(detection_id)
+
+
 ALLOWED_SETTING_KEYS = {
     "send_mode", "debug_email", "gmail_poll_interval_sec", "gmail_from_filter",
     "inquiry_max_age_days",

@@ -1,18 +1,20 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260511-4";
-import * as thread from "./screens/thread.js?v=20260511-4";
-import * as history from "./screens/history.js?v=20260511-4";
-import * as settings from "./screens/settings.js?v=20260511-4";
-import * as review from "./screens/review.js?v=20260511-4";
-import * as sales from "./screens/sales.js?v=20260511-4";
-import { setError } from "./utils.js?v=20260511-4";
-import { hideBack, showBack } from "./tg.js?v=20260511-4";
+import * as pipeline from "./screens/pipeline.js?v=20260511-5";
+import * as thread from "./screens/thread.js?v=20260511-5";
+import * as history from "./screens/history.js?v=20260511-5";
+import * as settings from "./screens/settings.js?v=20260511-5";
+import * as review from "./screens/review.js?v=20260511-5";
+import * as sales from "./screens/sales.js?v=20260511-5";
+import * as detected from "./screens/detected.js?v=20260511-5";
+import { setError } from "./utils.js?v=20260511-5";
+import { hideBack, showBack } from "./tg.js?v=20260511-5";
 
 const ROUTES = [
   { pattern: /^#?\/?$/,                   screen: pipeline, params: () => ({}) },
   { pattern: /^#\/pipeline\/?$/,          screen: pipeline, params: () => ({}) },
   { pattern: /^#\/sales\/?$/,             screen: sales,    params: () => ({}) },
+  { pattern: /^#\/detected\/?$/,          screen: detected, params: () => ({}) },
   { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }) },  // focused deep-link
   { pattern: /^#\/thread\/([^/]+)\/?$/,         screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]) }) },
   { pattern: /^#\/client\/(.+)$/,         screen: history, params: m => ({ email: decodeURIComponent(m[1]) }) },

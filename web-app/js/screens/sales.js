@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260511-4";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-4";
+import { api } from "../api.js?v=20260511-5";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-5";
 
 const PERIODS = [
   {key: "all",   label: "Все время"},
@@ -226,7 +226,10 @@ function render(mount, data) {
   const header = el(`
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h5 class="mb-0">💰 Продажи</h5>
-      <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ Pipeline</a>
+      <div class="d-flex gap-1">
+        <a class="btn btn-sm btn-outline-warning" href="#/detected">🔍 Review</a>
+        <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ Pipeline</a>
+      </div>
     </div>
   `);
   root.appendChild(header);
