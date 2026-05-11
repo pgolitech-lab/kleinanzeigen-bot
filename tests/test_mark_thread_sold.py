@@ -123,3 +123,25 @@ def test_mark_thread_sold_ad_not_marked_sold(tmp_db):
 def test_mark_thread_sold_invalid_msg_id(tmp_db):
     with pytest.raises(ValueError, match="not found"):
         tmp_db.mark_thread_sold(99999, sold_price_eur=100.0)
+
+
+def test_mark_thread_sold_closes_thread_for_pipeline(tmp_db):
+    """Sold-тред должен исчезать из pipeline (через closed_threads)."""
+    _ensure_account(tmp_db)
+    mid = _insert_msg(tmp_db, direction="in", status="pending",
+                      gmail_thread_id="thread-X", ad_id="ad-9")
+    assert tmp_db.is_thread_closed("thread-X") is False
+    tmp_db.mark_thread_sold(mid, sold_price_eur=500.0)
+    assert tmp_db.is_thread_closed("thread-X") is True
+
+
+def test_mark_thread_sold_closes_other_threads_when_flag_set(tmp_db):
+    _ensure_account(tmp_db)
+    m_main = _insert_msg(tmp_db, direction="in", status="pending",
+                          gmail_thread_id="thread-A", ad_id="ad-1")
+    _insert_msg(tmp_db, direction="in", status="pending",
+                gmail_thread_id="thread-B", ad_id="ad-1")
+    tmp_db.mark_thread_sold(m_main, sold_price_eur=200.0,
+                             close_other_threads_for_ad=True)
+    assert tmp_db.is_thread_closed("thread-A") is True
+    assert tmp_db.is_thread_closed("thread-B") is True

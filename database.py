@@ -1183,15 +1183,17 @@ def mark_thread_sold(
                     (other_thread,),
                 )
 
-    # Остановить автопилоты ВНЕ транзакции (stop_thread_autopilot имеет свой conn).
+    # Остановить автопилоты + закрыть треды ВНЕ транзакции (свои conn).
     if thread_id:
         ap = get_thread_autopilot(thread_id)
         if ap and ap["active"]:
             stop_thread_autopilot(thread_id, "sold")
+        close_thread(thread_id, closed_by="sold")
     for other_thread in closed_other:
         ap = get_thread_autopilot(other_thread)
         if ap and ap["active"]:
             stop_thread_autopilot(other_thread, "sold")
+        close_thread(other_thread, closed_by="sold")
 
     return {
         "thread_id": thread_id,
