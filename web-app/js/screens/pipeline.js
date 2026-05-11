@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260511-1";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-1";
+import { api } from "../api.js?v=20260511-2";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-2";
 
 function threadCard(thread) {
   const card = el(`
@@ -94,7 +94,10 @@ async function fetchAndPaint(mount, params) {
     const headerRow = el(`
       <div class="d-flex justify-content-between align-items-center mb-2">
         <button class="btn btn-sm btn-outline-secondary refresh-btn">↻ Обновить</button>
-        <a class="btn btn-sm btn-outline-secondary" href="#/settings">⚙</a>
+        <div class="d-flex gap-1">
+          <a class="btn btn-sm btn-outline-success" href="#/sales">💰 Продажи</a>
+          <a class="btn btn-sm btn-outline-secondary" href="#/settings">⚙</a>
+        </div>
       </div>
     `);
     headerRow.querySelector(".refresh-btn").addEventListener("click", () => fetchAndPaint(mount, params));

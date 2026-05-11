@@ -1,0 +1,243 @@
+import { api } from "../api.js?v=20260511-2";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-2";
+
+const PERIODS = [
+  {key: "all",   label: "Все время"},
+  {key: "week",  label: "Эта неделя"},
+  {key: "month", label: "Этот месяц"},
+  {key: "year",  label: "Этот год"},
+];
+
+const GROUPS = [
+  {key: "week",  label: "по неделям"},
+  {key: "month", label: "по месяцам"},
+  {key: "year",  label: "по годам"},
+];
+
+const state = {
+  period: "month",
+  account_id: "",
+  q: "",
+  group_by: "month",
+};
+
+function eur(n) {
+  if (n == null) return "—";
+  return n.toLocaleString("de-DE", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + "€";
+}
+
+function summaryCard(summary) {
+  const card = el(`
+    <div class="card mb-3">
+      <div class="card-body p-3">
+        <div class="row g-2 small text-center">
+          <div class="col-6 col-md-3"><div class="text-muted">Сделок</div><div class="fs-5 fw-semibold count"></div></div>
+          <div class="col-6 col-md-3"><div class="text-muted">Всего</div><div class="fs-5 fw-semibold total"></div></div>
+          <div class="col-6 col-md-3"><div class="text-muted">⌀</div><div class="fs-5 fw-semibold avg"></div></div>
+          <div class="col-6 col-md-3"><div class="text-muted">min / max</div><div class="fs-6 minmax"></div></div>
+        </div>
+      </div>
+    </div>
+  `);
+  card.querySelector(".count").textContent = summary.count;
+  card.querySelector(".total").textContent = eur(summary.total_eur);
+  card.querySelector(".avg").textContent = eur(summary.avg_eur);
+  card.querySelector(".minmax").textContent = summary.count
+    ? `${eur(summary.min_eur)} / ${eur(summary.max_eur)}`
+    : "—";
+  return card;
+}
+
+function breakdownTable(breakdown, groupBy) {
+  const title = GROUPS.find(g => g.key === groupBy)?.label || groupBy;
+  const wrap = el(`
+    <div class="card mb-3">
+      <div class="card-body p-2">
+        <div class="small text-muted mb-2">Разбивка ${esc(title)}</div>
+        <table class="table table-sm table-hover mb-0 small">
+          <thead><tr><th>Период</th><th class="text-end">Сделок</th><th class="text-end">Сумма</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  `);
+  const tbody = wrap.querySelector("tbody");
+  if (!breakdown.length) {
+    tbody.appendChild(el(`<tr><td colspan="3" class="text-muted text-center fst-italic">данных нет</td></tr>`));
+  } else {
+    for (const b of breakdown) {
+      const tr = el(`<tr><td class="label"></td><td class="text-end count"></td><td class="text-end total"></td></tr>`);
+      tr.querySelector(".label").textContent = b.period_label;
+      tr.querySelector(".count").textContent = b.count;
+      tr.querySelector(".total").textContent = eur(b.total_eur);
+      tbody.appendChild(tr);
+    }
+  }
+  return wrap;
+}
+
+function saleCard(sale) {
+  const a = el(`
+    <a class="list-group-item list-group-item-action py-2" role="button">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="flex-grow-1 min-w-0">
+          <div class="d-flex align-items-baseline gap-2">
+            <div class="fw-semibold price"></div>
+            <small class="text-muted disc"></small>
+          </div>
+          <div class="title small text-truncate"></div>
+          <div class="meta text-muted small text-truncate"></div>
+        </div>
+        <div class="text-end small text-muted flex-shrink-0">
+          <div class="when"></div>
+          <div class="account"></div>
+        </div>
+      </div>
+    </a>
+  `);
+  a.href = `#/thread/${encodeURIComponent(sale.thread_id)}`;
+  a.querySelector(".price").textContent = eur(sale.sold_price_eur);
+
+  if (sale.discount_eur != null) {
+    const sign = sale.discount_eur >= 0 ? "−" : "+";
+    a.querySelector(".disc").textContent =
+      `(${eur(sale.ad_price_listed_eur)} → ${sign}${eur(Math.abs(sale.discount_eur))}, ${sale.discount_pct >= 0 ? "−" : "+"}${Math.abs(sale.discount_pct).toFixed(1)}%)`;
+  } else if (sale.ad_price_listed) {
+    a.querySelector(".disc").textContent = `(в объявлении: ${sale.ad_price_listed})`;
+  }
+
+  a.querySelector(".title").textContent = sale.ad_title;
+  const metaParts = [];
+  if (sale.buyer_display_name) metaParts.push(`👤 ${sale.buyer_display_name}`);
+  a.querySelector(".meta").textContent = metaParts.join(" · ");
+
+  a.querySelector(".when").textContent = sale.sold_at ? berlinTime(sale.sold_at) : "—";
+  a.querySelector(".account").textContent = sale.account_name ? `@${sale.account_name}` : "";
+  return a;
+}
+
+function controlsBar(accounts) {
+  const bar = el(`
+    <div class="mb-3">
+      <div class="btn-group btn-group-sm w-100 mb-2 period-pills" role="group"></div>
+      <div class="row g-2 mb-2">
+        <div class="col-7">
+          <input type="search" class="form-control form-control-sm q-input" placeholder="🔍 объявление / покупатель…">
+        </div>
+        <div class="col-5">
+          <select class="form-select form-select-sm account-select">
+            <option value="">Все аккаунты</option>
+          </select>
+        </div>
+      </div>
+      <div class="row g-2">
+        <div class="col-12">
+          <select class="form-select form-select-sm group-select"></select>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const pills = bar.querySelector(".period-pills");
+  for (const p of PERIODS) {
+    const btn = el(`<button type="button" class="btn btn-outline-secondary" data-period="${p.key}"></button>`);
+    btn.textContent = p.label;
+    if (p.key === state.period) btn.classList.add("active");
+    pills.appendChild(btn);
+  }
+
+  const accountSel = bar.querySelector(".account-select");
+  for (const a of accounts) {
+    const opt = el(`<option></option>`);
+    opt.value = String(a.id);
+    opt.textContent = a.name;
+    if (String(a.id) === String(state.account_id)) opt.selected = true;
+    accountSel.appendChild(opt);
+  }
+
+  const groupSel = bar.querySelector(".group-select");
+  for (const g of GROUPS) {
+    const opt = el(`<option></option>`);
+    opt.value = g.key;
+    opt.textContent = `Разбивка ${g.label}`;
+    if (g.key === state.group_by) opt.selected = true;
+    groupSel.appendChild(opt);
+  }
+
+  return bar;
+}
+
+async function load(mount) {
+  const params = new URLSearchParams({
+    period: state.period,
+    group_by: state.group_by,
+  });
+  if (state.account_id) params.set("account_id", state.account_id);
+  if (state.q) params.set("q", state.q);
+
+  setLoading(mount, "Загружаю…");
+  try {
+    const data = await api(`/api/ma/sales?${params.toString()}`);
+    render(mount, data);
+  } catch (e) {
+    setError(mount, e.message ?? String(e));
+  }
+}
+
+function render(mount, data) {
+  const root = el(`<div></div>`);
+
+  const header = el(`
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0">💰 Продажи</h5>
+      <a class="btn btn-sm btn-outline-secondary" href="#/pipeline">↩ Pipeline</a>
+    </div>
+  `);
+  root.appendChild(header);
+
+  const bar = controlsBar(data.accounts || []);
+  root.appendChild(bar);
+
+  root.appendChild(summaryCard(data.summary));
+  root.appendChild(breakdownTable(data.breakdown || [], state.group_by));
+
+  const list = el(`<div class="list-group"></div>`);
+  if (!data.sales.length) {
+    list.appendChild(el(`<div class="list-group-item text-muted fst-italic text-center">Продаж в этом периоде нет</div>`));
+  } else {
+    for (const s of data.sales) list.appendChild(saleCard(s));
+  }
+  root.appendChild(list);
+
+  mount.replaceChildren(root);
+
+  // Wire controls
+  bar.querySelectorAll("[data-period]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.period = btn.dataset.period;
+      load(mount);
+    });
+  });
+  bar.querySelector(".account-select").addEventListener("change", e => {
+    state.account_id = e.target.value;
+    load(mount);
+  });
+  bar.querySelector(".group-select").addEventListener("change", e => {
+    state.group_by = e.target.value;
+    load(mount);
+  });
+  let qTimer = null;
+  bar.querySelector(".q-input").value = state.q;
+  bar.querySelector(".q-input").addEventListener("input", e => {
+    state.q = e.target.value.trim();
+    if (qTimer) clearTimeout(qTimer);
+    qTimer = setTimeout(() => load(mount), 350);
+  });
+}
+
+export async function renderScreen(mount, params) {
+  await load(mount);
+}
+
+// router expects `render`
+export { renderScreen as render };

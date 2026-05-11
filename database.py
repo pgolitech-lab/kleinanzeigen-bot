@@ -160,6 +160,8 @@ def init_db() -> None:
         # Цена за которую товар реально продан (заполняется при тапе «Продано» в MA).
         # NULL = не продано или цена не зафиксирована.
         _add_column_if_missing(conn, "messages", "sold_price_eur", "REAL")
+        # Момент фиксации продажи в MA (sold-action). NULL для рядов проданных до фичи.
+        _add_column_if_missing(conn, "messages", "sold_at", "TEXT")
         # thread_autopilot — состояние авто-пилота per-thread.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS thread_autopilot (
@@ -1130,6 +1132,63 @@ def is_ad_sold(ad_id: str) -> bool:
     return bool(row and row["sold_at"])
 
 
+def list_sales(
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
+    account_id: Optional[int] = None,
+    query: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Список продаж (по одной строке на gmail_thread_id).
+
+    period_from/period_to — ISO timestamps (UTC). Фильтрует по sold_at если оно есть,
+    иначе по created_at (fallback для legacy-рядов без sold_at).
+
+    query — текстовое совпадение по ad_title или buyer_display_name (LIKE %q%).
+
+    Возвращает список dict-ов: одна продажа на тред (MAX sold_price_eur per thread_id).
+    """
+    where: list[str] = ["m.status = 'skipped_sold'", "m.sold_price_eur IS NOT NULL"]
+    args: list[Any] = []
+    if period_from:
+        where.append("COALESCE(m.sold_at, m.created_at) >= ?")
+        args.append(period_from)
+    if period_to:
+        where.append("COALESCE(m.sold_at, m.created_at) < ?")
+        args.append(period_to)
+    if account_id is not None:
+        where.append("m.account_id = ?")
+        args.append(int(account_id))
+    if query:
+        where.append("(m.ad_title LIKE ? OR m.buyer_display_name LIKE ? OR m.buyer_name LIKE ?)")
+        like = f"%{query}%"
+        args.extend([like, like, like])
+
+    where_sql = " AND ".join(where)
+    sql = f"""
+        SELECT
+            m.gmail_thread_id AS thread_id,
+            m.ad_id,
+            m.ad_title,
+            m.ad_price,
+            m.ad_url,
+            m.buyer_name,
+            m.buyer_display_name,
+            m.account_id,
+            a.name AS account_name,
+            MAX(m.sold_price_eur) AS sold_price_eur,
+            MAX(COALESCE(m.sold_at, m.created_at)) AS sold_at,
+            COUNT(*) AS rows_count
+        FROM messages m
+        LEFT JOIN accounts a ON a.id = m.account_id
+        WHERE {where_sql}
+        GROUP BY m.gmail_thread_id
+        ORDER BY sold_at DESC
+    """
+    with get_conn() as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
 def mark_thread_sold(
     msg_id: int,
     sold_price_eur: float,
@@ -1156,9 +1215,10 @@ def mark_thread_sold(
         thread_id = src["gmail_thread_id"] or ""
         ad_id = src["ad_id"] or ""
 
+        now_iso = datetime.utcnow().isoformat()
         conn.execute(
-            "UPDATE messages SET status='skipped_sold', sold_price_eur=? WHERE id=?",
-            (float(sold_price_eur), msg_id),
+            "UPDATE messages SET status='skipped_sold', sold_price_eur=?, sold_at=? WHERE id=?",
+            (float(sold_price_eur), now_iso, msg_id),
         )
         if thread_id:
             conn.execute(

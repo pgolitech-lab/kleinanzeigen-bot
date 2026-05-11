@@ -770,6 +770,169 @@ async def ma_suggest_reply(thread_id: str,
     return _thread_dict(thread_id)
 
 
+# ──────────────────────── SALES ────────────────────────
+
+import re as _re
+from datetime import datetime as _dt, timedelta as _td
+
+_PRICE_RE = _re.compile(r"(\d+(?:[.,]\d{3})*(?:[.,]\d+)?)")
+
+
+def _parse_listed_price_eur(raw: "str | None") -> "float | None":
+    """Парсит messages.ad_price ('1500 €' / '1.500 €' / 'VB' / 'Auf Anfrage') в float.
+
+    Возвращает None если число не извлекается.
+    """
+    if not raw:
+        return None
+    m = _PRICE_RE.search(str(raw))
+    if not m:
+        return None
+    token = m.group(1)
+    # «1.500» / «1,500» (тыс. разделитель) vs «99.99» / «99,99» (дроби).
+    # Признак тысячных: ровно 3 цифры после разделителя и без второго разделителя.
+    if "," in token and "." in token:
+        # Самый «правый» разделитель — десятичный
+        if token.rfind(",") > token.rfind("."):
+            token = token.replace(".", "").replace(",", ".")
+        else:
+            token = token.replace(",", "")
+    elif "." in token:
+        right = token.split(".")[-1]
+        if len(right) == 3:
+            token = token.replace(".", "")
+    elif "," in token:
+        right = token.split(",")[-1]
+        if len(right) == 3:
+            token = token.replace(",", "")
+        else:
+            token = token.replace(",", ".")
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _period_window(period: str, *, custom_from: "str | None", custom_to: "str | None") -> "tuple[str | None, str | None]":
+    """ISO-границы для фильтра period. Возвращает (from_iso, to_iso) или (None, None) для all."""
+    if period == "all":
+        return (custom_from, custom_to)
+    now = _dt.utcnow()
+    if period == "week":
+        start = now - _td(days=now.weekday(), hours=now.hour, minutes=now.minute,
+                          seconds=now.second, microseconds=now.microsecond)
+    elif period == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == "year":
+        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == "custom":
+        return (custom_from, custom_to)
+    else:
+        return (None, None)
+    return (start.isoformat(), None)
+
+
+def _bucket_label(iso_ts: str, granularity: str) -> str:
+    """ISO timestamp → бакет-label по granularity (week/month/year)."""
+    try:
+        d = _dt.fromisoformat(iso_ts.replace("Z", "+00:00").split("+")[0])
+    except Exception:
+        return "?"
+    if granularity == "week":
+        iso_year, iso_week, _ = d.isocalendar()
+        return f"{iso_year}-W{iso_week:02d}"
+    if granularity == "month":
+        return d.strftime("%Y-%m")
+    if granularity == "year":
+        return d.strftime("%Y")
+    return d.strftime("%Y-%m-%d")
+
+
+@router.get("/sales")
+async def ma_sales(
+    period: str = "all",
+    from_: "str | None" = None,
+    to_: "str | None" = None,
+    account_id: "int | None" = None,
+    q: "str | None" = None,
+    group_by: str = "month",
+    user: dict = Depends(verify_init_data_dep),
+) -> dict[str, Any]:
+    """Все продажи (in-one-pot из всех аккаунтов) + сводка + breakdown по периоду."""
+    period = period if period in {"all", "week", "month", "year", "custom"} else "all"
+    group_by = group_by if group_by in {"week", "month", "year"} else "month"
+    period_from, period_to = _period_window(period, custom_from=from_, custom_to=to_)
+
+    raw = db.list_sales(
+        period_from=period_from, period_to=period_to,
+        account_id=account_id, query=(q.strip() if q else None),
+    )
+
+    sales: list[dict[str, Any]] = []
+    for r in raw:
+        listed = _parse_listed_price_eur(r.get("ad_price"))
+        sold = float(r["sold_price_eur"]) if r.get("sold_price_eur") is not None else None
+        discount_eur = (listed - sold) if (listed is not None and sold is not None) else None
+        discount_pct = ((discount_eur / listed) * 100.0) if (discount_eur is not None and listed) else None
+        sales.append({
+            "thread_id": r["thread_id"],
+            "ad_id": r.get("ad_id"),
+            "ad_title": r.get("ad_title") or "(без названия)",
+            "ad_url": r.get("ad_url"),
+            "ad_price_listed": r.get("ad_price"),
+            "ad_price_listed_eur": listed,
+            "buyer_display_name": r.get("buyer_display_name") or r.get("buyer_name"),
+            "account_id": r.get("account_id"),
+            "account_name": r.get("account_name") or "?",
+            "sold_at": r.get("sold_at"),
+            "sold_price_eur": sold,
+            "discount_eur": round(discount_eur, 2) if discount_eur is not None else None,
+            "discount_pct": round(discount_pct, 1) if discount_pct is not None else None,
+        })
+
+    # Summary
+    prices = [s["sold_price_eur"] for s in sales if s["sold_price_eur"] is not None]
+    summary = {
+        "count": len(sales),
+        "total_eur": round(sum(prices), 2) if prices else 0.0,
+        "avg_eur": round(sum(prices) / len(prices), 2) if prices else 0.0,
+        "max_eur": max(prices) if prices else 0.0,
+        "min_eur": min(prices) if prices else 0.0,
+    }
+
+    # Breakdown
+    buckets: dict[str, dict[str, Any]] = {}
+    for s in sales:
+        if not s.get("sold_at"):
+            continue
+        label = _bucket_label(s["sold_at"], group_by)
+        b = buckets.setdefault(label, {"period_label": label, "count": 0, "total_eur": 0.0})
+        b["count"] += 1
+        if s["sold_price_eur"] is not None:
+            b["total_eur"] += s["sold_price_eur"]
+    breakdown = sorted(buckets.values(), key=lambda x: x["period_label"], reverse=True)
+    for b in breakdown:
+        b["total_eur"] = round(b["total_eur"], 2)
+
+    # Accounts list (для фильтра-дропдауна)
+    with db.get_conn() as conn:
+        accounts = [
+            {"id": a["id"], "name": a["name"]}
+            for a in conn.execute("SELECT id, name FROM accounts WHERE is_active=1 ORDER BY name").fetchall()
+        ]
+
+    return {
+        "sales": sales,
+        "summary": summary,
+        "breakdown": breakdown,
+        "accounts": accounts,
+        "filters": {
+            "period": period, "from": period_from, "to": period_to,
+            "account_id": account_id, "q": q, "group_by": group_by,
+        },
+    }
+
+
 ALLOWED_SETTING_KEYS = {
     "send_mode", "debug_email", "gmail_poll_interval_sec", "gmail_from_filter",
     "inquiry_max_age_days",
