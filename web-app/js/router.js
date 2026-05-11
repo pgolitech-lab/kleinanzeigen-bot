@@ -1,14 +1,14 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260511-7";
-import * as thread from "./screens/thread.js?v=20260511-7";
-import * as history from "./screens/history.js?v=20260511-7";
-import * as settings from "./screens/settings.js?v=20260511-7";
-import * as review from "./screens/review.js?v=20260511-7";
-import * as sales from "./screens/sales.js?v=20260511-7";
-import * as detected from "./screens/detected.js?v=20260511-7";
-import { setError } from "./utils.js?v=20260511-7";
-import { hideBack, showBack } from "./tg.js?v=20260511-7";
+import * as pipeline from "./screens/pipeline.js?v=20260511-8";
+import * as thread from "./screens/thread.js?v=20260511-8";
+import * as history from "./screens/history.js?v=20260511-8";
+import * as settings from "./screens/settings.js?v=20260511-8";
+import * as review from "./screens/review.js?v=20260511-8";
+import * as sales from "./screens/sales.js?v=20260511-8";
+import * as detected from "./screens/detected.js?v=20260511-8";
+import { setError } from "./utils.js?v=20260511-8";
+import { hideBack, showBack } from "./tg.js?v=20260511-8";
 
 const ROUTES = [
   { pattern: /^#?\/?$/,                   screen: pipeline, params: () => ({}) },
@@ -23,10 +23,23 @@ const ROUTES = [
 ];
 
 function navigateBack() {
-  if (location.hash === "#/pipeline" || !location.hash) {
+  // Используем browser history если есть куда — это сохраняет «откуда пришёл»
+  // (например из /detected открыл тред → back возвращает в /detected, не /pipeline).
+  // Если истории нет — fallback на /pipeline.
+  if (window.history.length > 1) {
+    const before = location.hash;
+    window.history.back();
+    // Если через 100мс hash не изменился (history.back ничего не сделал) — fallback
+    setTimeout(() => {
+      if (location.hash === before) {
+        location.hash = "#/pipeline";
+      }
+    }, 100);
     return;
   }
-  location.hash = "#/pipeline";
+  if (location.hash !== "#/pipeline" && location.hash) {
+    location.hash = "#/pipeline";
+  }
 }
 
 export function start(mount) {
