@@ -120,21 +120,57 @@ def test_skip_success(client):
 
 def test_sold_success(client):
     c, mdb, mtb, msched, mclaude = client
+    mdb.mark_thread_sold.return_value = {
+        "thread_id": "t-abc", "ad_id": "a-1", "closed_other_threads": [],
+    }
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/sold",
+                 json={"price_eur": 1300, "close_other_threads_for_ad": False},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
     body = res.json()
     assert body["status"] == "skipped_sold"
-    mdb.update_message.assert_called_once_with(123, status="skipped_sold")
+    assert body["sold_price_eur"] == 1300
+    assert body["closed_other_threads"] == []
+    mdb.mark_thread_sold.assert_called_once_with(
+        123, sold_price_eur=1300.0, close_other_threads_for_ad=False,
+    )
+
+
+def test_sold_with_close_other(client):
+    c, mdb, mtb, msched, mclaude = client
+    mdb.mark_thread_sold.return_value = {
+        "thread_id": "t-abc", "ad_id": "a-1", "closed_other_threads": ["t-x", "t-y"],
+    }
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/sold",
+                 json={"price_eur": 950, "close_other_threads_for_ad": True},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["closed_other_threads"] == ["t-x", "t-y"]
+    mdb.mark_thread_sold.assert_called_once_with(
+        123, sold_price_eur=950.0, close_other_threads_for_ad=True,
+    )
+
+
+def test_sold_rejects_negative_price(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/sold",
+                 json={"price_eur": -10, "close_other_threads_for_ad": False},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
 
 
 def test_action_endpoints_require_auth(client):
     c, mdb, mtb, msched, mclaude = client
-    for path in ["/api/ma/messages/123/send", "/api/ma/messages/123/skip",
-                 "/api/ma/messages/123/sold"]:
+    for path in ["/api/ma/messages/123/send", "/api/ma/messages/123/skip"]:
         res = c.post(path)
         assert res.status_code == 422
+    # sold has required body — sends 422 either without auth or without body
+    res = c.post("/api/ma/messages/123/sold")
+    assert res.status_code == 422
 
 def test_regenerate_valid_strategy(client):
     c, mdb, mtb, msched, mclaude = client

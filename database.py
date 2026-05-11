@@ -157,6 +157,9 @@ def init_db() -> None:
         _add_column_if_missing(conn, "messages", "extra_notes", "TEXT")
         # is_autopilot_reply=1 у row которая была сгенерена и отправлена в авто-пилот режиме.
         _add_column_if_missing(conn, "messages", "is_autopilot_reply", "INTEGER")
+        # Цена за которую товар реально продан (заполняется при тапе «Продано» в MA).
+        # NULL = не продано или цена не зафиксирована.
+        _add_column_if_missing(conn, "messages", "sold_price_eur", "REAL")
         # thread_autopilot — состояние авто-пилота per-thread.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS thread_autopilot (
@@ -1125,6 +1128,76 @@ def is_ad_sold(ad_id: str) -> bool:
             "SELECT sold_at FROM ad_briefs WHERE ad_id = ?", (ad_id,)
         ).fetchone()
     return bool(row and row["sold_at"])
+
+
+def mark_thread_sold(
+    msg_id: int,
+    sold_price_eur: float,
+    close_other_threads_for_ad: bool = False,
+) -> dict[str, Any]:
+    """Зафиксировать продажу и свернуть тред.
+
+    Поведение:
+      - msg_id → status='skipped_sold', sold_price_eur=<price>.
+      - Все pending in-rows этого же gmail_thread_id → status='skipped_sold' (без цены).
+      - Если автопилот треда активен → stop_thread_autopilot(reason='sold').
+      - close_other_threads_for_ad=True → то же самое (без цены) для ВСЕХ других
+        тредов с тем же ad_id, у которых есть pending in-rows.
+      - mark_ad_sold НЕ зовётся — товар может быть продан повторно следующему клиенту.
+
+    Возвращает {"thread_id": ..., "ad_id": ..., "closed_other_threads": [thread_ids]}.
+    """
+    with get_conn() as conn:
+        src = conn.execute(
+            "SELECT id, gmail_thread_id, ad_id FROM messages WHERE id = ?", (msg_id,)
+        ).fetchone()
+        if not src:
+            raise ValueError(f"message {msg_id} not found")
+        thread_id = src["gmail_thread_id"] or ""
+        ad_id = src["ad_id"] or ""
+
+        conn.execute(
+            "UPDATE messages SET status='skipped_sold', sold_price_eur=? WHERE id=?",
+            (float(sold_price_eur), msg_id),
+        )
+        if thread_id:
+            conn.execute(
+                "UPDATE messages SET status='skipped_sold' "
+                "WHERE gmail_thread_id=? AND direction='in' AND status='pending'",
+                (thread_id,),
+            )
+
+        closed_other: list[str] = []
+        if close_other_threads_for_ad and ad_id:
+            other = conn.execute(
+                "SELECT DISTINCT gmail_thread_id FROM messages "
+                "WHERE ad_id=? AND direction='in' AND status='pending' "
+                "AND gmail_thread_id != ?",
+                (ad_id, thread_id),
+            ).fetchall()
+            closed_other = [r["gmail_thread_id"] for r in other if r["gmail_thread_id"]]
+            for other_thread in closed_other:
+                conn.execute(
+                    "UPDATE messages SET status='skipped_sold' "
+                    "WHERE gmail_thread_id=? AND direction='in' AND status='pending'",
+                    (other_thread,),
+                )
+
+    # Остановить автопилоты ВНЕ транзакции (stop_thread_autopilot имеет свой conn).
+    if thread_id:
+        ap = get_thread_autopilot(thread_id)
+        if ap and ap["active"]:
+            stop_thread_autopilot(thread_id, "sold")
+    for other_thread in closed_other:
+        ap = get_thread_autopilot(other_thread)
+        if ap and ap["active"]:
+            stop_thread_autopilot(other_thread, "sold")
+
+    return {
+        "thread_id": thread_id,
+        "ad_id": ad_id,
+        "closed_other_threads": closed_other,
+    }
 
 
 # --- LESSONS ---

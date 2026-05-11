@@ -365,8 +365,14 @@ async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
     return {"ok": True, "status": "skipped"}
 
 
+class SoldBody(BaseModel):
+    price_eur: float = Field(..., ge=0, lt=1000000)
+    close_other_threads_for_ad: bool = False
+
+
 @router.post("/messages/{msg_id}/sold")
-async def ma_sold(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+async def ma_sold(msg_id: int, body: SoldBody,
+                  user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
@@ -375,11 +381,20 @@ async def ma_sold(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    db.update_message(msg_id, status="skipped_sold")
+    result = db.mark_thread_sold(
+        msg_id,
+        sold_price_eur=body.price_eur,
+        close_other_threads_for_ad=body.close_other_threads_for_ad,
+    )
     telegram_bot.broadcast_after_external_action(msg_id)
     telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
-    return {"ok": True, "status": "skipped_sold"}
+    return {
+        "ok": True,
+        "status": "skipped_sold",
+        "sold_price_eur": body.price_eur,
+        "closed_other_threads": result["closed_other_threads"],
+    }
 
 
 def _apply_regenerate_result(msg_id: int, result: "dict[str, Any]") -> None:
