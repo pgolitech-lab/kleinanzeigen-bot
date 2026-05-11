@@ -932,10 +932,17 @@ async def ma_sales(
         if not s.get("sold_at"):
             continue
         label = _bucket_label(s["sold_at"], group_by)
-        b = buckets.setdefault(label, {"period_label": label, "count": 0, "total_eur": 0.0})
+        b = buckets.setdefault(label, {
+            "period_label": label, "count": 0, "total_eur": 0.0, "items": [],
+        })
         b["count"] += 1
         if s["sold_price_eur"] is not None:
             b["total_eur"] += s["sold_price_eur"]
+        b["items"].append({
+            "ad_title": s.get("ad_title") or "(без названия)",
+            "sold_price_eur": s.get("sold_price_eur"),
+            "thread_id": s.get("thread_id"),
+        })
     breakdown = sorted(buckets.values(), key=lambda x: x["period_label"], reverse=True)
     for b in breakdown:
         b["total_eur"] = round(b["total_eur"], 2)

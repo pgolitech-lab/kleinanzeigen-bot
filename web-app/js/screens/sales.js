@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260511-3";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-3";
+import { api } from "../api.js?v=20260511-4";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260511-4";
 
 const PERIODS = [
   {key: "all",   label: "Все время"},
@@ -54,7 +54,7 @@ function breakdownTable(breakdown, groupBy) {
   const wrap = el(`
     <div class="card mb-3">
       <div class="card-body p-2">
-        <div class="small text-muted mb-2">Разбивка ${esc(title)}</div>
+        <div class="small text-muted mb-2">Разбивка ${esc(title)} <span class="text-muted">(тап — список товаров)</span></div>
         <table class="table table-sm table-hover mb-0 small">
           <thead><tr><th>Период</th><th class="text-end">Сделок</th><th class="text-end">Сумма</th></tr></thead>
           <tbody></tbody>
@@ -65,14 +65,51 @@ function breakdownTable(breakdown, groupBy) {
   const tbody = wrap.querySelector("tbody");
   if (!breakdown.length) {
     tbody.appendChild(el(`<tr><td colspan="3" class="text-muted text-center fst-italic">данных нет</td></tr>`));
-  } else {
-    for (const b of breakdown) {
-      const tr = el(`<tr><td class="label"></td><td class="text-end count"></td><td class="text-end total"></td></tr>`);
-      tr.querySelector(".label").textContent = b.period_label;
-      tr.querySelector(".count").textContent = b.count;
-      tr.querySelector(".total").textContent = eur(b.total_eur);
-      tbody.appendChild(tr);
+    return wrap;
+  }
+
+  for (const b of breakdown) {
+    const tr = el(`
+      <tr class="period-row" role="button" style="cursor: pointer">
+        <td class="label"><span class="caret me-1">▸</span><span class="period-text"></span></td>
+        <td class="text-end count"></td>
+        <td class="text-end total"></td>
+      </tr>
+    `);
+    tr.querySelector(".period-text").textContent = b.period_label;
+    tr.querySelector(".count").textContent = b.count;
+    tr.querySelector(".total").textContent = eur(b.total_eur);
+
+    const itemsTr = el(`
+      <tr class="items-row d-none">
+        <td colspan="3" class="ps-4">
+          <ul class="list-unstyled mb-0 small"></ul>
+        </td>
+      </tr>
+    `);
+    const ul = itemsTr.querySelector("ul");
+    for (const it of (b.items || [])) {
+      const li = el(`
+        <li class="d-flex justify-content-between gap-2 py-1 border-bottom border-secondary-subtle">
+          <a class="text-decoration-none text-body item-title flex-grow-1 text-truncate"></a>
+          <span class="text-success fw-semibold item-price flex-shrink-0"></span>
+        </li>
+      `);
+      const link = li.querySelector(".item-title");
+      link.textContent = it.ad_title;
+      link.href = `#/thread/${encodeURIComponent(it.thread_id)}`;
+      li.querySelector(".item-price").textContent = eur(it.sold_price_eur);
+      ul.appendChild(li);
     }
+
+    tr.addEventListener("click", () => {
+      const collapsed = itemsTr.classList.contains("d-none");
+      itemsTr.classList.toggle("d-none", !collapsed);
+      tr.querySelector(".caret").textContent = collapsed ? "▾" : "▸";
+    });
+
+    tbody.appendChild(tr);
+    tbody.appendChild(itemsTr);
   }
   return wrap;
 }
