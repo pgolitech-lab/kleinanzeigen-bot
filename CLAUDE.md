@@ -21,7 +21,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - systemd
 ## Mini App (актуально 2026-05-10)
 - **URL:** https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/ (GitHub Pages из main:/web-app/, repo public)
-- **HTTPS бэкенд:** cloudflared Quick Tunnel `https://choice-drunk-curriculum-effectiveness.trycloudflare.com` → 127.0.0.1:8080 (URL ротируется при рестарте — обновить web-app/js/api.js:API_BASE и bump cache-bust)
+- **HTTPS бэкенд:** cloudflared Quick Tunnel `https://anonymous-beginners-puzzles-social.trycloudflare.com` → 127.0.0.1:8080 (URL ротируется при рестарте — обновить web-app/js/api.js:API_BASE и bump cache-bust)
 - **Auth:** Telegram WebApp initData HMAC-валидация в `modules/tg_init_data.py`, dependency `verify_init_data_dep` на всех `/api/ma/*` endpoint'ах
 - **Lock:** общий `modules/operator_lock.py` (msg_id → actor, auto-expire 5 мин) — используют и бот wrappers (`_acquire_lock`/`_release_lock`/`_check_lock`), и MA endpoints
 - **API surface:** `web/api_ma.py` (~800 LOC) — 19+ endpoint'ов под `/api/ma/*`: pipeline, threads, messages (review payload + lock), send/skip/sold/regenerate/edit-ru/edit-de/instruction, compose, autopilot start/stop/preview, suggest-reply, thread wait, settings GET/POST
