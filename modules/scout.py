@@ -488,12 +488,14 @@ def verify_listings(batch_size: int = 25, max_items: int = 1000) -> dict[str, An
               "cost_usd": 0.0}
     if not rows:
         return result
+    # few-shot: учим Haiku на операторских правках
+    examples = [dict(c) for c in db.recent_scout_corrections(limit=30)]
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
         items = [{"ad_id": r["ad_id"], "title": r["title"], "description": r["description"]}
                  for r in batch]
         try:
-            res = claude.classify_scout_listings(items)
+            res = claude.classify_scout_listings(items, examples=examples)
         except Exception:
             logger.exception("scout: classify batch fail")
             continue

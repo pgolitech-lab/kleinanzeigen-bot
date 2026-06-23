@@ -330,6 +330,24 @@ def init_db() -> None:
         # Эффективный вид объявления = COALESCE(verified_kind, kind). verified_at — когда.
         _add_column_if_missing(conn, "scout_listings", "verified_kind", "TEXT")
         _add_column_if_missing(conn, "scout_listings", "verified_at", "TEXT")
+        # rejected=1 — оператор пометил объявление неверным и удалил. Скрыто везде +
+        # НЕ реактивируется при повторном скрапе (upsert не трогает rejected-строки).
+        _add_column_if_missing(conn, "scout_listings", "rejected", "INTEGER NOT NULL DEFAULT 0")
+        # scout_corrections — операторские правки классификации для in-context обучения
+        # Haiku. correct_kind: 'car'|'part'|'other'|'remove'.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scout_corrections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ad_id TEXT,
+                title TEXT,
+                description TEXT,
+                was_kind TEXT,
+                correct_kind TEXT NOT NULL,
+                note TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
 
 
 # --- ACCOUNTS ---
@@ -1671,12 +1689,15 @@ def upsert_scout_listing(listing: dict[str, Any]) -> bool:
     vals = [listing.get(c) for c in cols]
     with get_conn() as conn:
         existing = conn.execute(
-            "SELECT 1 FROM scout_listings WHERE ad_id = ?", (ad_id,)
+            "SELECT rejected FROM scout_listings WHERE ad_id = ?", (ad_id,)
         ).fetchone()
         if existing:
+            # Отклонённые оператором не реактивируем (active остаётся 0).
+            is_rejected = bool(existing["rejected"]) if "rejected" in existing.keys() else False
+            active_set = "" if is_rejected else ", active = 1"
             set_sql = ", ".join(f"{c} = ?" for c in cols)
             conn.execute(
-                f"UPDATE scout_listings SET {set_sql}, last_seen_at = ?, active = 1 WHERE ad_id = ?",
+                f"UPDATE scout_listings SET {set_sql}, last_seen_at = ?{active_set} WHERE ad_id = ?",
                 (*vals, now, ad_id),
             )
             return False
@@ -1830,6 +1851,72 @@ def reset_scout_verification() -> int:
             "WHERE verified_kind IS NOT NULL"
         )
         return cur.rowcount
+
+
+# --- MARKET SCOUT: операторские корректировки (+ обучение Haiku) ---
+
+def apply_scout_correction(
+    ad_id: str,
+    correct_kind: str,
+    note: Optional[str] = None,
+    created_by: Optional[str] = None,
+) -> dict[str, Any]:
+    """Операторская правка результата.
+
+    correct_kind:
+      'remove'             → пометить rejected (скрыть + не реактивировать),
+      'car'|'part'|'other' → выставить verified_kind (переклассификация).
+    Записывает правку в scout_corrections для in-context обучения Haiku.
+    Возвращает {ok, action, ad_id}.
+    """
+    if not ad_id:
+        return {"ok": False, "error": "no ad_id"}
+    correct_kind = (correct_kind or "").strip().lower()
+    if correct_kind not in ("remove", "car", "part", "other"):
+        return {"ok": False, "error": "bad correct_kind"}
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT ad_id, title, description, COALESCE(verified_kind, kind) AS eff_kind "
+            "FROM scout_listings WHERE ad_id = ?", (ad_id,),
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": "not found"}
+        was_kind = row["eff_kind"]
+        # лог правки
+        conn.execute(
+            "INSERT INTO scout_corrections "
+            "(ad_id, title, description, was_kind, correct_kind, note, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (ad_id, row["title"], row["description"], was_kind, correct_kind,
+             note, created_by, datetime.utcnow().isoformat()),
+        )
+        if correct_kind == "remove":
+            conn.execute(
+                "UPDATE scout_listings SET rejected = 1, active = 0 WHERE ad_id = ?", (ad_id,))
+            action = "removed"
+        else:
+            conn.execute(
+                "UPDATE scout_listings SET verified_kind = ?, verified_at = ? WHERE ad_id = ?",
+                (correct_kind, datetime.utcnow().isoformat(), ad_id))
+            action = f"reclassified→{correct_kind}"
+    return {"ok": True, "action": action, "ad_id": ad_id, "was_kind": was_kind}
+
+
+def recent_scout_corrections(limit: int = 30) -> list[sqlite3.Row]:
+    """Свежие операторские правки — few-shot примеры для классификатора Haiku."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT title, description, was_kind, correct_kind FROM scout_corrections "
+            "ORDER BY id DESC LIMIT ?", (limit,),
+        ).fetchall()
+
+
+def list_scout_corrections(limit: int = 100) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM scout_corrections ORDER BY id DESC LIMIT ?", (limit,),
+        ).fetchall()
 
 
 if __name__ == "__main__":

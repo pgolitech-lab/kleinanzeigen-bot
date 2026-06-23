@@ -215,6 +215,20 @@
     </div>
 </div>
 
+{# ===== Тепловые карты ===== #}
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100"><div class="card-header">🗺 Тепловая карта — машины</div>
+            <div class="card-body"><div id="car-heatmap" class="scout-heatmap"></div></div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100"><div class="card-header">🗺 Тепловая карта — запчасти</div>
+            <div class="card-body"><div id="part-heatmap" class="scout-heatmap"></div></div>
+        </div>
+    </div>
+</div>
+
 {# ===== Машины ===== #}
 <h2 class="mb-2">🚐 Машины ({{ cars|length }})</h2>
 <div class="card mb-4"><div class="card-body p-2">
@@ -223,7 +237,7 @@
         <thead><tr>
             <th data-default-sort="asc">Земля</th><th>Город</th><th>PLZ</th><th>Модель</th>
             <th>Год</th><th>Двиг.</th><th>КПП</th><th>Пробег</th><th>Цена</th>
-            <th data-sortable="false">Объявление</th><th>Дата</th>
+            <th data-sortable="false">Объявление</th><th>Дата</th><th data-sortable="false"></th>
         </tr></thead>
         <tbody>
         {% for c in cars %}
@@ -239,6 +253,10 @@
                 <td data-sort="{{ c.price_eur or 0 }}">{{ eur(c.price_eur) }}{% if c.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
                 <td><a class="row-link" href="{{ c.url }}" target="_blank" rel="noopener">{{ (c.title or '')[:70] }}</a></td>
                 <td class="text-muted-sm">{{ c.posted_raw or '' }}</td>
+                <td class="text-nowrap">
+                    <button class="btn btn-sm btn-outline-warning corr" data-ad="{{ c.ad_id }}" data-k="part" title="это запчасть">🪑</button>
+                    <button class="btn btn-sm btn-outline-danger corr" data-ad="{{ c.ad_id }}" data-k="remove" title="удалить (неверно)">🗑</button>
+                </td>
             </tr>
         {% endfor %}
         </tbody>
@@ -254,7 +272,7 @@
         <thead><tr>
             <th data-default-sort="asc">Земля</th><th>Город</th><th>PLZ</th><th>Тип</th>
             <th>Сост.</th><th>Год</th><th>Цена</th>
-            <th data-sortable="false">Объявление</th><th>Дата</th>
+            <th data-sortable="false">Объявление</th><th>Дата</th><th data-sortable="false"></th>
         </tr></thead>
         <tbody>
         {% for p in parts %}
@@ -268,6 +286,10 @@
                 <td data-sort="{{ p.price_eur or 0 }}">{{ eur(p.price_eur) }}{% if p.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
                 <td><a class="row-link" href="{{ p.url }}" target="_blank" rel="noopener">{{ (p.title or '')[:70] }}</a></td>
                 <td class="text-muted-sm">{{ p.posted_raw or '' }}</td>
+                <td class="text-nowrap">
+                    <button class="btn btn-sm btn-outline-warning corr" data-ad="{{ p.ad_id }}" data-k="car" title="это машина">🚐</button>
+                    <button class="btn btn-sm btn-outline-danger corr" data-ad="{{ p.ad_id }}" data-k="remove" title="удалить (неверно)">🗑</button>
+                </td>
             </tr>
         {% endfor %}
         </tbody>
@@ -280,6 +302,55 @@
 <script>
     if (document.querySelector('#cars-table tbody tr')) window.initDataTable('#cars-table', { perPage: 50 });
     if (document.querySelector('#parts-table tbody tr')) window.initDataTable('#parts-table', { perPage: 50 });
+
+    // ===== Тепловая карта (tile-grid картограмма земель) =====
+    const TILE_GRID = {
+      "Schleswig-Holstein":[0,1,"SH"],
+      "Bremen":[1,0,"HB"],"Hamburg":[1,1,"HH"],"Mecklenburg-Vorpommern":[1,2,"MV"],
+      "Niedersachsen":[2,1,"NI"],"Brandenburg":[2,2,"BB"],"Berlin":[2,3,"BE"],
+      "Nordrhein-Westfalen":[3,0,"NW"],"Sachsen-Anhalt":[3,1,"ST"],"Sachsen":[3,2,"SN"],
+      "Rheinland-Pfalz":[4,0,"RP"],"Hessen":[4,1,"HE"],"Thüringen":[4,2,"TH"],
+      "Saarland":[5,0,"SL"],"Baden-Württemberg":[5,1,"BW"],"Bayern":[5,2,"BY"],
+    };
+    function renderHeatmap(elId, regions) {
+      const host = document.getElementById(elId);
+      if (!host) return;
+      const counts = {};
+      (regions || []).forEach(r => { if (r.bundesland) counts[r.bundesland] = r.cnt; });
+      const max = Math.max(1, ...Object.values(counts));
+      host.innerHTML = "";
+      for (const [land, def] of Object.entries(TILE_GRID)) {
+        const [row, col, ab] = def;
+        const n = counts[land] || 0;
+        const intensity = n / max;
+        const tile = document.createElement("div");
+        tile.className = "heat-tile";
+        tile.style.gridRow = row + 1;
+        tile.style.gridColumn = col + 1;
+        tile.style.background = n ? `rgba(239,68,68,${(0.15 + 0.85*intensity).toFixed(3)})` : "rgba(255,255,255,0.05)";
+        tile.style.color = intensity > 0.5 ? "#fff" : "var(--kb-muted)";
+        tile.title = `${land}: ${n}`;
+        tile.innerHTML = `<div class="ab">${ab}</div><div class="n">${n}</div>`;
+        host.appendChild(tile);
+      }
+    }
+    renderHeatmap("car-heatmap", {{ car_regions|tojson }});
+    renderHeatmap("part-heatmap", {{ part_regions|tojson }});
+
+    // ===== Операторские правки (пометить неверным / удалить) =====
+    document.addEventListener("click", function(e) {
+      const btn = e.target.closest(".corr");
+      if (!btn) return;
+      const ad = btn.dataset.ad, k = btn.dataset.k;
+      const msg = k === "remove" ? "Удалить объявление как неверное?" : "Переклассифицировать объявление?";
+      if (!confirm(msg)) return;
+      const fd = new FormData();
+      fd.append("ad_id", ad); fd.append("correct_kind", k);
+      fetch("/scout/correct", { method: "POST", body: fd })
+        .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(() => { const tr = btn.closest("tr"); if (tr) tr.remove(); })
+        .catch(err => alert("Ошибка: " + err.message));
+    });
 
     // Авто-обновление пока идёт фоновый прогон
     {% if scout_state.running %}

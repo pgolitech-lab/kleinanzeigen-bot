@@ -216,6 +216,34 @@ def test_effective_kind_and_city_summary(tmp_path, monkeypatch):
     assert len(db.list_scout_listings(kind="part", city="Berlin")) == 1
 
 
+def test_scout_corrections(tmp_path, monkeypatch):
+    import database as db
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "c.db")
+    db.init_db()
+    db.upsert_scout_listing(_mk_listing("10", "car", "Köln", "Nordrhein-Westfalen", 9000))
+    db.upsert_scout_listing(_mk_listing("11", "car", "Köln", "Nordrhein-Westfalen", 50))
+
+    # #11 — на самом деле запчасть → reclassify
+    r = db.apply_scout_correction("11", "part", note="это сиденье", created_by="op")
+    assert r["ok"] and "part" in r["action"]
+    assert db.scout_counts()["parts"] == 1 and db.scout_counts()["cars"] == 1
+
+    # #10 — мусор → remove (rejected)
+    r = db.apply_scout_correction("10", "remove", created_by="op")
+    assert r["ok"] and r["action"] == "removed"
+    assert db.scout_counts()["cars"] == 0
+
+    # повторный скрап НЕ реактивирует rejected #10
+    db.upsert_scout_listing(_mk_listing("10", "car", "Köln", "Nordrhein-Westfalen", 9000))
+    assert db.scout_counts()["cars"] == 0
+
+    # правки записаны для обучения Haiku
+    corr = db.recent_scout_corrections(limit=10)
+    assert len(corr) == 2
+    kinds = {c["correct_kind"] for c in corr}
+    assert kinds == {"part", "remove"}
+
+
 @pytest.mark.parametrize("plz,land", [
     ("90449", "Bayern"),
     ("10707", "Berlin"),

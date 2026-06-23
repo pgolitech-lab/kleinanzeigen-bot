@@ -912,6 +912,19 @@ def scout_verify_reset():
     return _scout_redirect(f"Сброшена проверка у {n} объявлений")
 
 
+@app.post("/scout/correct")
+def scout_correct(
+    ad_id: str = Form(...),
+    correct_kind: str = Form(...),
+    note: str = Form(""),
+) -> dict[str, Any]:
+    """Операторская правка результата (reclassify/remove). Возвращает JSON (вызов из JS)."""
+    res = db.apply_scout_correction(ad_id, correct_kind, note=note or None, created_by="web")
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "correction failed"))
+    return res
+
+
 @app.get("/api/scout/status")
 def api_scout_status() -> dict[str, Any]:
     """JSON статус фонового прогона (для авто-обновления страницы)."""

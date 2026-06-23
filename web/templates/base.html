@@ -250,6 +250,24 @@
 
         /* Бейджи поменьше */
         .badge { font-weight: 500; font-size: 0.74em; }
+
+        /* Тепловая карта (tile-grid картограмма земель) */
+        .scout-heatmap {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            max-width: 320px;
+        }
+        .scout-heatmap .heat-tile {
+            aspect-ratio: 1 / 1;
+            border-radius: 5px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            line-height: 1.1;
+            border: 1px solid var(--kb-border);
+        }
+        .scout-heatmap .heat-tile .ab { font-weight: 700; font-size: 0.7rem; }
+        .scout-heatmap .heat-tile .n { font-size: 0.8rem; }
     </style>
     {% block head_extra %}{% endblock %}
 </head>

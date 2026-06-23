@@ -1441,3 +1441,21 @@ async def ma_scout_verify(user: dict = Depends(verify_init_data_dep)) -> dict[st
     from modules import scout as _scout
     threading.Thread(target=_scout.verify_listings, daemon=True).start()
     return {"started": True}
+
+
+class ScoutCorrectBody(BaseModel):
+    correct_kind: str  # 'car' | 'part' | 'other' | 'remove'
+    note: str = Field("", max_length=500)
+
+
+@router.post("/scout/listings/{ad_id}/correct")
+async def ma_scout_correct(ad_id: str, body: ScoutCorrectBody,
+                           user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Операторская правка: переклассифицировать или удалить (с обучением Haiku)."""
+    from fastapi import HTTPException
+    actor = actor_from_user(user)
+    res = db.apply_scout_correction(ad_id, body.correct_kind,
+                                    note=body.note or None, created_by=actor)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "correction failed"))
+    return res

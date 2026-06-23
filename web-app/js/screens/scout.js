@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260624-001500";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260624-001500";
-import { openLink } from "../tg.js?v=20260624-001500";
+import { api } from "../api.js?v=20260624-013000";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260624-013000";
+import { openLink } from "../tg.js?v=20260624-013000";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -26,50 +26,48 @@ function eur(v) {
 }
 
 // --- карточки объявлений ---
-function carCard(c) {
+function _cardShell(item, kind, rerender, specs) {
   const card = el(`
     <div class="list-group-item py-2">
-      <a class="title fw-semibold d-block text-truncate" role="button"></a>
+      <div class="d-flex align-items-start">
+        <a class="title fw-semibold text-truncate flex-grow-1 me-2" role="button"></a>
+        <button class="btn btn-sm btn-link p-0 flag" title="пометить неверным">🚩</button>
+      </div>
       <div class="small mt-1"><span class="price fw-bold"></span><span class="specs text-muted"></span></div>
       <div class="small text-muted mt-1 loc"></div>
     </div>`);
   const t = card.querySelector(".title");
-  t.textContent = c.title || "(без названия)";
-  t.addEventListener("click", () => c.url && openLink(c.url));
-  card.querySelector(".price").textContent = eur(c.price_eur) + (c.negotiable ? " VB " : " ");
+  t.textContent = item.title || "(без названия)";
+  t.addEventListener("click", () => item.url && openLink(item.url));
+  card.querySelector(".price").textContent = eur(item.price_eur) + (item.negotiable ? " VB " : " ");
+  card.querySelector(".specs").textContent = "· " + specs.join(" · ");
+  card.querySelector(".loc").textContent =
+    `📍 ${item.plz || ""} ${item.city || ""}${item.bundesland ? " (" + item.bundesland + ")" : ""}` +
+    (item.posted_raw ? ` · ${item.posted_raw}` : "");
+  const bar = corrBar(kind, item.ad_id, rerender);
+  card.appendChild(bar);
+  card.querySelector(".flag").addEventListener("click", () => {
+    bar.style.display = bar.style.display === "none" ? "" : "none";
+  });
+  return card;
+}
+
+function carCard(c, rerender) {
   const specs = [];
   if (c.year) specs.push(c.year);
   if (c.fuel) specs.push(FUEL_RU[c.fuel] || c.fuel);
   if (c.gearbox) specs.push(GB_RU[c.gearbox] || c.gearbox);
   if (c.mileage_km) specs.push(Math.round(c.mileage_km).toLocaleString("de-DE") + " км");
   if (c.model_family) specs.push(c.model_family);
-  card.querySelector(".specs").textContent = "· " + specs.join(" · ");
-  card.querySelector(".loc").textContent =
-    `📍 ${c.plz || ""} ${c.city || ""}${c.bundesland ? " (" + c.bundesland + ")" : ""}` +
-    (c.posted_raw ? ` · ${c.posted_raw}` : "");
-  return card;
+  return _cardShell(c, "car", rerender, specs);
 }
 
-function partCard(p) {
-  const card = el(`
-    <div class="list-group-item py-2">
-      <a class="title fw-semibold d-block text-truncate" role="button"></a>
-      <div class="small mt-1"><span class="price fw-bold"></span><span class="specs text-muted"></span></div>
-      <div class="small text-muted mt-1 loc"></div>
-    </div>`);
-  const t = card.querySelector(".title");
-  t.textContent = p.title || "(без названия)";
-  t.addEventListener("click", () => p.url && openLink(p.url));
-  card.querySelector(".price").textContent = eur(p.price_eur) + (p.negotiable ? " VB " : " ");
+function partCard(p, rerender) {
   const specs = [];
   if (p.part_type) specs.push(PT_RU[p.part_type] || p.part_type);
   if (p.condition) specs.push(COND_RU[p.condition] || p.condition);
   if (p.year) specs.push(p.year);
-  card.querySelector(".specs").textContent = "· " + specs.join(" · ");
-  card.querySelector(".loc").textContent =
-    `📍 ${p.plz || ""} ${p.city || ""}${p.bundesland ? " (" + p.bundesland + ")" : ""}` +
-    (p.posted_raw ? ` · ${p.posted_raw}` : "");
-  return card;
+  return _cardShell(p, "part", rerender, specs);
 }
 
 // --- фильтрация + сортировка ---
@@ -83,6 +81,70 @@ function countedOptions(all, key) {
   return [...m.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([value, n]) => ({ value, text: `${value} (${n})` }));
+}
+
+// Tile-grid картограмма земель ФРГ: [row, col, аббревиатура]. Схематично geo.
+const TILE_GRID = {
+  "Schleswig-Holstein": [0, 1, "SH"],
+  "Bremen": [1, 0, "HB"], "Hamburg": [1, 1, "HH"], "Mecklenburg-Vorpommern": [1, 2, "MV"],
+  "Niedersachsen": [2, 1, "NI"], "Brandenburg": [2, 2, "BB"], "Berlin": [2, 3, "BE"],
+  "Nordrhein-Westfalen": [3, 0, "NW"], "Sachsen-Anhalt": [3, 1, "ST"], "Sachsen": [3, 2, "SN"],
+  "Rheinland-Pfalz": [4, 0, "RP"], "Hessen": [4, 1, "HE"], "Thüringen": [4, 2, "TH"],
+  "Saarland": [5, 0, "SL"], "Baden-Württemberg": [5, 1, "BW"], "Bayern": [5, 2, "BY"],
+};
+
+// Тепловая карта: считает по землям из all, рисует tile-grid с цветом ∝ количеству.
+// onPick(land) — клик по плитке (фильтр).
+function heatMap(all, onPick) {
+  const counts = new Map();
+  all.forEach(r => { if (r.bundesland) counts.set(r.bundesland, (counts.get(r.bundesland) || 0) + 1); });
+  const max = Math.max(1, ...counts.values());
+  const wrap = el(`<div class="heatmap"></div>`);
+  for (const [land, [row, col, ab]] of Object.entries(TILE_GRID)) {
+    const n = counts.get(land) || 0;
+    const t = el(`<div class="heat-tile" role="button"></div>`);
+    t.style.gridRow = row + 1;
+    t.style.gridColumn = col + 1;
+    const intensity = n / max;
+    t.style.background = n ? `rgba(239,68,68,${(0.15 + 0.85 * intensity).toFixed(3)})` : "rgba(255,255,255,0.05)";
+    t.style.color = intensity > 0.5 ? "#fff" : "var(--bs-secondary-color)";
+    t.title = `${land}: ${n}`;
+    t.innerHTML = `<div class="ab">${ab}</div><div class="n">${n}</div>`;
+    if (n) t.addEventListener("click", () => onPick(land));
+    wrap.appendChild(t);
+  }
+  return wrap;
+}
+
+// Операторская правка: переклассифицировать / удалить. Удаляет из кэша + перерисовка.
+async function correctListing(kind, adId, correctKind, rerender) {
+  try {
+    await api(`/api/ma/scout/listings/${encodeURIComponent(adId)}/correct`,
+              { method: "POST", body: { correct_kind: correctKind } });
+  } catch (e) { alert("Ошибка: " + (e.message || e)); return; }
+  const arr = kind === "car" ? S.cars : S.parts;
+  const idx = arr.findIndex(r => r.ad_id === adId);
+  if (idx >= 0) arr.splice(idx, 1);
+  // если переклассифицировали в другой вид — сбросим его кэш, чтоб подтянулся заново
+  if (correctKind === "car") S.cars = null;
+  if (correctKind === "part") S.parts = null;
+  if (rerender) rerender();
+}
+
+// Панель правки внутри карточки (toggle по 🚩).
+function corrBar(kind, adId, rerender) {
+  const bar = el(`<div class="corrbar mt-1" style="display:none"></div>`);
+  const mk = (label, ck, cls) => {
+    const b = el(`<button class="btn btn-sm ${cls} me-1 mb-1"></button>`);
+    b.textContent = label;
+    b.addEventListener("click", () => correctListing(kind, adId, ck, rerender));
+    return b;
+  };
+  if (kind === "car") bar.appendChild(mk("🪑 это запчасть", "part", "btn-outline-warning"));
+  else bar.appendChild(mk("🚐 это машина", "car", "btn-outline-warning"));
+  bar.appendChild(mk("🚫 не то", "other", "btn-outline-secondary"));
+  bar.appendChild(mk("🗑 удалить", "remove", "btn-outline-danger"));
+  return bar;
 }
 
 function applyAndRender(listEl, kind) {
@@ -126,7 +188,8 @@ function applyAndRender(listEl, kind) {
     return;
   }
   const group = el(`<div class="list-group list-group-flush"></div>`);
-  rows.forEach(r => group.appendChild(kind === "car" ? carCard(r) : partCard(r)));
+  const rerender = () => applyAndRender(listEl, kind);
+  rows.forEach(r => group.appendChild(kind === "car" ? carCard(r, rerender) : partCard(r, rerender)));
   listEl.appendChild(group);
 }
 
@@ -210,7 +273,12 @@ async function renderListTab(container, kind) {
   });
   det.appendChild(rtab);
 
+  // тепловая карта по землям (клик = фильтр)
+  const heatDet = el(`<details class="mb-2" open><summary class="small text-muted">🗺 Тепловая карта</summary></details>`);
+  heatDet.appendChild(heatMap(all, (land) => { f.bundesland = land; applyAndRender(listEl, kind); }));
+
   root.appendChild(filterRow);
+  root.appendChild(heatDet);
   root.appendChild(det);
   root.appendChild(listEl);
   container.replaceChildren(root);

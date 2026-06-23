@@ -1333,18 +1333,36 @@ _SCOUT_CLASSIFY_SCHEMA: dict[str, Any] = {
 }
 
 
-def classify_scout_listings(items: list[dict[str, Any]]) -> dict[str, Any]:
+def classify_scout_listings(
+    items: list[dict[str, Any]],
+    examples: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """Haiku-проверка пачки объявлений: целый автомобиль / запчасть / другое.
 
-    items: [{ad_id, title, description}]. Возвращает
-    {map: {ad_id: 'car'|'part'|'other'}, tokens_in, tokens_out, cost_usd}.
-    Дешёвая батч-классификация (десятки объявлений за один вызов).
+    items: [{ad_id, title, description}].
+    examples: операторские правки [{title, description, was_kind, correct_kind}] —
+      few-shot для in-context обучения (учится на корректировках оператора).
+    Возвращает {map: {ad_id: 'car'|'part'|'other'}, tokens_in, tokens_out, cost_usd}.
     """
     api_key = config.anthropic_api_key()
     if not api_key:
         raise RuntimeError("Не задан Anthropic API key")
     if not items:
         return {"map": {}, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0}
+
+    examples_block = ""
+    if examples:
+        ex_lines = []
+        for e in examples[:30]:
+            t = (e.get("title") or "").replace("\n", " ")[:90]
+            ck = e.get("correct_kind")
+            if ck == "remove":
+                ck = "other"
+            ex_lines.append(f"- «{t}» → {ck}")
+        if ex_lines:
+            examples_block = (
+                "\nОператор ранее ПОПРАВИЛ классификацию таких объявлений "
+                "(учитывай эти примеры как эталон):\n" + "\n".join(ex_lines) + "\n")
 
     lines = []
     for it in items:
@@ -1360,7 +1378,10 @@ def classify_scout_listings(items: list[dict[str, Any]]) -> dict[str, Any]:
         "двигатель, фара, коврики, шины, и т.п.)\n"
         "- other = всё прочее (услуга, прокат/аренда, реклама, не относится к авто/запчастям)\n\n"
         "Подсказка: '9 Sitzer'/'8 Sitze' в названии машины — это число мест, это CAR, не part.\n"
-        "Цена целого вэна обычно тысячи евро; запчасть обычно дешевле.\n\n"
+        "Цена целого вэна обычно тысячи евро; запчасть обычно дешевле.\n"
+        "ВНИМАНИЕ: 'SUCHE'/'Suche'/'gesucht' = это ПОКУПАТЕЛЬ ищет (не продажа) → other; "
+        "'mieten'/'Vermietung'/'Miete' = аренда → other.\n"
+        f"{examples_block}\n"
         f"Объявления (формат [id] заголовок — описание):\n{listing_block}\n\n"
         "Верни results: массив {id, type} для КАЖДОГО id."
     )
