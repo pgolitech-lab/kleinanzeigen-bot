@@ -2358,6 +2358,10 @@ def run_polling_in_thread() -> Optional[Any]:
                 allowed_updates=Update.ALL_TYPES,
                 stop_signals=None,
                 close_loop=False,
+                # bootstrap_retries=-1 — бесконечно ретраить bootstrap (get_me)
+                # при старте, пока сеть/DNS не поднимутся. Без этого DNS-гонка
+                # на ребуте роняла поток polling навсегда (Failed run 0 of 0).
+                bootstrap_retries=-1,
             )
         except Exception:
             logger.exception("Telegram polling упал")
