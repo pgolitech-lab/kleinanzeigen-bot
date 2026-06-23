@@ -1,7 +1,7 @@
-import { api } from "../api.js?v=20260623-160000";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260623-160000";
+import { api } from "../api.js?v=20260623-170000";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260623-170000";
 
-function threadCard(thread) {
+export function threadCard(thread) {
   const card = el(`
     <a class="list-group-item list-group-item-action py-2" role="button">
       <div class="d-flex justify-content-between align-items-start">
