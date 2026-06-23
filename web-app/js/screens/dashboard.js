@@ -1,8 +1,8 @@
 // Дашборд-экран MA: сводка (pipeline-счётчики, сегодня, баланс, продажи)
 // + КЛИКАБЕЛЬНЫЙ список входящих (клик → переписка треда с историей).
-import { api } from "../api.js?v=20260623-180000";
-import { el, setLoading, setError } from "../utils.js?v=20260623-180000";
-import { threadCard } from "./pipeline.js?v=20260623-180000";
+import { api } from "../api.js?v=20260623-190000";
+import { el, setLoading, setError } from "../utils.js?v=20260623-190000";
+import { threadCard } from "./pipeline.js?v=20260623-190000";
 
 function statsBlock(d) {
   const p = d.pipeline || {}, t = d.today || {}, b = d.api_balance || {};
