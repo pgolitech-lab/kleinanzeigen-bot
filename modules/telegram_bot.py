@@ -1004,31 +1004,39 @@ def _remember_pipeline_msgs(chat_id: Any, msg_ids: list[int]) -> None:
 
 
 
-async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, scan: int = 50) -> int:
-    """Sweep: попытаться удалить msg_id в диапазоне [max_id-scan .. max_id] параллельно.
+async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, max_batches: int = 6) -> int:
+    """Sweep вниз от max_msg_id батчами по 100 через `deleteMessages` (Bot API 7.4+).
 
-    Используется `deleteMessages` (batch до 100 за вызов, Bot API 7.4+) если доступно,
-    иначе fallback на параллельные delete_message через asyncio.gather.
-
-    scan=50 — лимит чтобы не зацепить «запустить бота» system-сообщение в начале чата.
+    Чистит накопившиеся сообщения даже когда in-memory tracking потерян (после
+    рестарта сервиса). Останавливается:
+      • на «стене 48ч» — Telegram не даёт ботам удалять сообщения старше 48 часов
+        ('message can't be deleted for everyone') → ниже всё неудаляемо;
+      • когда диапазон пуст (already-deleted, 'message to delete not found');
+      • после max_batches (≈600 id) — защита от лишних API-вызовов.
+    Новый pipeline имеет msg_id > max_msg_id (это trigger), поэтому не затрагивается.
+    Возвращает верхнюю оценку числа удалённых (not-found внутри батча пропускаются).
     """
-    ids = list(range(max(1, max_msg_id - scan + 1), max_msg_id + 1))
-    if not ids:
-        return 0
-    # Попытка batch-API
-    try:
-        await context.bot.delete_messages(chat_id=chat_id, message_ids=ids)
-        return len(ids)
-    except Exception:
-        pass  # fallback к параллельным single-deletes
-    results = await asyncio.gather(
-        *[
-            context.bot.delete_message(chat_id=chat_id, message_id=mid)
-            for mid in ids
-        ],
-        return_exceptions=True,
-    )
-    return sum(1 for r in results if not isinstance(r, Exception))
+    deleted = 0
+    cur = int(max_msg_id)
+    empty_streak = 0
+    for _ in range(max_batches):
+        if cur < 1:
+            break
+        lo = max(1, cur - 99)
+        ids = list(range(lo, cur + 1))
+        try:
+            await context.bot.delete_messages(chat_id=chat_id, message_ids=ids)
+            deleted += len(ids)
+            empty_streak = 0
+        except Exception as e:
+            msg = str(e).lower()
+            if "can't be deleted" in msg or "too old" in msg:
+                break  # стена 48ч
+            empty_streak += 1  # 'not found' и пр. — диапазон пуст
+            if empty_streak >= 2:
+                break
+        cur = lo - 1
+    return deleted
 
 
 
@@ -1824,7 +1832,7 @@ async def _on_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     deleted_swept = 0
     if trigger_msg_id:
-        deleted_swept = await _delete_range(context, chat_id, trigger_msg_id, scan=50)
+        deleted_swept = await _delete_range(context, chat_id, trigger_msg_id)
     logger.info(
         "/pipeline: удалено %d tracked + %d sweep в chat %s (pipeline kept: %d)",
         deleted_tracked, deleted_swept, chat_id, len(new_pipeline_ids),
