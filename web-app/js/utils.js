@@ -40,3 +40,18 @@ export function setError(mount, message) {
   card.querySelector(".msg").textContent = String(message ?? "");
   mount.replaceChildren(card);
 }
+
+
+const _ACCT_COLORS = ["#0d6efd", "#198754", "#dc3545", "#fd7e14", "#6f42c1", "#20c997", "#d63384"];
+
+export function accountColor(id) {
+  const n = parseInt(id, 10);
+  return _ACCT_COLORS[(isNaN(n) ? 0 : n) % _ACCT_COLORS.length];
+}
+
+export function accountBadge(id, name) {
+  const b = el(`<span class="badge me-1 acct-badge"></span>`);
+  b.style.backgroundColor = accountColor(id);
+  b.textContent = name ?? `acc${id}`;
+  return b;
+}

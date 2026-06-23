@@ -55,6 +55,8 @@ def _row_to_pipeline_item(row: Any, autopilot_row: Any) -> dict[str, Any]:
         "last_event_kind": row["last_event_kind"],
         "pending_drafts_count": row["pending_drafts_count"],
         "is_autopilot": is_autopilot,
+        "account_id": row["account_id"] if "account_id" in row.keys() else None,
+        "ru_client": row["ru_client"] if "ru_client" in row.keys() else None,
     }
 
 
@@ -77,7 +79,8 @@ async def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, l
             green.append(item)
     red.sort(key=lambda x: x["last_event_at"] or "")
     green.sort(key=lambda x: x["last_event_at"] or "")
-    return {"red": red, "green": green}
+    accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
+    return {"red": red, "green": green, "accounts": accounts}
 
 
 from fastapi import HTTPException
@@ -1206,3 +1209,55 @@ async def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, 
         "sales_7d": _sales_window(7),
         "sales_30d": _sales_window(30),
     }
+
+
+@router.get("/accounts")
+async def ma_accounts(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Список аккаунтов (для фильтра инбокса и бейджей)."""
+    return {"accounts": [
+        {"id": a["id"], "name": a["name"], "active": bool(a["is_active"])}
+        for a in db.list_accounts()
+    ]}
+
+
+@router.get("/clients")
+async def ma_clients(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """База обращений (CRM): уникальные покупатели с агрегатами."""
+    return {"clients": [
+        {
+            "email": r["email"],
+            "display_name": r["display_name"],
+            "ad_count": r["ad_count"],
+            "thread_count": r["thread_count"],
+            "msg_count": r["msg_count"],
+            "last_at": r["last_at"],
+            "last_status": r["last_status"],
+        }
+        for r in db.list_clients()
+    ]}
+
+
+@router.post("/threads/{thread_id}/compose-preview")
+async def ma_compose_preview(thread_id: str, body: ComposeBody,
+                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Предпросмотр перевода ответа: RU → язык клиента + обратный перевод RU."""
+    from fastapi import HTTPException
+    import asyncio
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    client_lang = "de"
+    for m in reversed(history):
+        try:
+            if m["direction"] == "in" and m["client_lang"]:
+                client_lang = m["client_lang"]
+                break
+        except (KeyError, IndexError):
+            continue
+    tr = await asyncio.to_thread(claude.translate_only, body.text,
+                                 target_lang=client_lang, source_lang="ru")
+    translated = tr.get("translation", "") if isinstance(tr, dict) else ""
+    back = await asyncio.to_thread(claude.translate_only, translated,
+                                   target_lang="ru", source_lang=client_lang)
+    back_ru = back.get("translation", "") if isinstance(back, dict) else ""
+    return {"translated": translated, "back_ru": back_ru, "target_lang": client_lang}

@@ -1,15 +1,14 @@
 // Дашборд-экран MA: сводка (pipeline-счётчики, сегодня, баланс, продажи)
-// + КЛИКАБЕЛЬНЫЙ список входящих запросов (клик → переписка треда с историей).
-import { api } from "../api.js?v=20260623-170000";
-import { el, setLoading, setError } from "../utils.js?v=20260623-170000";
-import { threadCard } from "./pipeline.js?v=20260623-170000";
+// + КЛИКАБЕЛЬНЫЙ список входящих (клик → переписка треда с историей).
+import { api } from "../api.js?v=20260623-180000";
+import { el, setLoading, setError } from "../utils.js?v=20260623-180000";
+import { threadCard } from "./pipeline.js?v=20260623-180000";
 
 function statsBlock(d) {
   const p = d.pipeline || {}, t = d.today || {}, b = d.api_balance || {};
   const s7 = d.sales_7d || {}, s30 = d.sales_30d || {};
   const wrap = el(`<div class="d-flex flex-column gap-2"></div>`);
 
-  // pipeline-счётчики (клик → pipeline)
   const pc = el(`
     <a href="#/pipeline" class="card text-decoration-none text-reset" role="button"><div class="card-body p-3">
       <div class="row text-center g-2">
@@ -55,11 +54,10 @@ function statsBlock(d) {
   row.querySelector(".balv").textContent = balText;
   row.querySelector(".salesv").textContent = `${s7.count ?? 0}шт · ${s30.count ?? 0}шт`;
   wrap.appendChild(row);
-
   return wrap;
 }
 
-function requestsBlock(pipe, color, title, threads) {
+function requestsBlock(color, title, threads, accountsById) {
   const sec = el(`
     <div class="mb-2">
       <h6 class="text-muted small text-uppercase mb-1 sec-title"></h6>
@@ -70,7 +68,7 @@ function requestsBlock(pipe, color, title, threads) {
   if (!threads.length) {
     list.appendChild(el(`<div class="text-muted small fst-italic px-2 py-1">пусто</div>`));
   } else {
-    threads.forEach(t => list.appendChild(threadCard(t)));
+    threads.forEach(t => list.appendChild(threadCard(t, accountsById)));
   }
   return sec;
 }
@@ -79,20 +77,16 @@ export async function render(mount, params) {
   setLoading(mount, "Загрузка дашборда…");
   let stats, pipe;
   try {
-    [stats, pipe] = await Promise.all([
-      api("/api/ma/dashboard"),
-      api("/api/ma/pipeline"),
-    ]);
-  } catch (e) {
-    setError(mount, e.message ?? String(e));
-    return;
-  }
+    [stats, pipe] = await Promise.all([api("/api/ma/dashboard"), api("/api/ma/pipeline")]);
+  } catch (e) { setError(mount, e.message ?? String(e)); return; }
+
+  const accountsById = {};
+  (pipe.accounts ?? []).forEach(a => { accountsById[a.id] = a; });
 
   const root = el(`<div class="d-flex flex-column gap-3"></div>`);
-
   const head = el(`
     <div class="d-flex justify-content-between align-items-center">
-      <h5 class="mb-0">📊 Дашборд</h5>
+      <h5 class="mb-0">📊 Обзор</h5>
       <div class="d-flex gap-1">
         <button class="btn btn-sm btn-outline-secondary refresh">↻</button>
         <a class="btn btn-sm btn-outline-secondary" href="#/settings">⚙</a>
@@ -103,10 +97,9 @@ export async function render(mount, params) {
 
   root.appendChild(statsBlock(stats));
 
-  // --- Кликабельные входящие запросы (клик → переписка треда с историей) ---
   const reqs = el(`<div><div class="fw-semibold mb-2">📨 Входящие запросы</div></div>`);
-  reqs.appendChild(requestsBlock(pipe, "🔴", "ждут нас", pipe.red ?? []));
-  reqs.appendChild(requestsBlock(pipe, "🟢", "ждём клиента", pipe.green ?? []));
+  reqs.appendChild(requestsBlock("🔴", "ждут нас", pipe.red ?? [], accountsById));
+  reqs.appendChild(requestsBlock("🟢", "ждём клиента", pipe.green ?? [], accountsById));
   root.appendChild(reqs);
 
   mount.replaceChildren(root);

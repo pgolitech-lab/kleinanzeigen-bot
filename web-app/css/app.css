@@ -25,3 +25,21 @@ pre.payload {
   font-size: 12px;
   overflow: auto;
 }
+
+
+/* Нижний таб-бар */
+#tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  display: flex; z-index: 1030;
+  background: var(--bs-body-bg);
+  border-top: 1px solid var(--bs-border-color);
+  padding: .25rem 0 calc(.25rem + env(safe-area-inset-bottom));
+}
+#tabbar .tab {
+  flex: 1; text-align: center; font-size: .7rem;
+  padding: .35rem 0; text-decoration: none; white-space: nowrap;
+  color: var(--bs-secondary-color);
+}
+#tabbar .tab.active { color: var(--bs-primary); font-weight: 600; }
+#app { padding-bottom: 4.5rem !important; }
+.acct-badge { font-size: .65rem; vertical-align: middle; }
