@@ -1122,3 +1122,87 @@ async def ma_settings_post(body: SettingPostBody,
         raise HTTPException(400, f"invalid value for {body.key}")
     db.set_setting(body.key, body.value)
     return {"ok": True, "key": body.key, "value": body.value}
+
+
+@router.get("/dashboard")
+async def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сводный дашборд: pipeline-счётчики, сегодня, баланс API, продажи 7/30д."""
+    from datetime import datetime, timedelta
+
+    # --- pipeline ---
+    rows = db.pipeline_threads()
+    red = green = drafts = 0
+    for r in rows:
+        keys = r.keys()
+        kind = (r["last_event_kind"] if "last_event_kind" in keys else None) or "in"
+        if kind == "out":
+            green += 1
+        else:
+            red += 1
+        if "has_pending_draft" in keys and r["has_pending_draft"]:
+            drafts += 1
+
+    with db.get_conn() as conn:
+        ap_active = conn.execute(
+            "SELECT COUNT(*) AS c FROM thread_autopilot WHERE active=1"
+        ).fetchone()["c"]
+        new_today = conn.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE direction='in' "
+            "AND date(created_at)=date('now')"
+        ).fetchone()["c"]
+        sent_today = conn.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
+            "AND date(COALESCE(sent_at, created_at))=date('now')"
+        ).fetchone()["c"]
+        sold_today = conn.execute(
+            "SELECT COUNT(*) AS c FROM ad_briefs WHERE sold_at IS NOT NULL "
+            "AND date(sold_at)=date('now')"
+        ).fetchone()["c"]
+        burn_row = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) AS s FROM messages "
+            "WHERE cost_usd IS NOT NULL AND created_at >= datetime('now','-7 days')"
+        ).fetchone()
+
+    # --- баланс API (как на веб-дашборде) ---
+    snapshot_raw = config.get("api_balance_snapshot_usd") or ""
+    snapshot_at = config.get("api_balance_snapshot_at") or ""
+    try:
+        snapshot_usd = float(snapshot_raw) if snapshot_raw else None
+    except ValueError:
+        snapshot_usd = None
+    remaining = None
+    if snapshot_usd is not None and snapshot_at:
+        with db.get_conn() as conn:
+            srow = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd),0) AS s FROM messages "
+                "WHERE cost_usd IS NOT NULL AND created_at > ?", (snapshot_at,)
+            ).fetchone()
+        remaining = round(snapshot_usd - float(srow["s"] or 0.0), 2)
+    burn_per_day = round(float(burn_row["s"] or 0.0) / 7.0, 4)
+    days_remaining = None
+    if remaining is not None and burn_per_day > 0 and remaining > 0:
+        days_remaining = round(remaining / burn_per_day, 1)
+
+    # --- продажи 7д / 30д ---
+    def _sales_window(days: int) -> dict[str, Any]:
+        frm = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        try:
+            srows = db.list_sales(period_from=frm, period_to=None, account_id=None, query=None)
+        except Exception:
+            srows = []
+        prices = []
+        for r in srows:
+            v = r.get("sold_price_eur") if hasattr(r, "get") else r["sold_price_eur"]
+            if v is not None:
+                prices.append(float(v))
+        return {"count": len(srows), "total_eur": round(sum(prices), 2) if prices else 0.0}
+
+    return {
+        "pipeline": {"red": red, "green": green, "drafts": drafts,
+                     "autopilot_active": ap_active},
+        "today": {"new": new_today, "sent": sent_today, "sold": sold_today},
+        "api_balance": {"snapshot_usd": snapshot_usd, "remaining_usd": remaining,
+                        "burn_per_day_usd": burn_per_day, "days_remaining": days_remaining},
+        "sales_7d": _sales_window(7),
+        "sales_30d": _sales_window(30),
+    }

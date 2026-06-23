@@ -29,9 +29,13 @@ def main() -> None:
     log.info("Запуск scheduler...")
     sched = scheduler.start()
 
-    # 2b. Поднять Telegram polling в фоновом потоке (если токен задан)
-    log.info("Запуск Telegram polling...")
-    telegram_bot.run_polling_in_thread()
+    # 2b. Бот теперь чисто исходящий (без polling). Ставим нативную
+    #     Telegram Menu Button у поля ввода → открывает Mini App.
+    log.info("Установка Telegram Menu Button...")
+    try:
+        telegram_bot.set_menu_button()
+    except Exception:
+        log.exception("set_menu_button failed")
 
     # 3. Запустить FastAPI. uvicorn сам ловит SIGINT/SIGTERM и
     #    корректно завершает worker-ы — после этого управление возвращается сюда.

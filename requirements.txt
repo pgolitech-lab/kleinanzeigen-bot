@@ -3,7 +3,6 @@ uvicorn[standard]
 jinja2
 python-multipart
 anthropic
-python-telegram-bot
 playwright
 apscheduler
 google-api-python-client

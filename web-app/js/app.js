@@ -1,7 +1,7 @@
 // Mini App entry point. Bootstrap → router.start.
 
-import { ready, startParam } from "./tg.js?v=20260623-100655";
-import { start as startRouter } from "./router.js?v=20260623-100655";
+import { ready, startParam } from "./tg.js?v=20260623-160000";
+import { start as startRouter } from "./router.js?v=20260623-160000";
 
 function applyStartParam() {
   // First try Telegram SDK (works for /start commands, startapp deep-links, etc.)
@@ -16,10 +16,10 @@ function applyStartParam() {
     }
   }
   if (!sp) return;
-  const m = sp.match(/^([a-z]+)_(.+)$/);
+  const m = sp.match(/^([a-z]+)(?:_(.+))?$/);
   if (m) {
     const [, screen, id] = m;
-    location.hash = `#/${screen}/${encodeURIComponent(id)}`;
+    location.hash = id ? `#/${screen}/${encodeURIComponent(id)}` : `#/${screen}`;
   }
 }
 

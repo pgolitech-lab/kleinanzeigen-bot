@@ -1,18 +1,20 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260623-100655";
-import * as thread from "./screens/thread.js?v=20260623-100655";
-import * as history from "./screens/history.js?v=20260623-100655";
-import * as settings from "./screens/settings.js?v=20260623-100655";
-import * as review from "./screens/review.js?v=20260623-100655";
-import * as sales from "./screens/sales.js?v=20260623-100655";
-import * as detected from "./screens/detected.js?v=20260623-100655";
-import { setError } from "./utils.js?v=20260623-100655";
-import { hideBack, showBack } from "./tg.js?v=20260623-100655";
+import * as pipeline from "./screens/pipeline.js?v=20260623-160000";
+import * as thread from "./screens/thread.js?v=20260623-160000";
+import * as history from "./screens/history.js?v=20260623-160000";
+import * as settings from "./screens/settings.js?v=20260623-160000";
+import * as review from "./screens/review.js?v=20260623-160000";
+import * as sales from "./screens/sales.js?v=20260623-160000";
+import * as detected from "./screens/detected.js?v=20260623-160000";
+import * as dashboard from "./screens/dashboard.js?v=20260623-160000";
+import { setError } from "./utils.js?v=20260623-160000";
+import { hideBack, showBack } from "./tg.js?v=20260623-160000";
 
 const ROUTES = [
   { pattern: /^#?\/?$/,                   screen: pipeline, params: () => ({}) },
   { pattern: /^#\/pipeline\/?$/,          screen: pipeline, params: () => ({}) },
+  { pattern: /^#\/dashboard\/?$/,         screen: dashboard, params: () => ({}) },
   { pattern: /^#\/sales\/?$/,             screen: sales,    params: () => ({}) },
   { pattern: /^#\/detected\/?$/,          screen: detected, params: () => ({}) },
   { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }) },  // focused deep-link
@@ -53,7 +55,7 @@ export function start(mount) {
     for (const r of ROUTES) {
       const m = hash.match(r.pattern);
       if (m) {
-        if (r.screen === pipeline) {
+        if (r.screen === pipeline || r.screen === dashboard) {
           hideBack();
         } else {
           showBack(navigateBack);

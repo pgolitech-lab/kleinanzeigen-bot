@@ -1,8 +1,8 @@
 // Compose form для operator-initiated message в тред.
 
-import { api } from "../api.js?v=20260623-100655";
-import { el } from "../utils.js?v=20260623-100655";
-import { tg } from "../tg.js?v=20260623-100655";
+import { api } from "../api.js?v=20260623-160000";
+import { el } from "../utils.js?v=20260623-160000";
+import { tg } from "../tg.js?v=20260623-160000";
 
 
 export function buildComposeForm({threadId, onSubmitComplete, onCancel}) {
