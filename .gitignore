@@ -33,3 +33,7 @@ _*.py
 
 # Disabled service-файлы (если временно отключали через .disabled)
 *.disabled
+
+# Runtime-состояние трекинга TG-сообщений (для очистки чата) — не коммитим
+tracking_state.json
+tracking_state.json.tmp

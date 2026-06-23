@@ -8,8 +8,10 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import sqlite3
+import threading
 import urllib.error
 import urllib.request
 import zoneinfo
@@ -984,23 +986,69 @@ _CHAT_TRACKED_MSGS: dict[int, set[int]] = {}
 # для in-place edit при auto-refresh (см. refresh_pipeline_for_active_chats).
 _CHAT_PIPELINE_MSGS: dict[int, list[int]] = {}
 
+# Persist трекинга на диск: переживает рестарт сервиса, чтобы кнопка «Обновить»
+# удаляла карточки, отправленные ДО рестарта (в пределах 48ч-лимита Telegram).
+_TRACKING_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tracking_state.json"
+)
+_tracking_lock = threading.Lock()
+
+
+def _save_tracking() -> None:
+    """Атомарно (tmp+os.replace) сохранить трекинг в JSON. Write-through при каждом
+    изменении — объём низкий (десятки сообщений/час)."""
+    with _tracking_lock:
+        try:
+            data = {
+                "tracked": {str(k): sorted(v) for k, v in _CHAT_TRACKED_MSGS.items()},
+                "pipeline": {str(k): list(v) for k, v in _CHAT_PIPELINE_MSGS.items()},
+            }
+            tmp = _TRACKING_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, _TRACKING_FILE)
+        except RuntimeError:
+            pass  # set изменился во время итерации (гонка с _track_msg) — следующий save догонит
+        except Exception:
+            logger.exception("tracking persist failed")
+
+
+def _load_tracking() -> None:
+    """Загрузить трекинг с диска при старте бота. Нет файла / битый → стартуем с пустого."""
+    global _CHAT_TRACKED_MSGS, _CHAT_PIPELINE_MSGS
+    try:
+        with open(_TRACKING_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        _CHAT_TRACKED_MSGS = {int(k): set(v) for k, v in data.get("tracked", {}).items()}
+        _CHAT_PIPELINE_MSGS = {int(k): list(v) for k, v in data.get("pipeline", {}).items()}
+        logger.info("tracking загружен с диска: %d чатов", len(_CHAT_TRACKED_MSGS))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("tracking load failed — стартуем с пустого")
+
 
 def _track_msg(chat_id: Any, msg_id: Optional[int]) -> None:
     """Запомнить message_id чтобы удалить при следующем /pipeline вызове."""
     if not chat_id or not msg_id:
         return
     try:
-        _CHAT_TRACKED_MSGS.setdefault(int(chat_id), set()).add(int(msg_id))
+        cid, mid = int(chat_id), int(msg_id)
     except (TypeError, ValueError):
-        pass
+        return
+    with _tracking_lock:
+        _CHAT_TRACKED_MSGS.setdefault(cid, set()).add(mid)
+    _save_tracking()
 
 
 def _remember_pipeline_msgs(chat_id: Any, msg_ids: list[int]) -> None:
     """Сохранить ordered список pipeline message_ids для последующего in-place refresh."""
     try:
-        _CHAT_PIPELINE_MSGS[int(chat_id)] = [int(m) for m in msg_ids if m]
+        cid = int(chat_id)
     except (TypeError, ValueError):
-        pass
+        return
+    _CHAT_PIPELINE_MSGS[cid] = [int(m) for m in msg_ids if m]
+    _save_tracking()
 
 
 
@@ -1837,6 +1885,7 @@ async def _on_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/pipeline: удалено %d tracked + %d sweep в chat %s (pipeline kept: %d)",
         deleted_tracked, deleted_swept, chat_id, len(new_pipeline_ids),
     )
+    _save_tracking()  # зафиксировать pruned-набор на диск
 
 
 async def _on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2334,6 +2383,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("help", _on_help))
     app.add_handler(CallbackQueryHandler(_on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _on_text))
+
+    _load_tracking()  # восстановить трекинг отправленного после рестарта
     return app
 
 
