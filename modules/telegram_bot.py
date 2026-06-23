@@ -1052,7 +1052,7 @@ def _remember_pipeline_msgs(chat_id: Any, msg_ids: list[int]) -> None:
 
 
 
-async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, max_batches: int = 6) -> int:
+async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, max_batches: int = 12) -> int:
     """Sweep вниз от max_msg_id батчами по 100 через `deleteMessages` (Bot API 7.4+).
 
     Чистит накопившиеся сообщения даже когда in-memory tracking потерян (после
@@ -1079,6 +1079,14 @@ async def _delete_range(context: Any, chat_id: Any, max_msg_id: int, max_batches
         except Exception as e:
             msg = str(e).lower()
             if "can't be deleted" in msg or "too old" in msg:
+                # Пограничный батч: часть моложе 48ч, часть старше. deleteMessages
+                # фейлит ВЕСЬ батч атомарно — поэтому добиваем удаляемые поштучно
+                # (молодые удалятся, старше-48ч — нет). Ниже стены всё неудаляемо → стоп.
+                results = await asyncio.gather(
+                    *[context.bot.delete_message(chat_id=chat_id, message_id=m) for m in ids],
+                    return_exceptions=True,
+                )
+                deleted += sum(1 for r in results if not isinstance(r, Exception))
                 break  # стена 48ч
             empty_streak += 1  # 'not found' и пр. — диапазон пуст
             if empty_streak >= 2:
