@@ -1,10 +1,10 @@
-import { api } from "../api.js?v=20260623-100509";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260623-100509";
-import { buildActionGrid } from "../components/action-grid.js?v=20260623-100509";
-import { buildEditForm } from "../components/edit-form.js?v=20260623-100509";
-import { buildComposeForm } from "../components/compose-form.js?v=20260623-100509";
-import { buildSuggestForm } from "../components/suggest-form.js?v=20260623-100509";
-import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260623-100509";
+import { api } from "../api.js?v=20260623-100655";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260623-100655";
+import { buildActionGrid } from "../components/action-grid.js?v=20260623-100655";
+import { buildEditForm } from "../components/edit-form.js?v=20260623-100655";
+import { buildComposeForm } from "../components/compose-form.js?v=20260623-100655";
+import { buildSuggestForm } from "../components/suggest-form.js?v=20260623-100655";
+import { buildAutopilotForm, buildAutopilotStatus } from "../components/autopilot-form.js?v=20260623-100655";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
