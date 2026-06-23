@@ -81,3 +81,14 @@
 
 - Новые фичи MA/веб (дашборд-виджеты и т.п.) — отдельно.
 - Retention-чистка ленты бота — опционально, потом.
+
+
+## Как реализовано (as-built, 2026-06-23)
+
+- `telegram_bot.py` переписан с нуля (~330 LOC), PTB убран из requirements (httpx ОСТАВЛЕН — его тянет anthropic).
+- Локи НЕ переносили в operator_lock — обёртки оставлены в telegram_bot.py (они и так тонкие над operator_lock); так не трогали call-site'ы.
+- `refresh_pipeline_for_active_chats` / `broadcast_after_external_action` / `broadcast_thread_state` — **no-op заглушки** в telegram_bot.py → scheduler.py и api_ma.py НЕ менялись (кроме удаления polling-health в monitor_errors_job).
+- `send_for_review` покрывает и «новое обращение», и «клиент ответил» (умный текст по длине thread_history) — отдельного notify для follow-up не делали.
+- MA-дашборд: `GET /api/ma/dashboard` + `web-app/js/screens/dashboard.js`, роут `#/dashboard`, Menu Button → `?tgWebAppStartParam=dashboard` (в app.js id в start_param сделан опциональным). Виджеты: pipeline (red/green/drafts/autopilot), сегодня (new/sent/sold), баланс API, продажи 7/30д.
+- Бэкап: git tag `pre-bot-notifier-2026-06-23`, DB `/home/pg/backups/db-pre-bot-notifier-2026-06-23.db`.
+- Проверено: imports OK, PTB не грузится, getUpdates=0, Menu Button установлена, `/api/ma/dashboard`→200 с реальными данными, `notify()` доставляет с web_app-кнопкой.

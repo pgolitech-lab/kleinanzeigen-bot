@@ -43,7 +43,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 
 
 ## Структура
-- `main.py` — entry: bootstrap БД → scheduler в фоне → Telegram polling в потоке → uvicorn
+- `main.py` — entry: bootstrap БД → scheduler в фоне → `telegram_bot.set_menu_button()` → uvicorn (Telegram polling УДАЛЁН 2026-06-23)
 - `config.py` — настройки (KV в БД с дефолтами в `DEFAULTS`); геттеры с приведением типов
 - `database.py` — SQLite схема + миграции через `_add_column_if_missing` + helpers
 - `log_buffer.py` — кольцевой буфер 2000 записей для веб-морды (`/api/logs`)
@@ -63,7 +63,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
   - `lang_display`, `detect_lang_override` (директива «на немецком: …»)
   - `GERMAN_CLOSING_RULE` — каждое исходящее на немецком ОБЯЗАНО заканчиваться MfG/Viele Grüße
 - `modules/ad_brief.py` — генератор брифа объявления (Sonnet с json_schema, кэшируется в `ad_briefs` по `ad_id`)
-- `modules/telegram_bot.py` — основной фронт оператора (см. отдельный раздел ниже)
+- `modules/telegram_bot.py` — ТОЛЬКО исходящие уведомления (нотификатор на urllib, без polling/PTB). Вся работа оператора — в MA/веб. См. раздел «Telegram-бот».
 - `modules/backup.py` — Google Drive backup через service account
 - `web/app.py` — FastAPI: `/`, `/clients`, `/clients/{email}`, `/threads`, `/threads/{id}`, `/messages`, `/accounts`, `/settings`, `/logs` + `/api/*` + `/debug/*`
 - `web/templates/` — Bootstrap 5.3 dark theme + simple-datatables 9.0.3 (CDN) для клиент-side сортировки/фильтрации в таблицах. `base.html` определяет глобальный хелпер `window.initDataTable(selector, opts)` — все табличные страницы (`/clients`, `/threads`, `/messages`, `/accounts`, dashboard «recent») используют его. Дефолт-сортировка: дата DESC (свежие сверху). Навигация — pills вместо navbar; компактная типографика (14px база)
@@ -100,6 +100,20 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 **`processed_messages`** (NEW 2026-05-07, для orphan-recovery): `gmail_message_id` PK, `account_id`, `processed_at`, `reason`. Журнал ВСЕХ писем которые бот видел и решил по ним что-то — даже skip-ы (junk/noreply/sold/etc). Используется `gmail.find_orphan_seen_uids` чтобы отличать «никогда не видели» от «видели и сознательно skip-нули»; без этого orphan-scan в цикле дёргает Haiku-classifier на одних и тех же junk-письмах. Заполняется через `db.mark_processed(msg_id, account_id, reason)` из единого хелпера `scheduler._skip_email`. Reason: `inquiry` / `skipped_dedup` / `skipped_noreply` / `skipped_junk` / `skipped_purchase_side` / `skipped_classifier` / `skipped_max_age` / `skipped_sold` / `skipped_no_ad_ref`.
 
 ## Telegram-бот (`modules/telegram_bot.py`)
+
+> ⚠️ **АРХИТЕКТУРА ИЗМЕНЕНА 2026-06-23 (spec `docs/superpowers/specs/2026-06-23-bot-notifier-only-design.md`).**
+> Бот теперь **чисто исходящий нотификатор** — НЕТ long-polling, НЕТ python-telegram-bot,
+> НЕТ интерактива (callbacks/клавиатуры/pipeline-карточки/review-карточки/очистка чата).
+> Каждое событие = одно сообщение + одна `web_app`-кнопка «Открыть» → нужный экран MA.
+> Вход в MA — нативная **Menu Button** (`setChatMenuButton`, ставится в `main.py` при старте).
+> Сохранены: `_http_post`/`_http_post_single`, `notify()`, `set_menu_button()`, нотификаторы
+> (`send_for_review` [умный текст: новое обращение / клиент ответил], `send_autopilot_*`,
+> `send_reminder_offer`), и лок/thread-busy обёртки (`_acquire/_release/_check_lock`,
+> `thread_is_busy/mark/clear`) — concurrency для MA. `refresh_pipeline_for_active_chats`,
+> `broadcast_after_external_action`, `broadcast_thread_state` — **no-op заглушки** (call-site'ы
+> в scheduler/api_ma не трогали). MA-дашборд: экран `dashboard.js` + `GET /api/ma/dashboard`.
+> **Весь раздел ниже описывает СТАРЫЙ интерактивный бот — историческая справка, не актуально.**
+
 
 ### Режимы доставки
 1. **Group-mode** (legacy): `telegram_chat_id` = chat_id группы (отрицательное число, supergroup `-100xxx` после миграции). Все сообщения в группе.
