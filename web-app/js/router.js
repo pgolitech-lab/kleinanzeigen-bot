@@ -1,16 +1,17 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260623-190000";
-import * as thread from "./screens/thread.js?v=20260623-190000";
-import * as history from "./screens/history.js?v=20260623-190000";
-import * as settings from "./screens/settings.js?v=20260623-190000";
-import * as review from "./screens/review.js?v=20260623-190000";
-import * as sales from "./screens/sales.js?v=20260623-190000";
-import * as detected from "./screens/detected.js?v=20260623-190000";
-import * as dashboard from "./screens/dashboard.js?v=20260623-190000";
-import * as clients from "./screens/clients.js?v=20260623-190000";
-import { setError } from "./utils.js?v=20260623-190000";
-import { hideBack, showBack } from "./components/backbar.js?v=20260623-190000";
+import * as pipeline from "./screens/pipeline.js?v=20260623-235900";
+import * as thread from "./screens/thread.js?v=20260623-235900";
+import * as history from "./screens/history.js?v=20260623-235900";
+import * as settings from "./screens/settings.js?v=20260623-235900";
+import * as review from "./screens/review.js?v=20260623-235900";
+import * as sales from "./screens/sales.js?v=20260623-235900";
+import * as detected from "./screens/detected.js?v=20260623-235900";
+import * as dashboard from "./screens/dashboard.js?v=20260623-235900";
+import * as clients from "./screens/clients.js?v=20260623-235900";
+import * as scout from "./screens/scout.js?v=20260623-235900";
+import { setError } from "./utils.js?v=20260623-235900";
+import { hideBack, showBack } from "./components/backbar.js?v=20260623-235900";
 
 const ROUTES = [
   { pattern: /^#?\/?$/,                   screen: pipeline, params: () => ({}) },
@@ -18,6 +19,7 @@ const ROUTES = [
   { pattern: /^#\/dashboard\/?$/,         screen: dashboard, params: () => ({}) },
   { pattern: /^#\/clients\/?$/,          screen: clients, params: () => ({}) },
   { pattern: /^#\/sales\/?$/,             screen: sales,    params: () => ({}) },
+  { pattern: /^#\/scout\/?$/,             screen: scout,    params: () => ({}) },
   { pattern: /^#\/detected\/?$/,          screen: detected, params: () => ({}) },
   { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }) },  // focused deep-link
   { pattern: /^#\/thread\/([^/]+)\/?$/,         screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]) }) },
@@ -57,7 +59,7 @@ export function start(mount) {
     for (const r of ROUTES) {
       const m = hash.match(r.pattern);
       if (m) {
-        if (r.screen === pipeline || r.screen === dashboard || r.screen === clients || r.screen === sales) {
+        if (r.screen === pipeline || r.screen === dashboard || r.screen === clients || r.screen === sales || r.screen === scout) {
           hideBack();
         } else {
           showBack(navigateBack);

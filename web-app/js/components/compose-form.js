@@ -1,7 +1,7 @@
 // Compose form: пишешь по-русски → «Перевести» (предпросмотр DE + обратный RU) → «Отправить».
-import { api } from "../api.js?v=20260623-190000";
-import { el } from "../utils.js?v=20260623-190000";
-import { tg } from "../tg.js?v=20260623-190000";
+import { api } from "../api.js?v=20260623-235900";
+import { el } from "../utils.js?v=20260623-235900";
+import { tg } from "../tg.js?v=20260623-235900";
 
 export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
   const form = el(`

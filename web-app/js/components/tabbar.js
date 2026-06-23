@@ -1,11 +1,12 @@
 // Нижний таб-бар (как в нормальном приложении). Монтируется один раз в body,
 // подсвечивает активную вкладку по location.hash.
-import { el } from "../utils.js?v=20260623-190000";
+import { el } from "../utils.js?v=20260623-235900";
 
 const TABS = [
   { label: "📥 Входящие", hash: "#/pipeline", match: /^#\/(pipeline|thread|review)/ },
   { label: "👥 Клиенты",  hash: "#/clients",  match: /^#\/(clients|client)/ },
   { label: "💰 Продажи",  hash: "#/sales",    match: /^#\/sales/ },
+  { label: "🔎 Рынок",    hash: "#/scout",    match: /^#\/scout/ },
   { label: "📊 Обзор",    hash: "#/dashboard", match: /^#\/dashboard/ },
 ];
 

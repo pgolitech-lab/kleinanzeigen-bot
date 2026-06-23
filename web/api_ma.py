@@ -18,6 +18,7 @@ import config
 from modules import operator_lock, telegram_bot
 import scheduler
 from modules import claude
+from modules import scout_runner
 from modules.tg_init_data import verify_init_data_dep
 
 
@@ -1261,3 +1262,173 @@ async def ma_compose_preview(thread_id: str, body: ComposeBody,
                                    target_lang="ru", source_lang=client_lang)
     back_ru = back.get("translation", "") if isinstance(back, dict) else ""
     return {"translated": translated, "back_ru": back_ru, "target_lang": client_lang}
+
+
+# ============================================================
+# Разведка рынка (market scout) — Mini App
+# ============================================================
+
+def _scout_query_dict(q: Any) -> dict[str, Any]:
+    return {
+        "id": q["id"], "kind": q["kind"], "label": q["label"],
+        "keywords": q["keywords"], "category": q["category"],
+        "enabled": bool(q["enabled"]), "max_pages": q["max_pages"],
+        "source": q["source"], "last_run_at": q["last_run_at"],
+        "last_count": q["last_count"],
+    }
+
+
+def _scout_listing_dict(r: Any) -> dict[str, Any]:
+    return {
+        "ad_id": r["ad_id"], "kind": r["kind"], "title": r["title"], "url": r["url"],
+        "price_eur": r["price_eur"], "negotiable": bool(r["negotiable"]),
+        "plz": r["plz"], "city": r["city"], "bundesland": r["bundesland"],
+        "year": r["year"], "mileage_km": r["mileage_km"], "fuel": r["fuel"],
+        "gearbox": r["gearbox"], "model_family": r["model_family"],
+        "part_type": r["part_type"], "condition": r["condition"],
+        "posted_raw": r["posted_raw"],
+    }
+
+
+def _scout_region_dict(r: Any) -> dict[str, Any]:
+    return {
+        "bundesland": r["bundesland"], "cnt": r["cnt"],
+        "min_price": r["min_price"], "avg_price": r["avg_price"],
+        "max_price": r["max_price"],
+    }
+
+
+@router.get("/scout/overview")
+async def ma_scout_overview(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сводка разведки: счётчики, статус прогона, запросы, регионы."""
+    st = scout_runner.status()
+    return {
+        "counts": db.scout_counts(),
+        "auto_enabled": config.scout_auto_enabled(),
+        "interval_hours": config.scout_interval_hours(),
+        "running": st["running"],
+        "started_at": st["started_at"],
+        "summary": st["summary"],
+        "queries": [_scout_query_dict(q) for q in db.list_scout_queries()],
+        "car_regions": [_scout_region_dict(r) for r in db.scout_region_summary("car")],
+        "part_regions": [_scout_region_dict(r) for r in db.scout_region_summary("part")],
+    }
+
+
+@router.get("/scout/listings")
+async def ma_scout_listings(kind: str = "car",
+                            user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Активные объявления разведки одного вида (car|part). Фильтрация — на клиенте."""
+    kind = "part" if kind == "part" else "car"
+    rows = db.list_scout_listings(kind=kind)
+    return {"kind": kind, "listings": [_scout_listing_dict(r) for r in rows]}
+
+
+@router.get("/scout/status")
+async def ma_scout_status(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Статус фонового прогона (для поллинга)."""
+    st = scout_runner.status()
+    return {"running": st["running"], "started_at": st["started_at"],
+            "summary": st["summary"], "counts": db.scout_counts()}
+
+
+class ScoutRunBody(BaseModel):
+    query_id: int | None = None
+
+
+@router.post("/scout/run")
+async def ma_scout_run(body: ScoutRunBody,
+                       user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Запустить разведку в фоне (все enabled, либо один query_id)."""
+    ids = [body.query_id] if body.query_id else None
+    started = scout_runner.start(ids)
+    return {"started": started, "running": scout_runner.is_running()}
+
+
+class ScoutGenerateBody(BaseModel):
+    extra: str = Field("", max_length=2000)
+
+
+@router.post("/scout/generate")
+async def ma_scout_generate(body: ScoutGenerateBody,
+                            user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сгенерить запросы через LLM и добавить новые (без дублей)."""
+    import asyncio
+    existing = [q["keywords"] for q in db.list_scout_queries()]
+    result = await asyncio.to_thread(
+        claude.generate_scout_queries, existing_keywords=existing,
+        extra_instruction=body.extra.strip(),
+    )
+    added = 0
+    for q in result["queries"]:
+        if db.scout_query_exists(q["kind"], q["keywords"], q["category"]):
+            continue
+        db.add_scout_query(kind=q["kind"], keywords=q["keywords"],
+                           category=q["category"], label=q["label"],
+                           max_pages=q["max_pages"], source="llm")
+        added += 1
+    return {"added": added, "cost_usd": result.get("cost_usd", 0.0),
+            "total": len(result["queries"])}
+
+
+class ScoutQueryBody(BaseModel):
+    kind: str
+    keywords: str = Field(..., min_length=1, max_length=200)
+    category: str = "c216"
+    label: str = Field("", max_length=200)
+    max_pages: int = Field(5, ge=1, le=10)
+
+
+@router.post("/scout/queries")
+async def ma_scout_query_add(body: ScoutQueryBody,
+                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Добавить поисковый запрос вручную."""
+    from fastapi import HTTPException
+    kind = "part" if body.kind == "part" else "car"
+    category = body.category if body.category in ("c216", "c223") else (
+        "c223" if kind == "part" else "c216")
+    kw = body.keywords.strip()
+    if not kw:
+        raise HTTPException(400, "empty keywords")
+    qid = db.add_scout_query(kind=kind, keywords=kw, category=category,
+                             label=body.label.strip() or kw,
+                             max_pages=body.max_pages, source="operator")
+    return {"id": qid}
+
+
+class ScoutQueryUpdateBody(BaseModel):
+    keywords: str = Field(..., min_length=1, max_length=200)
+    category: str = "c216"
+    label: str = Field("", max_length=200)
+    max_pages: int = Field(5, ge=1, le=10)
+
+
+@router.post("/scout/queries/{query_id}/update")
+async def ma_scout_query_update(query_id: int, body: ScoutQueryUpdateBody,
+                                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    from fastapi import HTTPException
+    if not db.get_scout_query(query_id):
+        raise HTTPException(404, "query not found")
+    category = body.category if body.category in ("c216", "c223") else "c216"
+    db.update_scout_query(query_id, keywords=body.keywords.strip(),
+                          category=category, label=body.label.strip(),
+                          max_pages=body.max_pages)
+    return {"ok": True}
+
+
+@router.post("/scout/queries/{query_id}/toggle")
+async def ma_scout_query_toggle(query_id: int,
+                                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    from fastapi import HTTPException
+    q = db.get_scout_query(query_id)
+    if not q:
+        raise HTTPException(404, "query not found")
+    new_val = 0 if q["enabled"] else 1
+    db.update_scout_query(query_id, enabled=new_val)
+    return {"enabled": bool(new_val)}
+
+
+@router.post("/scout/queries/{query_id}/delete", status_code=204)
+async def ma_scout_query_delete(query_id: int,
+                                user: dict = Depends(verify_init_data_dep)) -> None:
+    db.delete_scout_query(query_id)

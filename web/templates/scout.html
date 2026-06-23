@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Разведка рынка — Kleinanzeigen Bot{% endblock %}
+
+{% macro eur(v) %}{% if v is not none %}{{ "{:,.0f}".format(v).replace(",", ".") }} €{% else %}—{% endif %}{% endmacro %}
+
+{% block content %}
+<div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+    <h1 class="mb-0">🔎 Разведка рынка</h1>
+    <span class="badge bg-secondary">🚐 машин: {{ counts.cars }}</span>
+    <span class="badge bg-secondary">🪑 запчастей: {{ counts.parts }}</span>
+    <div class="ms-auto d-flex gap-2 align-items-center">
+        {% if auto_enabled %}
+            <span class="badge bg-success">авто-прогон каждые {{ interval_hours }}ч</span>
+        {% else %}
+            <span class="badge bg-warning text-dark">авто-прогон выключен</span>
+        {% endif %}
+        <form method="post" action="/scout/run" class="d-inline">
+            <button class="btn btn-primary btn-sm" {% if scout_state.running %}disabled{% endif %}>
+                {% if scout_state.running %}⏳ Идёт разведка…{% else %}▶ Запустить разведку{% endif %}
+            </button>
+        </form>
+    </div>
+</div>
+
+{% if flash %}
+<div class="alert alert-{{ flash.type }}">{{ flash.message }}</div>
+{% endif %}
+
+{% if scout_state.running %}
+<div class="alert alert-info" id="run-banner">⏳ Разведка выполняется в фоне. Страница обновится автоматически…</div>
+{% endif %}
+
+{# ===== Поисковые запросы ===== #}
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center">
+        <span>Поисковые запросы ({{ queries|length }})</span>
+        <form method="post" action="/scout/generate" class="ms-auto d-flex gap-2 align-items-center">
+            <input type="text" name="extra" class="form-control form-control-sm" style="width:240px"
+                   placeholder="доп. указание LLM (необязательно)">
+            <button class="btn btn-outline-info btn-sm">🤖 Сгенерировать (LLM)</button>
+        </form>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead><tr>
+                <th>Тип</th><th>Фраза (нем.)</th><th>Имя</th><th>Кат.</th>
+                <th>Стр.</th><th>Источ.</th><th>Посл. прогон</th><th>Найдено</th><th>Вкл.</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for q in queries %}
+                <tr {% if not q.enabled %}class="text-muted"{% endif %}>
+                    <td>{% if q.kind == 'car' %}🚐 авто{% else %}🪑 з/ч{% endif %}</td>
+                    <td>
+                        <form method="post" action="/scout/queries/{{ q.id }}/update" class="d-flex gap-1 align-items-center">
+                            <input name="keywords" value="{{ q.keywords }}" class="form-control form-control-sm" style="min-width:160px">
+                            <input name="label" value="{{ q.label or '' }}" class="form-control form-control-sm d-none">
+                            <select name="category" class="form-select form-select-sm d-none">
+                                <option value="c216" {% if q.category=='c216' %}selected{% endif %}>c216</option>
+                                <option value="c223" {% if q.category=='c223' %}selected{% endif %}>c223</option>
+                            </select>
+                            <input name="max_pages" value="{{ q.max_pages }}" type="number" min="1" max="10"
+                                   class="form-control form-control-sm" style="width:58px">
+                            <button class="btn btn-outline-secondary btn-sm" title="Сохранить">💾</button>
+                        </form>
+                    </td>
+                    <td class="text-muted-sm">{{ q.label or '' }}</td>
+                    <td><code>{{ q.category }}</code></td>
+                    <td>{{ q.max_pages }}</td>
+                    <td class="text-muted-sm">{{ q.source or '' }}</td>
+                    <td class="text-muted-sm">{{ q.last_run_at|berlin('%d.%m %H:%M') if q.last_run_at else '—' }}</td>
+                    <td>{{ q.last_count if q.last_count is not none else '—' }}</td>
+                    <td>
+                        <form method="post" action="/scout/queries/{{ q.id }}/toggle">
+                            <button class="btn btn-sm {% if q.enabled %}btn-success{% else %}btn-outline-secondary{% endif %}">
+                                {% if q.enabled %}вкл{% else %}выкл{% endif %}
+                            </button>
+                        </form>
+                    </td>
+                    <td class="d-flex gap-1">
+                        <form method="post" action="/scout/run">
+                            <input type="hidden" name="query_id" value="{{ q.id }}">
+                            <button class="btn btn-outline-primary btn-sm" title="Прогнать только этот" {% if scout_state.running %}disabled{% endif %}>▶</button>
+                        </form>
+                        <form method="post" action="/scout/queries/{{ q.id }}/delete"
+                              onsubmit="return confirm('Удалить запрос?')">
+                            <button class="btn btn-outline-danger btn-sm" title="Удалить">🗑</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-3">
+                    Пока нет запросов. Нажмите «🤖 Сгенерировать (LLM)» или добавьте вручную ниже.
+                </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+
+        {# Добавить вручную #}
+        <form method="post" action="/scout/queries/add" class="row g-2 mt-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label">Тип</label>
+                <select name="kind" class="form-select form-select-sm" onchange="this.form.category.value = this.value=='part' ? 'c223':'c216'">
+                    <option value="car">🚐 авто</option>
+                    <option value="part">🪑 запчасть</option>
+                </select>
+            </div>
+            <div class="col-auto flex-grow-1">
+                <label class="form-label">Поисковая фраза (немецкий)</label>
+                <input name="keywords" class="form-control form-control-sm" placeholder="напр. opel zafira life 9 sitzer" required>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">Кат.</label>
+                <select name="category" class="form-select form-select-sm">
+                    <option value="c216">c216 (авто)</option>
+                    <option value="c223">c223 (з/ч)</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">Стр.</label>
+                <input name="max_pages" type="number" min="1" max="10" value="5" class="form-control form-control-sm" style="width:64px">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary btn-sm">+ Добавить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ===== Сводка по регионам ===== #}
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">🚐 Машины по землям</div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>Земля</th><th>Кол-во</th><th>мин</th><th>сред</th><th>макс</th></tr></thead>
+                    <tbody>
+                    {% for r in car_regions %}
+                        <tr><td>{{ r.bundesland }}</td><td><strong>{{ r.cnt }}</strong></td>
+                            <td>{{ eur(r.min_price) }}</td><td>{{ eur(r.avg_price) }}</td><td>{{ eur(r.max_price) }}</td></tr>
+                    {% else %}<tr><td colspan="5" class="text-muted text-center py-3">нет данных</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">🪑 Запчасти по землям</div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>Земля</th><th>Кол-во</th><th>мин</th><th>сред</th><th>макс</th></tr></thead>
+                    <tbody>
+                    {% for r in part_regions %}
+                        <tr><td>{{ r.bundesland }}</td><td><strong>{{ r.cnt }}</strong></td>
+                            <td>{{ eur(r.min_price) }}</td><td>{{ eur(r.avg_price) }}</td><td>{{ eur(r.max_price) }}</td></tr>
+                    {% else %}<tr><td colspan="5" class="text-muted text-center py-3">нет данных</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ===== Машины ===== #}
+<h2 class="mb-2">🚐 Машины ({{ cars|length }})</h2>
+<div class="card mb-4"><div class="card-body p-2">
+    <div class="table-responsive">
+    <table id="cars-table" class="table table-hover">
+        <thead><tr>
+            <th data-default-sort="asc">Земля</th><th>Город</th><th>PLZ</th><th>Модель</th>
+            <th>Год</th><th>Двиг.</th><th>КПП</th><th>Пробег</th><th>Цена</th>
+            <th data-sortable="false">Объявление</th><th>Дата</th>
+        </tr></thead>
+        <tbody>
+        {% for c in cars %}
+            <tr>
+                <td>{{ c.bundesland or '—' }}</td>
+                <td>{{ c.city or '—' }}</td>
+                <td>{{ c.plz or '—' }}</td>
+                <td>{{ c.model_family or '—' }}</td>
+                <td data-sort="{{ c.year or 0 }}">{{ c.year or '—' }}</td>
+                <td>{% if c.fuel=='electric' %}⚡эл{% elif c.fuel=='diesel' %}дизель{% elif c.fuel=='petrol' %}бензин{% elif c.fuel=='hybrid' %}гибрид{% else %}—{% endif %}</td>
+                <td>{% if c.gearbox=='automatik' %}авто{% elif c.gearbox=='manuell' %}мех{% else %}—{% endif %}</td>
+                <td data-sort="{{ c.mileage_km or 0 }}">{% if c.mileage_km %}{{ "{:,.0f}".format(c.mileage_km).replace(",", ".") }} км{% else %}—{% endif %}</td>
+                <td data-sort="{{ c.price_eur or 0 }}">{{ eur(c.price_eur) }}{% if c.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
+                <td><a class="row-link" href="{{ c.url }}" target="_blank" rel="noopener">{{ (c.title or '')[:70] }}</a></td>
+                <td class="text-muted-sm">{{ c.posted_raw or '' }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div></div>
+
+{# ===== Запчасти ===== #}
+<h2 class="mb-2">🪑 Запчасти ({{ parts|length }})</h2>
+<div class="card mb-4"><div class="card-body p-2">
+    <div class="table-responsive">
+    <table id="parts-table" class="table table-hover">
+        <thead><tr>
+            <th data-default-sort="asc">Земля</th><th>Город</th><th>PLZ</th><th>Тип</th>
+            <th>Сост.</th><th>Год</th><th>Цена</th>
+            <th data-sortable="false">Объявление</th><th>Дата</th>
+        </tr></thead>
+        <tbody>
+        {% for p in parts %}
+            <tr>
+                <td>{{ p.bundesland or '—' }}</td>
+                <td>{{ p.city or '—' }}</td>
+                <td>{{ p.plz or '—' }}</td>
+                <td>{% if p.part_type=='seat' %}сиденье{% elif p.part_type=='bench' %}скамейка{% elif p.part_type=='rail' %}рельсы{% else %}другое{% endif %}</td>
+                <td>{% if p.condition=='neu' %}новое{% elif p.condition=='gebraucht' %}б/у{% else %}—{% endif %}</td>
+                <td data-sort="{{ p.year or 0 }}">{{ p.year or '—' }}</td>
+                <td data-sort="{{ p.price_eur or 0 }}">{{ eur(p.price_eur) }}{% if p.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
+                <td><a class="row-link" href="{{ p.url }}" target="_blank" rel="noopener">{{ (p.title or '')[:70] }}</a></td>
+                <td class="text-muted-sm">{{ p.posted_raw or '' }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    if (document.querySelector('#cars-table tbody tr')) window.initDataTable('#cars-table', { perPage: 50 });
+    if (document.querySelector('#parts-table tbody tr')) window.initDataTable('#parts-table', { perPage: 50 });
+
+    // Авто-обновление пока идёт фоновый прогон
+    {% if scout_state.running %}
+    (function poll() {
+        fetch('/api/scout/status').then(r => r.json()).then(s => {
+            if (!s.running) { location.reload(); }
+            else { setTimeout(poll, 5000); }
+        }).catch(() => setTimeout(poll, 8000));
+    })();
+    {% endif %}
+</script>
+{% endblock %}

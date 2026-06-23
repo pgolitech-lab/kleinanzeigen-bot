@@ -272,6 +272,61 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_messages(processed_at)"
         )
 
+        # --- MARKET SCOUT (разведка рынка Kleinanzeigen) ---
+        # scout_queries — поисковые запросы (генерит LLM, редактирует оператор).
+        # kind: 'car' | 'part'. category: 'c216' (Autos) | 'c223' (Autoteile).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scout_queries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,                  -- 'car' | 'part'
+                label TEXT,                          -- человекочитаемое имя
+                keywords TEXT NOT NULL,              -- поисковая фраза (как вводят на сайте)
+                category TEXT NOT NULL DEFAULT 'c216',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                max_pages INTEGER NOT NULL DEFAULT 5,
+                source TEXT,                         -- 'llm' | 'operator'
+                notes TEXT,
+                last_run_at TEXT,
+                last_count INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        # scout_listings — найденные объявления. PK=ad_id (дедуп между запросами/прогонами).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scout_listings (
+                ad_id TEXT PRIMARY KEY,              -- 10-значный id Kleinanzeigen
+                kind TEXT NOT NULL,                  -- 'car' | 'part'
+                title TEXT,
+                url TEXT,
+                price_eur REAL,                      -- распарсенная числовая цена
+                price_raw TEXT,                      -- '10.900 € VB'
+                negotiable INTEGER,                  -- 1 если VB (Verhandlungsbasis)
+                plz TEXT,                            -- 5-значный индекс
+                city TEXT,
+                bundesland TEXT,                     -- выведено из plz
+                year INTEGER,                        -- год EZ (Erstzulassung) / год запчасти
+                ez_raw TEXT,                         -- '08/2021'
+                mileage_km INTEGER,
+                fuel TEXT,                           -- diesel|electric|petrol|hybrid|null
+                gearbox TEXT,                        -- automatik|manuell|null
+                model_family TEXT,                   -- traveller|proace|zafira_life|...
+                part_type TEXT,                      -- seat|bench|rail|other (для kind=part)
+                condition TEXT,                      -- neu|gebraucht|null
+                description TEXT,                     -- из JSON-LD (обрезано)
+                posted_raw TEXT,                     -- 'Heute, 15:07' / '14.06.2026'
+                shipping INTEGER,                    -- 1 если 'Versand möglich'
+                query_id INTEGER,                    -- последний запрос который нашёл
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_kind ON scout_listings(kind)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_land ON scout_listings(bundesland)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_model ON scout_listings(model_family)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_active ON scout_listings(active)")
+
 
 # --- ACCOUNTS ---
 
@@ -1520,6 +1575,193 @@ def list_lessons_for_ad(ad_id: str, limit: int = 20) -> list[sqlite3.Row]:
             "SELECT * FROM lessons WHERE ad_id = ? ORDER BY id DESC LIMIT ?",
             (ad_id, limit),
         ).fetchall()
+
+
+# --- MARKET SCOUT: QUERIES ---
+
+def add_scout_query(
+    kind: str,
+    keywords: str,
+    category: str = "c216",
+    label: Optional[str] = None,
+    max_pages: int = 5,
+    source: str = "operator",
+    enabled: bool = True,
+    notes: Optional[str] = None,
+) -> int:
+    """Создать поисковый запрос разведки. Возвращает id."""
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO scout_queries "
+            "(kind, label, keywords, category, enabled, max_pages, source, notes, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (kind, label, keywords, category, 1 if enabled else 0,
+             int(max_pages), source, notes, now, now),
+        )
+        return cur.lastrowid
+
+
+def list_scout_queries(only_enabled: bool = False) -> list[sqlite3.Row]:
+    """Все поисковые запросы разведки."""
+    sql = "SELECT * FROM scout_queries"
+    if only_enabled:
+        sql += " WHERE enabled = 1"
+    sql += " ORDER BY kind, id"
+    with get_conn() as conn:
+        return conn.execute(sql).fetchall()
+
+
+def get_scout_query(query_id: int) -> Optional[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM scout_queries WHERE id = ?", (query_id,)
+        ).fetchone()
+
+
+def update_scout_query(query_id: int, **fields: Any) -> None:
+    """Обновить произвольные поля запроса."""
+    allowed = {"kind", "label", "keywords", "category", "enabled",
+               "max_pages", "source", "notes", "last_run_at", "last_count"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if not fields:
+        return
+    fields["updated_at"] = datetime.utcnow().isoformat()
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE scout_queries SET {cols} WHERE id = ?",
+                     (*fields.values(), query_id))
+
+
+def delete_scout_query(query_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM scout_queries WHERE id = ?", (query_id,))
+
+
+def scout_query_exists(kind: str, keywords: str, category: str) -> bool:
+    """Дедуп при LLM-генерации: запрос с такими kind+keywords+category уже есть?"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM scout_queries WHERE kind=? AND lower(keywords)=lower(?) AND category=?",
+            (kind, keywords.strip(), category),
+        ).fetchone()
+    return bool(row)
+
+
+# --- MARKET SCOUT: LISTINGS ---
+
+def upsert_scout_listing(listing: dict[str, Any]) -> bool:
+    """UPSERT объявления по ad_id. Возвращает True если строка новая (insert).
+
+    `listing` — dict с ключами-колонками scout_listings (без first/last_seen).
+    first_seen_at ставится при первом появлении, last_seen_at обновляется всегда.
+    """
+    ad_id = str(listing.get("ad_id") or "").strip()
+    if not ad_id:
+        return False
+    now = datetime.utcnow().isoformat()
+    cols = ["kind", "title", "url", "price_eur", "price_raw", "negotiable",
+            "plz", "city", "bundesland", "year", "ez_raw", "mileage_km",
+            "fuel", "gearbox", "model_family", "part_type", "condition",
+            "description", "posted_raw", "shipping", "query_id"]
+    vals = [listing.get(c) for c in cols]
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM scout_listings WHERE ad_id = ?", (ad_id,)
+        ).fetchone()
+        if existing:
+            set_sql = ", ".join(f"{c} = ?" for c in cols)
+            conn.execute(
+                f"UPDATE scout_listings SET {set_sql}, last_seen_at = ?, active = 1 WHERE ad_id = ?",
+                (*vals, now, ad_id),
+            )
+            return False
+        all_cols = ["ad_id"] + cols + ["first_seen_at", "last_seen_at", "active"]
+        placeholders = ", ".join("?" * len(all_cols))
+        conn.execute(
+            f"INSERT INTO scout_listings ({', '.join(all_cols)}) VALUES ({placeholders})",
+            (ad_id, *vals, now, now, 1),
+        )
+        return True
+
+
+def deactivate_stale_scout_listings(kind: str, before_iso: str) -> int:
+    """Пометить active=0 объявления данного kind, не виденные с before_iso.
+
+    Используется после полного прогона: то что не встретилось в этот проход —
+    скорее всего снято/продано. Возвращает кол-во деактивированных.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE scout_listings SET active = 0 "
+            "WHERE kind = ? AND active = 1 AND last_seen_at < ?",
+            (kind, before_iso),
+        )
+        return cur.rowcount
+
+
+def list_scout_listings(
+    kind: Optional[str] = None,
+    only_active: bool = True,
+    bundesland: Optional[str] = None,
+    model_family: Optional[str] = None,
+    fuel: Optional[str] = None,
+    gearbox: Optional[str] = None,
+    part_type: Optional[str] = None,
+    condition: Optional[str] = None,
+) -> list[sqlite3.Row]:
+    """Объявления разведки с фильтрами. Сортировка: земля, город, цена."""
+    sql = "SELECT * FROM scout_listings WHERE 1=1"
+    params: list[Any] = []
+    if kind:
+        sql += " AND kind = ?"; params.append(kind)
+    if only_active:
+        sql += " AND active = 1"
+    if bundesland:
+        sql += " AND bundesland = ?"; params.append(bundesland)
+    if model_family:
+        sql += " AND model_family = ?"; params.append(model_family)
+    if fuel:
+        sql += " AND fuel = ?"; params.append(fuel)
+    if gearbox:
+        sql += " AND gearbox = ?"; params.append(gearbox)
+    if part_type:
+        sql += " AND part_type = ?"; params.append(part_type)
+    if condition:
+        sql += " AND condition = ?"; params.append(condition)
+    sql += (" ORDER BY COALESCE(bundesland, 'яя'), COALESCE(city, ''), "
+            "COALESCE(price_eur, 1e12)")
+    with get_conn() as conn:
+        return conn.execute(sql, params).fetchall()
+
+
+def scout_region_summary(kind: str) -> list[sqlite3.Row]:
+    """Агрегат по землям: сколько активных объявлений данного kind, медиана/мин/макс цены."""
+    sql = """
+        SELECT COALESCE(bundesland, '— неизвестно —') AS bundesland,
+               COUNT(*) AS cnt,
+               MIN(price_eur) AS min_price,
+               AVG(price_eur) AS avg_price,
+               MAX(price_eur) AS max_price
+        FROM scout_listings
+        WHERE kind = ? AND active = 1
+        GROUP BY bundesland
+        ORDER BY cnt DESC
+    """
+    with get_conn() as conn:
+        return conn.execute(sql, (kind,)).fetchall()
+
+
+def scout_counts() -> dict[str, int]:
+    """Сводка: сколько активных машин и запчастей сейчас в базе разведки."""
+    with get_conn() as conn:
+        cars = conn.execute(
+            "SELECT COUNT(*) c FROM scout_listings WHERE kind='car' AND active=1"
+        ).fetchone()["c"]
+        parts = conn.execute(
+            "SELECT COUNT(*) c FROM scout_listings WHERE kind='part' AND active=1"
+        ).fetchone()["c"]
+    return {"cars": cars, "parts": parts}
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 import config
 import database as db
-from modules import ad_brief, backup, claude, gmail, parser, telegram_bot
+from modules import ad_brief, backup, claude, gmail, parser, scout, telegram_bot
 
 logger = logging.getLogger(__name__)
 
@@ -1404,6 +1404,22 @@ def run_backup() -> str:
         raise  # пусть слушатель event-а зафиксирует error
 
 
+def scout_job() -> str:
+    """Job: авто-прогон разведки рынка (если включён в настройках)."""
+    if not config.scout_auto_enabled():
+        return "scout: auto disabled"
+    queries = db.list_scout_queries(only_enabled=True)
+    if not queries:
+        return "scout: нет активных запросов"
+    summary = scout.run_scout(page_delay_sec=config.scout_page_delay_sec())
+    msg = (f"scout: запросов {summary['ran']}, найдено {summary['total_seen']}, "
+           f"новых машин {summary['cars_new']}, новых запчастей {summary['parts_new']}")
+    if summary["errors"]:
+        msg += f", ошибок {len(summary['errors'])}"
+    logger.info(msg)
+    return msg
+
+
 # ============================================================
 # Сборка и запуск
 # ============================================================
@@ -1473,6 +1489,17 @@ def build_scheduler() -> BackgroundScheduler:
         trigger="interval",
         hours=1,
         id="monitor_errors",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Разведка рынка — авто-прогон по интервалу (само no-op если выключено в настройках).
+    sched.add_job(
+        scout_job,
+        trigger="interval",
+        hours=max(1, config.scout_interval_hours()),
+        id="market_scout",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

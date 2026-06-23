@@ -1,8 +1,8 @@
 // 📥 Входящие — единый инбокс всех аккаунтов. Фильтры (аккаунт/статус),
 // цветные бейджи аккаунтов, превью последнего сообщения по-русски.
 // Клик по карточке → переписка треда (#/thread/<id>).
-import { api } from "../api.js?v=20260623-190000";
-import { el, esc, berlinTime, setLoading, setError, accountBadge } from "../utils.js?v=20260623-190000";
+import { api } from "../api.js?v=20260623-235900";
+import { el, esc, berlinTime, setLoading, setError, accountBadge } from "../utils.js?v=20260623-235900";
 
 export function threadCard(thread, accountsById = {}) {
   const card = el(`

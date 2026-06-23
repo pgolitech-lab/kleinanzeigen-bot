@@ -26,6 +26,12 @@ export function close() {
   tg?.close();
 }
 
+// Открыть внешнюю ссылку (объявление Kleinanzeigen) в браузере.
+export function openLink(url) {
+  if (tg?.openLink) tg.openLink(url);
+  else window.open(url, "_blank");
+}
+
 // BackButton API
 export function showBack(handler) {
   if (!tg?.BackButton) return;

@@ -769,3 +769,139 @@ async def api_post_settings(request: Request) -> dict[str, Any]:
         updated.append(key)
     return {"updated": updated, "count": len(updated)}
 
+
+# ============================================================
+# Разведка рынка (market scout)
+# ============================================================
+
+from modules import scout_runner  # общий раннер (делят веб-морда и Mini App)
+
+
+@app.get("/scout")
+def page_scout(
+    request: Request,
+    flash_type: str = "",
+    flash_msg: str = "",
+):
+    """Разведка рынка: запросы + результаты по машинам и запчастям с группировкой."""
+    flash = {"type": flash_type or "info", "message": flash_msg} if flash_msg else None
+    queries = [dict(q) for q in db.list_scout_queries()]
+    cars = [dict(r) for r in db.list_scout_listings(kind="car")]
+    parts = [dict(r) for r in db.list_scout_listings(kind="part")]
+    return templates.TemplateResponse(
+        request, "scout.html",
+        {
+            "queries": queries,
+            "cars": cars,
+            "parts": parts,
+            "car_regions": [dict(r) for r in db.scout_region_summary("car")],
+            "part_regions": [dict(r) for r in db.scout_region_summary("part")],
+            "counts": db.scout_counts(),
+            "scout_state": scout_runner.status(),
+            "auto_enabled": config.scout_auto_enabled(),
+            "interval_hours": config.scout_interval_hours(),
+            "flash": flash,
+        },
+    )
+
+
+def _scout_redirect(msg: str, typ: str = "success") -> RedirectResponse:
+    return RedirectResponse(
+        url=f"/scout?flash_type={typ}&flash_msg={quote(msg)}", status_code=303
+    )
+
+
+@app.post("/scout/queries/add")
+def scout_query_add(
+    kind: str = Form(...),
+    keywords: str = Form(...),
+    category: str = Form("c216"),
+    label: str = Form(""),
+    max_pages: int = Form(5),
+):
+    kind = "part" if kind == "part" else "car"
+    if category not in ("c216", "c223"):
+        category = "c223" if kind == "part" else "c216"
+    kw = keywords.strip()
+    if not kw:
+        return _scout_redirect("Пустая поисковая фраза", "danger")
+    db.add_scout_query(kind=kind, keywords=kw, category=category,
+                       label=label.strip() or kw, max_pages=max_pages,
+                       source="operator")
+    return _scout_redirect(f"Запрос добавлен: {kw}")
+
+
+@app.post("/scout/queries/{query_id}/update")
+def scout_query_update(
+    query_id: int,
+    keywords: str = Form(...),
+    category: str = Form("c216"),
+    label: str = Form(""),
+    max_pages: int = Form(5),
+):
+    if not db.get_scout_query(query_id):
+        raise HTTPException(404, "Запрос не найден")
+    if category not in ("c216", "c223"):
+        category = "c216"
+    db.update_scout_query(query_id, keywords=keywords.strip(), category=category,
+                          label=label.strip(), max_pages=max_pages)
+    return _scout_redirect("Запрос обновлён")
+
+
+@app.post("/scout/queries/{query_id}/delete")
+def scout_query_delete(query_id: int):
+    db.delete_scout_query(query_id)
+    return _scout_redirect("Запрос удалён")
+
+
+@app.post("/scout/queries/{query_id}/toggle")
+def scout_query_toggle(query_id: int):
+    q = db.get_scout_query(query_id)
+    if not q:
+        raise HTTPException(404, "Запрос не найден")
+    db.update_scout_query(query_id, enabled=0 if q["enabled"] else 1)
+    return _scout_redirect("Статус запроса изменён")
+
+
+@app.post("/scout/generate")
+def scout_generate(extra: str = Form("")):
+    """Сгенерить запросы через LLM и добавить новые (без дублей)."""
+    from modules import claude as _claude
+    try:
+        existing = [q["keywords"] for q in db.list_scout_queries()]
+        result = _claude.generate_scout_queries(existing_keywords=existing,
+                                                 extra_instruction=extra.strip())
+    except Exception as e:  # noqa: BLE001
+        return _scout_redirect(f"LLM-ошибка: {e}", "danger")
+    added = 0
+    for q in result["queries"]:
+        if db.scout_query_exists(q["kind"], q["keywords"], q["category"]):
+            continue
+        db.add_scout_query(kind=q["kind"], keywords=q["keywords"],
+                           category=q["category"], label=q["label"],
+                           max_pages=q["max_pages"], source="llm")
+        added += 1
+    cost = result.get("cost_usd", 0.0)
+    return _scout_redirect(f"LLM добавил {added} новых запросов (${cost:.4f})")
+
+
+@app.post("/scout/run")
+def scout_run(query_id: Optional[int] = Form(None)):
+    """Запустить разведку в фоне. query_id — один запрос, иначе все enabled."""
+    ids = [query_id] if query_id else None
+    if not scout_runner.start(ids):
+        return _scout_redirect("Разведка уже выполняется…", "info")
+    return _scout_redirect("Разведка запущена в фоне — обновите страницу через минуту")
+
+
+@app.get("/api/scout/status")
+def api_scout_status() -> dict[str, Any]:
+    """JSON статус фонового прогона (для авто-обновления страницы)."""
+    st = scout_runner.status()
+    return {
+        "running": st["running"],
+        "started_at": st["started_at"],
+        "summary": st["summary"],
+        "counts": db.scout_counts(),
+    }
+

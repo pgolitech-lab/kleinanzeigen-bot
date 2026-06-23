@@ -75,6 +75,14 @@ DEFAULTS: dict[str, str] = {
     "chat_row_gap_rem": "0.35",       # промежуток между рядами (rem)
     "chat_meta_font_em": "0.78",      # шрифт мета-строки (📤 timestamp · sent)
     "chat_secondary_font_em": "0.92", # шрифт RU-перевода (от шрифта пузыря)
+
+    # --- Разведка рынка (market scout) ---
+    # Авто-прогон разведки по расписанию. "1" = scheduler сам обновляет данные.
+    "scout_auto_enabled": "1",
+    # Интервал авто-прогона в часах.
+    "scout_interval_hours": "6",
+    # Пауза между загрузками страниц поиска (вежливость к сайту), секунды.
+    "scout_page_delay_sec": "1.5",
 }
 
 
@@ -226,6 +234,22 @@ def reminder_after_days() -> float:
         return float(raw)
     except ValueError:
         return 1.0
+
+
+def scout_auto_enabled() -> bool:
+    return (get("scout_auto_enabled") or "0").strip() == "1"
+
+
+def scout_interval_hours() -> int:
+    return get_int("scout_interval_hours", 6)
+
+
+def scout_page_delay_sec() -> float:
+    raw = (get("scout_page_delay_sec") or "1.5").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 1.5
 
 
 def polling_paused() -> bool:
