@@ -796,6 +796,8 @@ def page_scout(
             "parts": parts,
             "car_regions": [dict(r) for r in db.scout_region_summary("car")],
             "part_regions": [dict(r) for r in db.scout_region_summary("part")],
+            "car_cities": [dict(r) for r in db.scout_city_summary("car")],
+            "part_cities": [dict(r) for r in db.scout_city_summary("part")],
             "counts": db.scout_counts(),
             "scout_state": scout_runner.status(),
             "auto_enabled": config.scout_auto_enabled(),
@@ -892,6 +894,22 @@ def scout_run(query_id: Optional[int] = Form(None)):
     if not scout_runner.start(ids):
         return _scout_redirect("Разведка уже выполняется…", "info")
     return _scout_redirect("Разведка запущена в фоне — обновите страницу через минуту")
+
+
+@app.post("/scout/verify")
+def scout_verify():
+    """Проверить тип непроверенных объявлений через Haiku (в фоне)."""
+    import threading
+    from modules import scout as _scout
+    threading.Thread(target=_scout.verify_listings, daemon=True).start()
+    return _scout_redirect("Проверка Haiku запущена в фоне — обновите через минуту")
+
+
+@app.post("/scout/verify/reset")
+def scout_verify_reset():
+    """Сбросить результаты проверки (для перепроверки всех)."""
+    n = db.reset_scout_verification()
+    return _scout_redirect(f"Сброшена проверка у {n} объявлений")
 
 
 @app.get("/api/scout/status")

@@ -1,7 +1,7 @@
 // Settings screen — KV editor с per-field save.
 
-import { api } from "../api.js?v=20260623-235900";
-import { el, esc, setLoading, setError } from "../utils.js?v=20260623-235900";
+import { api } from "../api.js?v=20260624-001500";
+import { el, esc, setLoading, setError } from "../utils.js?v=20260624-001500";
 
 
 const FIELDS = [

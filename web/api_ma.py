@@ -1432,3 +1432,12 @@ async def ma_scout_query_toggle(query_id: int,
 async def ma_scout_query_delete(query_id: int,
                                 user: dict = Depends(verify_init_data_dep)) -> None:
     db.delete_scout_query(query_id)
+
+
+@router.post("/scout/verify")
+async def ma_scout_verify(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Запустить Haiku-проверку типа непроверенных объявлений в фоне."""
+    import threading
+    from modules import scout as _scout
+    threading.Thread(target=_scout.verify_listings, daemon=True).start()
+    return {"started": True}

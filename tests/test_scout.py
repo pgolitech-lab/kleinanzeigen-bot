@@ -166,6 +166,56 @@ def test_extract_year_generic(text, year):
 
 # --- PLZ → Bundesland ---
 
+# --- DB: эффективный kind (verified_kind) + сводка по городам ---
+
+def _mk_listing(ad_id, kind, city, bundesland, price):
+    return {"ad_id": ad_id, "kind": kind, "title": f"t{ad_id}", "url": "u",
+            "price_eur": price, "price_raw": None, "negotiable": 0,
+            "plz": "10115", "city": city, "bundesland": bundesland,
+            "year": None, "ez_raw": None, "mileage_km": None, "fuel": None,
+            "gearbox": None, "model_family": None, "part_type": None,
+            "condition": None, "description": "", "posted_raw": None,
+            "shipping": 0, "query_id": 1}
+
+
+def test_effective_kind_and_city_summary(tmp_path, monkeypatch):
+    import importlib
+    import database as db
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    db.init_db()
+    # 3 машины (2 Berlin, 1 München), 1 запчасть (Berlin)
+    db.upsert_scout_listing(_mk_listing("1", "car", "Berlin", "Berlin", 10000))
+    db.upsert_scout_listing(_mk_listing("2", "car", "Berlin", "Berlin", 20000))
+    db.upsert_scout_listing(_mk_listing("3", "car", "München", "Bayern", 30000))
+    db.upsert_scout_listing(_mk_listing("4", "part", "Berlin", "Berlin", 100))
+
+    # до проверки: 3 car / 1 part, 4 unverified
+    c = db.scout_counts()
+    assert c["cars"] == 3 and c["parts"] == 1 and c["unverified"] == 4
+
+    # Haiku переклассифицировал машину #3 как запчасть, #2 как other
+    db.set_scout_verified_kind("3", "part")
+    db.set_scout_verified_kind("2", "other")
+    c = db.scout_counts()
+    assert c["cars"] == 1          # только #1
+    assert c["parts"] == 2          # #4 + переклассифицированная #3
+    assert c["other"] == 1          # #2
+    assert c["unverified"] == 2     # #1, #4
+
+    # list по эффективному виду
+    cars = db.list_scout_listings(kind="car")
+    assert {r["ad_id"] for r in cars} == {"1"}
+    parts = db.list_scout_listings(kind="part")
+    assert {r["ad_id"] for r in parts} == {"3", "4"}
+
+    # сводка по городам (машины): только #1 Berlin
+    cs = db.scout_city_summary("car")
+    assert len(cs) == 1 and cs[0]["city"] == "Berlin" and cs[0]["cnt"] == 1
+
+    # фильтр по городу
+    assert len(db.list_scout_listings(kind="part", city="Berlin")) == 1
+
+
 @pytest.mark.parametrize("plz,land", [
     ("90449", "Bayern"),
     ("10707", "Berlin"),

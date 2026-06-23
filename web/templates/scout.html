@@ -8,12 +8,17 @@
     <h1 class="mb-0">🔎 Разведка рынка</h1>
     <span class="badge bg-secondary">🚐 машин: {{ counts.cars }}</span>
     <span class="badge bg-secondary">🪑 запчастей: {{ counts.parts }}</span>
+    {% if counts.other %}<span class="badge bg-dark" title="Haiku: не машина и не запчасть">🚫 другое: {{ counts.other }}</span>{% endif %}
+    {% if counts.unverified %}<span class="badge bg-warning text-dark" title="ещё не проверено Haiku">❓ не пров.: {{ counts.unverified }}</span>{% endif %}
     <div class="ms-auto d-flex gap-2 align-items-center">
         {% if auto_enabled %}
             <span class="badge bg-success">авто-прогон каждые {{ interval_hours }}ч</span>
         {% else %}
             <span class="badge bg-warning text-dark">авто-прогон выключен</span>
         {% endif %}
+        <form method="post" action="/scout/verify" class="d-inline">
+            <button class="btn btn-outline-info btn-sm" title="Проверить тип объявлений через Haiku">🔍 Проверить (Haiku)</button>
+        </form>
         <form method="post" action="/scout/run" class="d-inline">
             <button class="btn btn-primary btn-sm" {% if scout_state.running %}disabled{% endif %}>
                 {% if scout_state.running %}⏳ Идёт разведка…{% else %}▶ Запустить разведку{% endif %}
@@ -159,6 +164,52 @@
                     {% else %}<tr><td colspan="5" class="text-muted text-center py-3">нет данных</td></tr>{% endfor %}
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ===== Сводка по городам ===== #}
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">🚐 Машины по городам ({{ car_cities|length }})</div>
+            <div class="card-body p-2">
+                <div class="table-responsive" style="max-height:340px;overflow-y:auto">
+                <table id="car-cities-table" class="table table-hover mb-0">
+                    <thead><tr><th>Город</th><th>Земля</th><th>Кол-во</th><th>мин</th><th>сред</th><th>макс</th></tr></thead>
+                    <tbody>
+                    {% for r in car_cities %}
+                        <tr><td>{{ r.city }}</td><td class="text-muted-sm">{{ r.bundesland or '—' }}</td>
+                            <td data-sort="{{ r.cnt }}"><strong>{{ r.cnt }}</strong></td>
+                            <td data-sort="{{ r.min_price or 0 }}">{{ eur(r.min_price) }}</td>
+                            <td data-sort="{{ r.avg_price or 0 }}">{{ eur(r.avg_price) }}</td>
+                            <td data-sort="{{ r.max_price or 0 }}">{{ eur(r.max_price) }}</td></tr>
+                    {% else %}<tr><td colspan="6" class="text-muted text-center py-3">нет данных</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">🪑 Запчасти по городам ({{ part_cities|length }})</div>
+            <div class="card-body p-2">
+                <div class="table-responsive" style="max-height:340px;overflow-y:auto">
+                <table id="part-cities-table" class="table table-hover mb-0">
+                    <thead><tr><th>Город</th><th>Земля</th><th>Кол-во</th><th>мин</th><th>сред</th><th>макс</th></tr></thead>
+                    <tbody>
+                    {% for r in part_cities %}
+                        <tr><td>{{ r.city }}</td><td class="text-muted-sm">{{ r.bundesland or '—' }}</td>
+                            <td data-sort="{{ r.cnt }}"><strong>{{ r.cnt }}</strong></td>
+                            <td data-sort="{{ r.min_price or 0 }}">{{ eur(r.min_price) }}</td>
+                            <td data-sort="{{ r.avg_price or 0 }}">{{ eur(r.avg_price) }}</td>
+                            <td data-sort="{{ r.max_price or 0 }}">{{ eur(r.max_price) }}</td></tr>
+                    {% else %}<tr><td colspan="6" class="text-muted text-center py-3">нет данных</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                </div>
             </div>
         </div>
     </div>

@@ -326,6 +326,10 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_land ON scout_listings(bundesland)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_model ON scout_listings(model_family)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scout_active ON scout_listings(active)")
+        # verified_kind — результат Haiku-проверки: 'car'|'part'|'other'|NULL(не проверено).
+        # Эффективный вид объявления = COALESCE(verified_kind, kind). verified_at — когда.
+        _add_column_if_missing(conn, "scout_listings", "verified_kind", "TEXT")
+        _add_column_if_missing(conn, "scout_listings", "verified_at", "TEXT")
 
 
 # --- ACCOUNTS ---
@@ -1685,16 +1689,22 @@ def upsert_scout_listing(listing: dict[str, Any]) -> bool:
         return True
 
 
-def deactivate_stale_scout_listings(kind: str, before_iso: str) -> int:
-    """Пометить active=0 объявления данного kind, не виденные с before_iso.
+# Эффективный вид объявления: результат Haiku-проверки имеет приоритет над
+# kind, выставленным запросом-источником.
+_EFF_KIND = "COALESCE(verified_kind, kind)"
 
-    Используется после полного прогона: то что не встретилось в этот проход —
-    скорее всего снято/продано. Возвращает кол-во деактивированных.
+
+def deactivate_stale_scout_listings(kind: str, before_iso: str) -> int:
+    """Пометить active=0 объявления данного (effective) kind, не виденные с before_iso.
+
+    before_iso — порог ПО ВОЗРАСТУ (now - scout_stale_days), НЕ время старта прогона.
+    Так один упавший/заблокированный прогон не обнуляет всю базу: деактивируются
+    лишь объявления, которых нет уже несколько дней. Возвращает кол-во.
     """
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE scout_listings SET active = 0 "
-            "WHERE kind = ? AND active = 1 AND last_seen_at < ?",
+            f"UPDATE scout_listings SET active = 0 "
+            f"WHERE {_EFF_KIND} = ? AND active = 1 AND last_seen_at < ?",
             (kind, before_iso),
         )
         return cur.rowcount
@@ -1709,16 +1719,19 @@ def list_scout_listings(
     gearbox: Optional[str] = None,
     part_type: Optional[str] = None,
     condition: Optional[str] = None,
+    city: Optional[str] = None,
 ) -> list[sqlite3.Row]:
-    """Объявления разведки с фильтрами. Сортировка: земля, город, цена."""
+    """Объявления разведки с фильтрами (по ЭФФЕКТИВНОМУ виду). Сортировка: земля, город, цена."""
     sql = "SELECT * FROM scout_listings WHERE 1=1"
     params: list[Any] = []
     if kind:
-        sql += " AND kind = ?"; params.append(kind)
+        sql += f" AND {_EFF_KIND} = ?"; params.append(kind)
     if only_active:
         sql += " AND active = 1"
     if bundesland:
         sql += " AND bundesland = ?"; params.append(bundesland)
+    if city:
+        sql += " AND city = ?"; params.append(city)
     if model_family:
         sql += " AND model_family = ?"; params.append(model_family)
     if fuel:
@@ -1736,15 +1749,15 @@ def list_scout_listings(
 
 
 def scout_region_summary(kind: str) -> list[sqlite3.Row]:
-    """Агрегат по землям: сколько активных объявлений данного kind, медиана/мин/макс цены."""
-    sql = """
+    """Агрегат по землям (effective kind): кол-во активных, мин/сред/макс цены."""
+    sql = f"""
         SELECT COALESCE(bundesland, '— неизвестно —') AS bundesland,
                COUNT(*) AS cnt,
                MIN(price_eur) AS min_price,
                AVG(price_eur) AS avg_price,
                MAX(price_eur) AS max_price
         FROM scout_listings
-        WHERE kind = ? AND active = 1
+        WHERE {_EFF_KIND} = ? AND active = 1
         GROUP BY bundesland
         ORDER BY cnt DESC
     """
@@ -1752,16 +1765,71 @@ def scout_region_summary(kind: str) -> list[sqlite3.Row]:
         return conn.execute(sql, (kind,)).fetchall()
 
 
-def scout_counts() -> dict[str, int]:
-    """Сводка: сколько активных машин и запчастей сейчас в базе разведки."""
+def scout_city_summary(kind: str) -> list[sqlite3.Row]:
+    """Агрегат по городам (effective kind): город, земля, кол-во, мин/сред/макс цены.
+    Отсортировано по убыванию количества."""
+    sql = f"""
+        SELECT COALESCE(city, '— неизвестно —') AS city,
+               bundesland,
+               COUNT(*) AS cnt,
+               MIN(price_eur) AS min_price,
+               AVG(price_eur) AS avg_price,
+               MAX(price_eur) AS max_price
+        FROM scout_listings
+        WHERE {_EFF_KIND} = ? AND active = 1
+        GROUP BY city, bundesland
+        ORDER BY cnt DESC, city
+    """
     with get_conn() as conn:
-        cars = conn.execute(
-            "SELECT COUNT(*) c FROM scout_listings WHERE kind='car' AND active=1"
-        ).fetchone()["c"]
-        parts = conn.execute(
-            "SELECT COUNT(*) c FROM scout_listings WHERE kind='part' AND active=1"
-        ).fetchone()["c"]
-    return {"cars": cars, "parts": parts}
+        return conn.execute(sql, (kind,)).fetchall()
+
+
+def scout_counts() -> dict[str, int]:
+    """Сводка по активным: машины, запчасти (effective kind), other, не проверено."""
+    with get_conn() as conn:
+        def c(where: str, *p: Any) -> int:
+            return conn.execute(
+                f"SELECT COUNT(*) c FROM scout_listings WHERE active=1 AND {where}", p
+            ).fetchone()["c"]
+        return {
+            "cars": c(f"{_EFF_KIND}='car'"),
+            "parts": c(f"{_EFF_KIND}='part'"),
+            "other": c(f"{_EFF_KIND}='other'"),
+            "unverified": c("verified_kind IS NULL"),
+        }
+
+
+# --- MARKET SCOUT: Haiku-проверка типа ---
+
+def list_unverified_scout_listings(limit: int = 500) -> list[sqlite3.Row]:
+    """Активные объявления без verified_kind (для батч-проверки Haiku)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT ad_id, kind, title, description FROM scout_listings "
+            "WHERE active = 1 AND verified_kind IS NULL ORDER BY first_seen_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
+def set_scout_verified_kind(ad_id: str, verified_kind: str) -> None:
+    """Записать результат Haiku-проверки ('car'|'part'|'other')."""
+    if not ad_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE scout_listings SET verified_kind = ?, verified_at = ? WHERE ad_id = ?",
+            (verified_kind, datetime.utcnow().isoformat(), ad_id),
+        )
+
+
+def reset_scout_verification() -> int:
+    """Сбросить verified_kind у всех (для перепроверки). Возвращает кол-во строк."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE scout_listings SET verified_kind = NULL, verified_at = NULL "
+            "WHERE verified_kind IS NOT NULL"
+        )
+        return cur.rowcount
 
 
 if __name__ == "__main__":

@@ -20,12 +20,14 @@ import logging
 import re
 import time
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from playwright.sync_api import Page, sync_playwright
 
+import config
 import database as db
+from modules import claude
 from modules.plz import plz_to_bundesland
 
 logger = logging.getLogger(__name__)
@@ -376,14 +378,18 @@ def run_scout(
     query_ids: Optional[list[int]] = None,
     full_run: bool = False,
     page_delay_sec: float = 1.5,
+    verify: bool = True,
 ) -> dict[str, Any]:
     """Прогнать разведку.
 
     query_ids=None → все enabled запросы (это «полный прогон»).
-    full_run=True (или query_ids=None) → после прогона объявления соответствующих
-      kind, не встретившиеся в этот раз, помечаются active=0 (сняты/проданы).
+    full_run=True (или query_ids=None) → после прогона объявления, которых НЕ
+      видели дольше scout_stale_days дней, помечаются active=0 (сняты/проданы).
+      Деактивация по ВОЗРАСТУ (не «не виден в этом прогоне») + пропуск kind с 0
+      результатов — чтобы упавший/заблокированный прогон не обнулял базу.
+    verify=True → после скрапинга прогнать Haiku-проверку типа новых объявлений.
 
-    Возвращает сводку: {ran, cars_new, parts_new, total_seen, errors, by_query}.
+    Возвращает сводку: {ran, cars_new, parts_new, total_seen, errors, by_query, ...}.
     """
     if query_ids is None:
         queries = db.list_scout_queries(only_enabled=True)
@@ -391,10 +397,10 @@ def run_scout(
     else:
         queries = [q for q in (db.get_scout_query(i) for i in query_ids) if q]
 
-    run_start = datetime.utcnow().isoformat()
     summary: dict[str, Any] = {
         "ran": 0, "cars_new": 0, "parts_new": 0, "total_seen": 0,
-        "errors": [], "by_query": [], "kinds": set(),
+        "errors": [], "by_query": [], "kinds": set(), "seen_by_kind": {},
+        "deactivated": 0, "verify": None,
     }
     if not queries:
         return summary
@@ -426,6 +432,8 @@ def run_scout(
                 summary["total_seen"] += len(rows)
                 summary["ran"] += 1
                 summary["kinds"].add(q["kind"])
+                summary["seen_by_kind"][q["kind"]] = (
+                    summary["seen_by_kind"].get(q["kind"], 0) + len(rows))
                 db.update_scout_query(
                     q["id"],
                     last_run_at=datetime.utcnow().isoformat(),
@@ -439,18 +447,71 @@ def run_scout(
         finally:
             browser.close()
 
-    # Деактивировать устаревшие (по каждому реально просканированному kind)
+    # Деактивировать устаревшие — ПО ВОЗРАСТУ (last_seen старше scout_stale_days),
+    # и только для kind, по которому реально что-то нашли в этот раз (иначе блокировка
+    # сайта → 0 результатов → не трогаем базу).
     if full_run:
+        cutoff = (datetime.utcnow() - timedelta(days=config.scout_stale_days())).isoformat()
         for kind in summary["kinds"]:
+            if summary["seen_by_kind"].get(kind, 0) <= 0:
+                logger.warning("scout: kind=%s дал 0 результатов — деактивацию пропускаем", kind)
+                continue
             try:
-                n = db.deactivate_stale_scout_listings(kind, run_start)
+                n = db.deactivate_stale_scout_listings(kind, cutoff)
+                summary["deactivated"] += n
                 if n:
-                    logger.info("scout: deactivated %d stale %s listings", n, kind)
+                    logger.info("scout: deactivated %d stale %s listings (>%dd)",
+                                n, kind, config.scout_stale_days())
             except Exception:
                 logger.exception("scout: deactivate stale fail")
 
+    # Haiku-проверка типа новых/непроверенных объявлений
+    if verify:
+        try:
+            summary["verify"] = verify_listings()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("scout: verify_listings fail")
+            summary["errors"].append(f"verify: {e}")
+
     summary["kinds"] = sorted(summary["kinds"])
     return summary
+
+
+def verify_listings(batch_size: int = 25, max_items: int = 1000) -> dict[str, Any]:
+    """Haiku-проверка типа (car/part/other) для непроверенных активных объявлений.
+
+    Батчами по batch_size. Возвращает {checked, changed, by_type, cost_usd}.
+    changed — сколько объявлений Haiku переклассифицировала относительно kind-источника.
+    """
+    rows = db.list_unverified_scout_listings(limit=max_items)
+    result = {"checked": 0, "changed": 0, "by_type": {"car": 0, "part": 0, "other": 0},
+              "cost_usd": 0.0}
+    if not rows:
+        return result
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        items = [{"ad_id": r["ad_id"], "title": r["title"], "description": r["description"]}
+                 for r in batch]
+        try:
+            res = claude.classify_scout_listings(items)
+        except Exception:
+            logger.exception("scout: classify batch fail")
+            continue
+        result["cost_usd"] += res.get("cost_usd", 0.0)
+        vmap = res["map"]
+        for r in batch:
+            v = vmap.get(str(r["ad_id"]))
+            if not v:
+                continue
+            db.set_scout_verified_kind(r["ad_id"], v)
+            result["checked"] += 1
+            result["by_type"][v] = result["by_type"].get(v, 0) + 1
+            if v != r["kind"]:
+                result["changed"] += 1
+        time.sleep(0.2)
+    logger.info("scout: verify checked=%d changed=%d by=%s cost=$%.4f",
+                result["checked"], result["changed"], result["by_type"], result["cost_usd"])
+    return result
 
 
 if __name__ == "__main__":

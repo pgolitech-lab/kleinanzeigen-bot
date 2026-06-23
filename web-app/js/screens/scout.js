@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260623-235900";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260623-235900";
-import { openLink } from "../tg.js?v=20260623-235900";
+import { api } from "../api.js?v=20260624-001500";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260624-001500";
+import { openLink } from "../tg.js?v=20260624-001500";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -75,6 +75,16 @@ function partCard(p) {
 // --- фильтрация + сортировка ---
 function uniq(arr) { return [...new Set(arr.filter(Boolean))].sort(); }
 
+// Опции «Значение (N)», отсортированные по убыванию количества — для выпадающих
+// списков городов/земель со счётчиком сколько объявлений в каждом.
+function countedOptions(all, key) {
+  const m = new Map();
+  all.forEach(r => { const v = r[key]; if (v) m.set(v, (m.get(v) || 0) + 1); });
+  return [...m.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([value, n]) => ({ value, text: `${value} (${n})` }));
+}
+
 function applyAndRender(listEl, kind) {
   const all = kind === "car" ? (S.cars || []) : (S.parts || []);
   const f = S.filters[kind];
@@ -82,6 +92,7 @@ function applyAndRender(listEl, kind) {
   let rows = all.filter(r => {
     if (term && !((r.title || "").toLowerCase().includes(term))) return false;
     if (f.bundesland && r.bundesland !== f.bundesland) return false;
+    if (f.city && r.city !== f.city) return false;
     if (kind === "car") {
       if (f.model_family && r.model_family !== f.model_family) return false;
       if (f.fuel && r.fuel !== f.fuel) return false;
@@ -154,9 +165,10 @@ async function renderListTab(container, kind) {
   search.addEventListener("input", () => { f.q = search.value; applyAndRender(listEl, kind); });
   filterRow.appendChild(search);
 
-  const lands = uniq(all.map(r => r.bundesland)).map(v => ({ value: v, text: v }));
-  filterRow.appendChild(selectFilter("🗺 земля", lands, f.bundesland || "",
+  filterRow.appendChild(selectFilter("🗺 земля (все)", countedOptions(all, "bundesland"), f.bundesland || "",
     v => { f.bundesland = v; applyAndRender(listEl, kind); }));
+  filterRow.appendChild(selectFilter("🏙 город (все)", countedOptions(all, "city"), f.city || "",
+    v => { f.city = v; applyAndRender(listEl, kind); }));
 
   if (kind === "car") {
     const models = uniq(all.map(r => r.model_family)).map(v => ({ value: v, text: v }));
@@ -215,10 +227,19 @@ async function renderQueriesTab(container) {
     <div class="d-grid gap-2 mb-3">
       <button class="btn btn-outline-info btn-sm gen">🤖 Сгенерировать запросы (LLM)</button>
       <button class="btn btn-primary btn-sm runall">▶ Запустить разведку (все)</button>
+      <button class="btn btn-outline-secondary btn-sm verify">🔍 Проверить тип (Haiku)</button>
       <div class="small text-muted status"></div>
     </div>`);
   const statusEl = actions.querySelector(".status");
   if (ov.running) statusEl.textContent = "⏳ идёт прогон…";
+  else if (ov.counts.unverified) statusEl.textContent = `❓ не проверено: ${ov.counts.unverified}`;
+  actions.querySelector(".verify").addEventListener("click", async (e) => {
+    const btn = e.target; btn.disabled = true;
+    try {
+      await api("/api/ma/scout/verify", { method: "POST", body: {} });
+      statusEl.textContent = "🔍 проверка Haiku запущена… (обновите вкладку через минуту)";
+    } catch (err) { statusEl.textContent = "ошибка: " + (err.message || err); btn.disabled = false; }
+  });
   actions.querySelector(".gen").addEventListener("click", async (e) => {
     const btn = e.target; btn.disabled = true; btn.textContent = "🤖 генерирую…";
     try {
@@ -342,6 +363,7 @@ function renderShell(mount) {
         <span class="small">
           <span class="badge bg-secondary me-1 cc"></span>
           <span class="badge bg-secondary pc"></span>
+          <span class="badge bg-warning text-dark ms-1 uc" style="display:none"></span>
         </span>
       </div>
       <div class="small text-muted mb-2 autostat"></div>
@@ -354,8 +376,11 @@ function renderShell(mount) {
     </div>`);
   root.querySelector(".cc").textContent = `🚐 ${ov.counts.cars}`;
   root.querySelector(".pc").textContent = `🪑 ${ov.counts.parts}`;
+  const uc = root.querySelector(".uc");
+  if (ov.counts.unverified) { uc.style.display = ""; uc.textContent = `❓ ${ov.counts.unverified}`; }
   root.querySelector(".autostat").textContent =
     (ov.auto_enabled ? `авто-прогон каждые ${ov.interval_hours}ч` : "авто-прогон выключен") +
+    (ov.counts.other ? ` · 🚫 другое: ${ov.counts.other}` : "") +
     (ov.running ? " · ⏳ идёт прогон" : "");
 
   const body = root.querySelector(".tabbody");

@@ -1304,3 +1304,89 @@ def generate_scout_queries(
         "tokens_out": out_t,
         "cost_usd": cost,
     }
+
+
+# --- MARKET SCOUT: проверка типа объявления (машина / запчасть / другое) ---
+
+_SCOUT_CLASSIFY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "ad_id из входа (как есть)"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["car", "part", "other"],
+                        "description": "car=целый автомобиль; part=запчасть/аксессуар; other=иное",
+                    },
+                },
+                "required": ["id", "type"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
+
+
+def classify_scout_listings(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Haiku-проверка пачки объявлений: целый автомобиль / запчасть / другое.
+
+    items: [{ad_id, title, description}]. Возвращает
+    {map: {ad_id: 'car'|'part'|'other'}, tokens_in, tokens_out, cost_usd}.
+    Дешёвая батч-классификация (десятки объявлений за один вызов).
+    """
+    api_key = config.anthropic_api_key()
+    if not api_key:
+        raise RuntimeError("Не задан Anthropic API key")
+    if not items:
+        return {"map": {}, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0}
+
+    lines = []
+    for it in items:
+        title = (it.get("title") or "").replace("\n", " ")[:140]
+        desc = (it.get("description") or "").replace("\n", " ")[:200]
+        lines.append(f"[{it.get('ad_id')}] {title} — {desc}")
+    listing_block = "\n".join(lines)
+
+    user_msg = (
+        "Классифицируй каждое объявление с немецкого Kleinanzeigen по типу:\n"
+        "- car = ЦЕЛЫЙ автомобиль/минивэн на продажу (даже аварийный, на запчасти, без ТО)\n"
+        "- part = отдельная ЗАПЧАСТЬ или аксессуар (сиденье, скамейка, рельсы, дверь, "
+        "двигатель, фара, коврики, шины, и т.п.)\n"
+        "- other = всё прочее (услуга, прокат/аренда, реклама, не относится к авто/запчастям)\n\n"
+        "Подсказка: '9 Sitzer'/'8 Sitze' в названии машины — это число мест, это CAR, не part.\n"
+        "Цена целого вэна обычно тысячи евро; запчасть обычно дешевле.\n\n"
+        f"Объявления (формат [id] заголовок — описание):\n{listing_block}\n\n"
+        "Верни results: массив {id, type} для КАЖДОГО id."
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    model = "claude-haiku-4-5"
+    response = client.messages.create(
+        model=model,
+        max_tokens=4000,
+        system=("Ты классификатор объявлений авторынка. Точно отличаешь целый "
+                "автомобиль от отдельной запчасти."),
+        output_config={
+            "format": {"type": "json_schema", "schema": _SCOUT_CLASSIFY_SCHEMA},
+        },
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    if not raw:
+        raise RuntimeError("Пустой ответ classify_scout_listings")
+    data = json.loads(raw)
+    in_t, out_t, cost = _calc_cost(model, response.usage)
+
+    out_map: dict[str, str] = {}
+    for r in data.get("results", []):
+        rid = str(r.get("id") or "").strip()
+        rtype = r.get("type")
+        if rid and rtype in ("car", "part", "other"):
+            out_map[rid] = rtype
+    return {"map": out_map, "tokens_in": in_t, "tokens_out": out_t, "cost_usd": cost}
