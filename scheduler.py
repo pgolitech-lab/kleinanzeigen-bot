@@ -1507,6 +1507,42 @@ def start() -> BackgroundScheduler:
 _REPORTED_ERROR_HASHES: set[str] = set()  # in-memory dedup; resets on restart
 
 
+def _check_polling_health() -> list[str]:
+    """Проверка живости Telegram long-polling. Возвращает список проблем (пусто = ок).
+
+    Два независимых сигнала:
+      1. Поток `tg-polling` жив в этом же процессе (ловит «поток polling упал» —
+         например DNS-гонка на ребуте, см. bootstrap_retries в telegram_bot).
+      2. getWebhookInfo: webhook должен быть пуст (иначе long-polling отключён),
+         pending_update_count не должен накапливаться (иначе polling не читает апдейты).
+    Отправка алерта идёт через _http_post (sendMessage) — не зависит от polling,
+    поэтому достучится до оператора даже когда приём апдейтов мёртв.
+    """
+    import threading
+    problems: list[str] = []
+
+    if not any(t.name == "tg-polling" and t.is_alive() for t in threading.enumerate()):
+        problems.append("поток tg-polling мёртв — бот не принимает команды/кнопки/callback-и")
+
+    token = config.telegram_bot_token()
+    if token:
+        try:
+            import json as _json
+            import urllib.request as _ur
+            with _ur.urlopen(f"https://api.telegram.org/bot{token}/getWebhookInfo", timeout=15) as r:
+                info = _json.load(r).get("result", {})
+            if info.get("url"):
+                problems.append(f"выставлен webhook ({info['url']}) — long-polling отключён")
+            pending = info.get("pending_update_count", 0)
+            if pending >= 5:
+                problems.append(f"pending_update_count={pending} — апдейты копятся, polling их не читает")
+        except Exception as e:
+            # Telegram/сеть недоступны — не алертим (всплывёт в обычном error-скане)
+            logger.warning("monitor: getWebhookInfo failed: %s", e)
+
+    return problems
+
+
 def monitor_errors_job() -> str:
     """Раз в час: сканировать journalctl за последний час, постить в Telegram digest
     если есть новые ERROR / Traceback / Exception (с дедупликацией по hash).
@@ -1514,6 +1550,25 @@ def monitor_errors_job() -> str:
     Резет дедупа происходит при рестарте сервиса — не страшно: тот же баг
     максимум раз в день alert-нётся снова, и оператор поймёт что он не уходит.
     """
+    # --- Health-check Telegram polling (независимо от журнальных ошибок) ---
+    poll_problems = _check_polling_health()
+    if poll_problems:
+        sig = "polling-health: " + "; ".join(poll_problems)
+        h = "pollhealth-" + hashlib.sha1(sig.encode("utf-8", errors="replace")).hexdigest()[:8]
+        if h not in _REPORTED_ERROR_HASHES:
+            _REPORTED_ERROR_HASHES.add(h)
+            try:
+                telegram_bot._http_post("sendMessage", {
+                    "chat_id": config.telegram_chat_id(),
+                    "text": "<b>🛑 Telegram-бот: проблема с polling</b>\n"
+                            + "\n".join(f"• {pr}" for pr in poll_problems)
+                            + "\n\n<i>Лечение: sudo systemctl restart kleinanzeigen-bot</i>",
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                })
+            except Exception:
+                logger.exception("monitor: polling-health telegram send failed")
+
     try:
         proc = subprocess.run(
             ["journalctl", "-u", "kleinanzeigen-bot", "--since", "1 hour ago",
