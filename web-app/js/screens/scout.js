@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260624-013000";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260624-013000";
-import { openLink } from "../tg.js?v=20260624-013000";
+import { api } from "../api.js?v=20260624-020000";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260624-020000";
+import { openLink } from "../tg.js?v=20260624-020000";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -18,6 +18,12 @@ const S = {
   parts: null,
   filters: { car: {}, part: {} },
   sort: { car: "price_asc", part: "price_asc" },
+  // город-первая навигация
+  view: { car: "cities", part: "cities" },   // cities | listings
+  city: { car: null, part: null },           // выбранный город (drill-down)
+  land: { car: null, part: null },           // фильтр по земле (с карты/списка)
+  cityQ: { car: "", part: "" },              // поиск по названию города
+  citySort: { car: "count", part: "count" }, // count | price | name
 };
 
 function eur(v) {
@@ -147,52 +153,6 @@ function corrBar(kind, adId, rerender) {
   return bar;
 }
 
-function applyAndRender(listEl, kind) {
-  const all = kind === "car" ? (S.cars || []) : (S.parts || []);
-  const f = S.filters[kind];
-  const term = (f.q || "").trim().toLowerCase();
-  let rows = all.filter(r => {
-    if (term && !((r.title || "").toLowerCase().includes(term))) return false;
-    if (f.bundesland && r.bundesland !== f.bundesland) return false;
-    if (f.city && r.city !== f.city) return false;
-    if (kind === "car") {
-      if (f.model_family && r.model_family !== f.model_family) return false;
-      if (f.fuel && r.fuel !== f.fuel) return false;
-      if (f.gearbox && r.gearbox !== f.gearbox) return false;
-    } else {
-      if (f.part_type && r.part_type !== f.part_type) return false;
-      if (f.condition && r.condition !== f.condition) return false;
-    }
-    return true;
-  });
-  const sort = S.sort[kind];
-  const num = (v) => (v === null || v === undefined) ? Infinity : v;
-  const numD = (v) => (v === null || v === undefined) ? -Infinity : v;
-  rows.sort((a, b) => {
-    switch (sort) {
-      case "price_asc": return num(a.price_eur) - num(b.price_eur);
-      case "price_desc": return numD(b.price_eur) - numD(a.price_eur);
-      case "year_desc": return numD(b.year) - numD(a.year);
-      case "year_asc": return num(a.year) - num(b.year);
-      case "region": return (a.bundesland || "яя").localeCompare(b.bundesland || "яя");
-      default: return 0;
-    }
-  });
-
-  listEl.replaceChildren();
-  const cnt = el(`<div class="text-muted small px-1 mb-1"></div>`);
-  cnt.textContent = `показано: ${rows.length} из ${all.length}`;
-  listEl.appendChild(cnt);
-  if (!rows.length) {
-    listEl.appendChild(el(`<div class="text-muted small fst-italic text-center py-3">Ничего не найдено</div>`));
-    return;
-  }
-  const group = el(`<div class="list-group list-group-flush"></div>`);
-  const rerender = () => applyAndRender(listEl, kind);
-  rows.forEach(r => group.appendChild(kind === "car" ? carCard(r, rerender) : partCard(r, rerender)));
-  listEl.appendChild(group);
-}
-
 function selectFilter(label, options, current, onChange) {
   const wrap = el(`<select class="form-select form-select-sm"></select>`);
   wrap.appendChild(el(`<option value="">${esc(label)}</option>`));
@@ -206,9 +166,46 @@ function selectFilter(label, options, current, onChange) {
   return wrap;
 }
 
-// --- подвкладка списка (car|part) ---
+// Группировка объявлений по городам. Возвращает [{city, bundesland, plzText,
+// plzCount, count, min, avg, max}] отсортировано по citySort.
+function buildCityGroups(all, kind) {
+  const land = S.land[kind];
+  const q = (S.cityQ[kind] || "").trim().toLowerCase();
+  const m = new Map();
+  for (const r of all) {
+    if (!r.city) continue;
+    if (land && r.bundesland !== land) continue;
+    if (q && !r.city.toLowerCase().includes(q)) continue;
+    let g = m.get(r.city);
+    if (!g) { g = { city: r.city, bundesland: r.bundesland, plz: new Set(), count: 0, sum: 0, n: 0, min: null, max: null }; m.set(r.city, g); }
+    g.count++;
+    if (r.plz) g.plz.add(r.plz);
+    if (r.price_eur != null) {
+      g.sum += r.price_eur; g.n++;
+      g.min = g.min == null ? r.price_eur : Math.min(g.min, r.price_eur);
+      g.max = g.max == null ? r.price_eur : Math.max(g.max, r.price_eur);
+    }
+  }
+  const groups = [...m.values()].map(g => {
+    const plzArr = [...g.plz].sort();
+    return {
+      city: g.city, bundesland: g.bundesland, count: g.count,
+      plzText: plzArr.length <= 3 ? plzArr.join(", ") : `${plzArr.length} индексов`,
+      plzCount: plzArr.length,
+      min: g.min, avg: g.n ? g.sum / g.n : null, max: g.max,
+    };
+  });
+  const s = S.citySort[kind];
+  groups.sort((a, b) => {
+    if (s === "name") return a.city.localeCompare(b.city);
+    if (s === "price") return (a.avg ?? Infinity) - (b.avg ?? Infinity);
+    return b.count - a.count;  // count (default)
+  });
+  return groups;
+}
+
+// --- подвкладка списка (car|part): города → drill в город ---
 async function renderListTab(container, kind) {
-  // ленивая загрузка
   if ((kind === "car" ? S.cars : S.parts) === null) {
     container.replaceChildren(el(`<p class="text-muted py-3">Загружаю…</p>`));
     try {
@@ -216,73 +213,146 @@ async function renderListTab(container, kind) {
       if (kind === "car") S.cars = data.listings; else S.parts = data.listings;
     } catch (e) { setError(container, e.message ?? String(e)); return; }
   }
+  if (S.view[kind] === "listings" && S.city[kind]) renderCityDrill(container, kind);
+  else renderCitiesView(container, kind);
+}
+
+// Экран списка ГОРОДОВ (с PLZ, счётчиками, ценами) + кликабельная карта.
+function renderCitiesView(container, kind) {
   const all = kind === "car" ? S.cars : S.parts;
-  const f = S.filters[kind];
-
   const root = el(`<div></div>`);
-  // строка фильтров
-  const filterRow = el(`<div class="d-flex flex-wrap gap-1 mb-2"></div>`);
-  const search = el(`<input type="search" class="form-control form-control-sm" placeholder="🔎 поиск по названию…" style="min-width:140px;flex:1 1 100%">`);
-  search.value = f.q || "";
-  const listEl = el(`<div></div>`);
-  search.addEventListener("input", () => { f.q = search.value; applyAndRender(listEl, kind); });
-  filterRow.appendChild(search);
 
-  filterRow.appendChild(selectFilter("🗺 земля (все)", countedOptions(all, "bundesland"), f.bundesland || "",
-    v => { f.bundesland = v; applyAndRender(listEl, kind); }));
-  filterRow.appendChild(selectFilter("🏙 город (все)", countedOptions(all, "city"), f.city || "",
-    v => { f.city = v; applyAndRender(listEl, kind); }));
+  // карта (клик по земле = фильтр городов)
+  const heatDet = el(`<details class="mb-2" open><summary class="small text-muted">🗺 Тепловая карта — нажми землю</summary></details>`);
+  heatDet.appendChild(heatMap(all, (land) => {
+    S.land[kind] = (S.land[kind] === land) ? null : land;
+    renderCitiesView(container, kind);
+  }));
+  root.appendChild(heatDet);
 
-  if (kind === "car") {
-    const models = uniq(all.map(r => r.model_family)).map(v => ({ value: v, text: v }));
-    filterRow.appendChild(selectFilter("модель", models, f.model_family || "",
-      v => { f.model_family = v; applyAndRender(listEl, kind); }));
-    filterRow.appendChild(selectFilter("топливо",
-      Object.entries(FUEL_RU).map(([value, text]) => ({ value, text })), f.fuel || "",
-      v => { f.fuel = v; applyAndRender(listEl, kind); }));
-    filterRow.appendChild(selectFilter("КПП",
-      Object.entries(GB_RU).map(([value, text]) => ({ value, text })), f.gearbox || "",
-      v => { f.gearbox = v; applyAndRender(listEl, kind); }));
-  } else {
-    filterRow.appendChild(selectFilter("тип",
-      Object.entries(PT_RU).map(([value, text]) => ({ value, text })), f.part_type || "",
-      v => { f.part_type = v; applyAndRender(listEl, kind); }));
-    filterRow.appendChild(selectFilter("состояние",
-      Object.entries(COND_RU).map(([value, text]) => ({ value, text })), f.condition || "",
-      v => { f.condition = v; applyAndRender(listEl, kind); }));
+  // строка управления: поиск города + сортировка + чип земли
+  const ctrl = el(`<div class="d-flex flex-wrap gap-1 mb-2 align-items-center"></div>`);
+  const search = el(`<input type="search" class="form-control form-control-sm" placeholder="🔎 поиск города…" style="min-width:120px;flex:1 1 auto">`);
+  search.value = S.cityQ[kind] || "";
+  search.addEventListener("input", () => { S.cityQ[kind] = search.value; refresh(); });
+  ctrl.appendChild(search);
+  const sortSel = selectFilter("сортировка", [
+    { value: "count", text: "по количеству" }, { value: "price", text: "по цене" },
+    { value: "name", text: "А-Я" },
+  ], S.citySort[kind], v => { S.citySort[kind] = v || "count"; refresh(); });
+  sortSel.options[0].textContent = "сортировка";
+  ctrl.appendChild(sortSel);
+  root.appendChild(ctrl);
+
+  if (S.land[kind]) {
+    const chip = el(`<div class="mb-2"><span class="badge bg-primary" role="button">🗺 <span class="l"></span> ✕</span></div>`);
+    chip.querySelector(".l").textContent = S.land[kind];
+    chip.querySelector(".badge").addEventListener("click", () => { S.land[kind] = null; renderCitiesView(container, kind); });
+    root.appendChild(chip);
   }
 
+  const head = el(`<div class="small text-muted mb-1 head"></div>`);
+  root.appendChild(head);
+  const list = el(`<div class="list-group list-group-flush"></div>`);
+  root.appendChild(list);
+
+  function refresh() {
+    const groups = buildCityGroups(all, kind);
+    head.textContent = `городов: ${groups.length} · объявлений: ${groups.reduce((s, g) => s + g.count, 0)}`;
+    list.replaceChildren();
+    if (!groups.length) {
+      list.appendChild(el(`<div class="text-muted small fst-italic text-center py-3">Нет данных</div>`));
+      return;
+    }
+    groups.forEach(g => {
+      const row = el(`
+        <a class="list-group-item list-group-item-action py-2" role="button">
+          <div class="d-flex justify-content-between align-items-start">
+            <div class="flex-grow-1 me-2">
+              <div class="fw-semibold city"></div>
+              <div class="small text-muted plz"></div>
+            </div>
+            <div class="text-end">
+              <div><span class="badge bg-secondary cnt"></span></div>
+              <div class="small text-muted price mt-1"></div>
+            </div>
+          </div>
+        </a>`);
+      row.querySelector(".city").textContent = `🏙 ${g.city}`;
+      row.querySelector(".plz").textContent =
+        `${g.plzText}${g.bundesland ? " · " + g.bundesland : ""}`;
+      row.querySelector(".cnt").textContent = g.count;
+      row.querySelector(".price").textContent =
+        g.min != null ? `${eur(g.min)}–${eur(g.max)}` : "";
+      row.addEventListener("click", () => {
+        S.city[kind] = g.city; S.view[kind] = "listings";
+        renderCityDrill(container, kind);
+      });
+      list.appendChild(row);
+    });
+  }
+  refresh();
+  container.replaceChildren(root);
+}
+
+// Экран объявлений ВНУТРИ города (drill-down).
+function renderCityDrill(container, kind) {
+  const all = kind === "car" ? S.cars : S.parts;
+  const city = S.city[kind];
+  const root = el(`<div></div>`);
+
+  const back = el(`<button class="btn btn-sm btn-outline-secondary mb-2 backc">← все города</button>`);
+  back.addEventListener("click", () => { S.view[kind] = "cities"; S.city[kind] = null; renderCitiesView(container, kind); });
+  root.appendChild(back);
+
+  const title = el(`<div class="d-flex justify-content-between align-items-center mb-2"><h6 class="mb-0 t"></h6></div>`);
+  title.querySelector(".t").textContent = `🏙 ${city}`;
+  root.appendChild(title);
+
+  // сортировка + (для машин) фильтры топливо/КПП/модель
+  const ctrl = el(`<div class="d-flex flex-wrap gap-1 mb-2"></div>`);
+  const listEl = el(`<div></div>`);
+  const f = S.filters[kind];
+  // в drill используем те же фильтры, но город фиксирован
   const sortSel = selectFilter("сортировка", [
     { value: "price_asc", text: "цена ↑" }, { value: "price_desc", text: "цена ↓" },
     { value: "year_desc", text: "год ↓" }, { value: "year_asc", text: "год ↑" },
-    { value: "region", text: "по землям" },
-  ], S.sort[kind], v => { S.sort[kind] = v || "price_asc"; applyAndRender(listEl, kind); });
-  // у сортировки убираем пустую опцию-плейсхолдер: ставим текущую
+  ], S.sort[kind], v => { S.sort[kind] = v || "price_asc"; draw(); });
   sortSel.options[0].textContent = "сортировка";
-  filterRow.appendChild(sortSel);
-
-  // сводка по землям (collapsible)
-  const regions = kind === "car" ? (S.overview?.car_regions || []) : (S.overview?.part_regions || []);
-  const det = el(`<details class="mb-2"><summary class="small text-muted">🗺 Сводка по землям (${regions.length})</summary></details>`);
-  const rtab = el(`<div class="list-group list-group-flush small mt-1"></div>`);
-  regions.forEach(r => {
-    const item = el(`<div class="d-flex justify-content-between py-1"><span class="l"></span><span class="v text-muted"></span></div>`);
-    item.querySelector(".l").textContent = r.bundesland;
-    item.querySelector(".v").textContent = `${r.cnt} · ${eur(r.min_price)}–${eur(r.max_price)}`;
-    rtab.appendChild(item);
-  });
-  det.appendChild(rtab);
-
-  // тепловая карта по землям (клик = фильтр)
-  const heatDet = el(`<details class="mb-2" open><summary class="small text-muted">🗺 Тепловая карта</summary></details>`);
-  heatDet.appendChild(heatMap(all, (land) => { f.bundesland = land; applyAndRender(listEl, kind); }));
-
-  root.appendChild(filterRow);
-  root.appendChild(heatDet);
-  root.appendChild(det);
+  ctrl.appendChild(sortSel);
+  if (kind === "car") {
+    const models = uniq(all.filter(r => r.city === city).map(r => r.model_family)).map(v => ({ value: v, text: v }));
+    ctrl.appendChild(selectFilter("модель", models, f.model_family || "", v => { f.model_family = v; draw(); }));
+    ctrl.appendChild(selectFilter("топливо", Object.entries(FUEL_RU).map(([value, text]) => ({ value, text })), f.fuel || "", v => { f.fuel = v; draw(); }));
+  }
+  root.appendChild(ctrl);
   root.appendChild(listEl);
+
+  function draw() {
+    let rows = all.filter(r => r.city === city);
+    if (kind === "car") {
+      if (f.model_family) rows = rows.filter(r => r.model_family === f.model_family);
+      if (f.fuel) rows = rows.filter(r => r.fuel === f.fuel);
+    }
+    const sort = S.sort[kind];
+    const num = v => v == null ? Infinity : v, numD = v => v == null ? -Infinity : v;
+    rows.sort((a, b) => sort === "price_desc" ? numD(b.price_eur) - numD(a.price_eur)
+      : sort === "year_desc" ? numD(b.year) - numD(a.year)
+      : sort === "year_asc" ? num(a.year) - num(b.year)
+      : num(a.price_eur) - num(b.price_eur));
+    listEl.replaceChildren();
+    const cnt = el(`<div class="text-muted small px-1 mb-1"></div>`);
+    cnt.textContent = `объявлений: ${rows.length}`;
+    listEl.appendChild(cnt);
+    if (!rows.length) {  // город опустел (все поправлены) → назад к городам
+      S.view[kind] = "cities"; S.city[kind] = null; renderCitiesView(container, kind); return;
+    }
+    const group = el(`<div class="list-group list-group-flush"></div>`);
+    rows.forEach(r => group.appendChild(kind === "car" ? carCard(r, draw) : partCard(r, draw)));
+    listEl.appendChild(group);
+  }
+  draw();
   container.replaceChildren(root);
-  applyAndRender(listEl, kind);
 }
 
 // --- подвкладка запросов ---
@@ -470,6 +540,9 @@ export async function render(mount, params) {
   setLoading(mount, "Загружаю разведку…");
   // сбрасываем кэши списков при заходе (overview всегда свежий)
   S.cars = null; S.parts = null;
+  // стартуем со списка городов
+  S.view = { car: "cities", part: "cities" };
+  S.city = { car: null, part: null };
   try {
     S.overview = await api("/api/ma/scout/overview");
   } catch (e) { setError(mount, e.message ?? String(e)); return; }

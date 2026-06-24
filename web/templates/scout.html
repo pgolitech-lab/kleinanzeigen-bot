@@ -180,7 +180,7 @@
                     <thead><tr><th>Город</th><th>Земля</th><th>Кол-во</th><th>мин</th><th>сред</th><th>макс</th></tr></thead>
                     <tbody>
                     {% for r in car_cities %}
-                        <tr><td>{{ r.city }}</td><td class="text-muted-sm">{{ r.bundesland or '—' }}</td>
+                        <tr class="city-row" data-kind="car" data-city="{{ r.city }}" role="button"><td>{{ r.city }}</td><td class="text-muted-sm">{{ r.bundesland or '—' }}</td>
                             <td data-sort="{{ r.cnt }}"><strong>{{ r.cnt }}</strong></td>
                             <td data-sort="{{ r.min_price or 0 }}">{{ eur(r.min_price) }}</td>
                             <td data-sort="{{ r.avg_price or 0 }}">{{ eur(r.avg_price) }}</td>
@@ -201,7 +201,7 @@
                     <thead><tr><th>Город</th><th>Земля</th><th>Кол-во</th><th>мин</th><th>сред</th><th>макс</th></tr></thead>
                     <tbody>
                     {% for r in part_cities %}
-                        <tr><td>{{ r.city }}</td><td class="text-muted-sm">{{ r.bundesland or '—' }}</td>
+                        <tr class="city-row" data-kind="part" data-city="{{ r.city }}" role="button"><td>{{ r.city }}</td><td class="text-muted-sm">{{ r.bundesland or '—' }}</td>
                             <td data-sort="{{ r.cnt }}"><strong>{{ r.cnt }}</strong></td>
                             <td data-sort="{{ r.min_price or 0 }}">{{ eur(r.min_price) }}</td>
                             <td data-sort="{{ r.avg_price or 0 }}">{{ eur(r.avg_price) }}</td>
@@ -300,8 +300,22 @@
 
 {% block scripts %}
 <script>
-    if (document.querySelector('#cars-table tbody tr')) window.initDataTable('#cars-table', { perPage: 50 });
-    if (document.querySelector('#parts-table tbody tr')) window.initDataTable('#parts-table', { perPage: 50 });
+    const carsDT = document.querySelector('#cars-table tbody tr') ? window.initDataTable('#cars-table', { perPage: 50 }) : null;
+    const partsDT = document.querySelector('#parts-table tbody tr') ? window.initDataTable('#parts-table', { perPage: 50 }) : null;
+
+    // Применить поиск к таблице (drill по городу/земле) + проскроллить к ней.
+    function drillTable(kind, query) {
+        const dt = kind === 'car' ? carsDT : partsDT;
+        const anchor = document.getElementById(kind === 'car' ? 'cars-table' : 'parts-table');
+        if (dt && dt.search) { try { dt.search(query); } catch (e) {} }
+        if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // Клик по строке города → фильтр таблицы
+    document.addEventListener('click', function (e) {
+        const row = e.target.closest('.city-row');
+        if (!row) return;
+        drillTable(row.dataset.kind, row.dataset.city || '');
+    });
 
     // ===== Тепловая карта (tile-grid картограмма земель) =====
     const TILE_GRID = {
@@ -312,7 +326,7 @@
       "Rheinland-Pfalz":[4,0,"RP"],"Hessen":[4,1,"HE"],"Thüringen":[4,2,"TH"],
       "Saarland":[5,0,"SL"],"Baden-Württemberg":[5,1,"BW"],"Bayern":[5,2,"BY"],
     };
-    function renderHeatmap(elId, regions) {
+    function renderHeatmap(elId, regions, kind) {
       const host = document.getElementById(elId);
       if (!host) return;
       const counts = {};
@@ -329,13 +343,14 @@
         tile.style.gridColumn = col + 1;
         tile.style.background = n ? `rgba(239,68,68,${(0.15 + 0.85*intensity).toFixed(3)})` : "rgba(255,255,255,0.05)";
         tile.style.color = intensity > 0.5 ? "#fff" : "var(--kb-muted)";
-        tile.title = `${land}: ${n}`;
+        tile.title = `${land}: ${n} — нажми для фильтра`;
         tile.innerHTML = `<div class="ab">${ab}</div><div class="n">${n}</div>`;
+        if (n) { tile.style.cursor = "pointer"; tile.addEventListener("click", () => drillTable(kind, land)); }
         host.appendChild(tile);
       }
     }
-    renderHeatmap("car-heatmap", {{ car_regions|tojson }});
-    renderHeatmap("part-heatmap", {{ part_regions|tojson }});
+    renderHeatmap("car-heatmap", {{ car_regions|tojson }}, "car");
+    renderHeatmap("part-heatmap", {{ part_regions|tojson }}, "part");
 
     // ===== Операторские правки (пометить неверным / удалить) =====
     document.addEventListener("click", function(e) {
