@@ -15,13 +15,13 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - Google Drive API (бекап SQLite)
 - IMAP/SMTP Gmail (App Password)
 - Anthropic API: claude-sonnet-4-6 (драфты, бриф) + claude-haiku-4-5 (classifier, auto-ack, similarity)
-- python-telegram-bot 20+ (long polling)
+- python-telegram-bot 20+ (только исходящие — urllib напрямую, PTB не используется)
 - Playwright Python (парсинг Kleinanzeigen)
 - APScheduler
 - systemd
-## Mini App (актуально 2026-05-10)
+## Mini App (актуально 2026-06-23)
 - **URL:** https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/ (GitHub Pages из main:/web-app/, repo public)
-- **HTTPS бэкенд:** cloudflared Quick Tunnel `https://anonymous-beginners-puzzles-social.trycloudflare.com` → 127.0.0.1:8080 (URL ротируется при рестарте — обновить web-app/js/api.js:API_BASE и bump cache-bust)
+- **HTTPS бэкенд:** cloudflared Quick Tunnel → 127.0.0.1:8080. URL ротируется при ребуте — `tunnel-url-sync.service` автоматически правит `web-app/js/api.js:API_BASE` и пушит на GitHub Pages. Запустить вручную: `sudo systemctl start tunnel-url-sync`.
 - **Auth:** Telegram WebApp initData HMAC-валидация в `modules/tg_init_data.py`, dependency `verify_init_data_dep` на всех `/api/ma/*` endpoint'ах
 - **Lock:** общий `modules/operator_lock.py` (msg_id → actor, auto-expire 5 мин) — используют и бот wrappers (`_acquire_lock`/`_release_lock`/`_check_lock`), и MA endpoints
 - **API surface:** `web/api_ma.py` (~800 LOC) — 19+ endpoint'ов под `/api/ma/*`: pipeline, threads, messages (review payload + lock), send/skip/sold/regenerate/edit-ru/edit-de/instruction, compose, autopilot start/stop/preview, suggest-reply, thread wait, settings GET/POST
@@ -36,18 +36,28 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
   [🚀 Автопилот status]
   ```
   🤖 Предложить → unified suggest-form с RU/DE textareas + 🔁 regenerate + 📨 send (auto-edit). НЕТ отдельных «Правка RU/DE/Отправить» — это всё внутри Предложить/Написать
+- **Таб-бар MA:** Входящие (инбокс всех аккаунтов + RU-превью) / Клиенты (CRM + поиск) / Продажи / Обзор. 5 аккаунтов цвет-кодированы. Compose с предпросмотром перевода.
+- **Scout:** страница `/scout` в MA — тепловая карта → земля → города → объявления. Cron каждые 6ч. Haiku-проверка типа. Пометка/удаление/обучение.
 - **Backup point:** git tag `pre-phase4-2026-05-10` (commit `9d81f1d`); DB snapshot `/home/pg/backups/db-pre-phase4-2026-05-10.db`; rollback procedure `/home/pg/backups/ROLLBACK.md`
 - **Phase docs:** specs/plans в `docs/superpowers/{specs,plans}/2026-05-{09,10}-tg-mini-app-*.md` (Phase 1-4.5) и `2026-05-10-tg-bot-phase5-*.md` (slim bot)
-- **Тесты:** 111 unit-тестов (pytest) в `tests/test_*.py`
+- **Тесты:** 201 unit-тестов (pytest) в `tests/test_*.py`
 - **Bot legacy section ниже** описывает inline-keyboard UX до Phase 5 — большая часть удалена. Бот теперь только pipeline + reminders + daily_summary + hourly errors. send_for_review шлёт мини-карточку с одной web_app кнопкой. Pipeline-карточки тоже web_app deep-link
 
 
 ## Структура
 - `main.py` — entry: bootstrap БД → scheduler в фоне → `telegram_bot.set_menu_button()` → uvicorn (Telegram polling УДАЛЁН 2026-06-23)
 - `config.py` — настройки (KV в БД с дефолтами в `DEFAULTS`); геттеры с приведением типов
-- `database.py` — SQLite схема + миграции через `_add_column_if_missing` + helpers
+- `database.py` — core: схема, миграции, accounts, messages, autopilot, settings, ad_briefs (726 строк после рефакторинга 2026-06-25)
 - `log_buffer.py` — кольцевой буфер 2000 записей для веб-морды (`/api/logs`)
-- `scheduler.py` — APScheduler jobs: `poll_gmail`, `send_replies`, `drive_backup`, `check_reminders`, `daily_summary`, `monitor_errors`. Plus action-функции `send_one`, `regenerate_draft*`, `send_followup_ping`, `send_manual_compose`, `_send_auto_ack`
+- `scheduler.py` — тонкий оркестратор APScheduler jobs (импортирует из модулей ниже)
+- `modules/db_threads.py` — thread-state, history, clients, pipeline (close/reopen/waiting, events, list_clients, pipeline_threads)
+- `modules/db_sales.py` — продажи, детекции, уроки (mark_ad_sold, record_detection, mark_thread_sold, add_lesson)
+- `modules/db_scout.py` — scout DB functions
+- `modules/incoming.py` — логика обработки входящих писем (was scheduler._process_incoming)
+- `modules/drafts.py` — генерация/регенерация драфтов
+- `modules/outgoing.py` — send_one, send_manual_compose, followup
+- `modules/claude_scout.py` — scout Claude functions; `modules/claude_utils.py` — _calc_cost и утилиты
+- `modules/scout.py` — Playwright-скрапер Kleinanzeigen; `modules/scout_runner.py` — scout job
 - `modules/gmail.py` — IMAP fetch (UNSEEN/include_seen) + SMTP send. `_decode` нормализует CR/LF в header (RFC 5322 folding)
 - `modules/parser.py` — Playwright `parse_ad`, regex для URL/ad_id, `clean_email_body`, `is_junk_subject` blacklist, `detect_ad_state` (Gelöscht/Reserviert/active)
 - `modules/claude.py` — Anthropic SDK обёртки:
@@ -257,7 +267,7 @@ Command-menu в Telegram очищено (`setMyCommands([])`) — нет авт�
 
 ## Деплой
 WSL2 через sshfs смонтирован на /home/pg/kleinanzeigen-bot — это **тот же путь что прод**. Никакого rsync — правки сразу на сервере.
-GitHub: `origin` = https://github.com/pgolitech-lab/kleinanzeigen-bot.git. Через ssh использовать `git -C /home/pg/kleinanzeigen-bot ...` (default ssh cwd = /home/pg, не репо).
+GitHub: `origin` = https://github.com/pgolitech-lab/kleinanzeigen-bot.git. **SSH git**: `git -C path` НЕ работает в SSH-сессии (cwd=/home/pg, не репо). Использовать: `GIT_DIR=/home/pg/kleinanzeigen-bot/.git GIT_WORK_TREE=/home/pg/kleinanzeigen-bot git <cmd>`
 ```
 ssh pg@192.168.88.28 'sudo systemctl restart kleinanzeigen-bot'
 ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
@@ -312,3 +322,4 @@ ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
 - `docs/superpowers/specs/2026-05-03-auto-ack-design.md` — auto-приветствие (Haiku, накрутка метрики Kleinanzeigen)
 - `docs/superpowers/specs/2026-05-03-tg-rework-design.md` — полный rewrite Telegram UX (раскладка, confirmation, edit RU/DE, custom price/instruction, draft preload)
 - `docs/superpowers/specs/2026-05-03-autopilot-design.md` — полная авто-беседа с клиентом (Sonnet + web_search, floor + 20-msg cap + stop conditions)
+- `docs/superpowers/specs/2026-06-23-bot-notifier-only-design.md` — разворот бот→нотификатор, MA как единственный UI
