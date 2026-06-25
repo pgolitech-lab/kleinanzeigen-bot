@@ -25,6 +25,9 @@ from modules.tg_init_data import verify_init_data_dep
 
 router = APIRouter(prefix="/api/ma", tags=["Mini App"])
 
+_CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
+_ALLOWED_TAGS = {"Серьёзный", "Торгуется", "Тянет время", "Мошенник"}
+
 
 @router.get("/health")
 async def ma_health(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
@@ -155,22 +158,79 @@ async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) 
 
 @router.get("/clients/{email}/history")
 async def ma_client_history(email: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """История тредов клиента (по buyer_email)."""
+    """Профиль клиента: треды + deal_brief + теги + агрегаты."""
     rows = db.list_threads_for_client(email)
-    threads = [
-        {
+
+    # display_name из последнего сообщения с непустым полем
+    display_name = email
+    with db.get_conn() as conn:
+        dn_row = conn.execute(
+            "SELECT buyer_display_name FROM messages "
+            "WHERE buyer_name = ? AND buyer_display_name IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1",
+            (email,),
+        ).fetchone()
+        if dn_row:
+            display_name = dn_row["buyer_display_name"]
+
+    # total_cost_usd — сумма по всем сообщениям клиента
+    with db.get_conn() as conn:
+        cost_row = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM messages WHERE buyer_name = ?",
+            (email,),
+        ).fetchone()
+    total_cost_usd = round(float(cost_row["total"]), 5) if cost_row else 0.0
+
+    # Теги и заметка из client_profiles
+    profile = db.get_client_profile(email)
+    tags: list[str] = []
+    note: str = ""
+    if profile:
+        try:
+            tags = json.loads(profile["tags_json"]) or []
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        note = profile["note"] or ""
+
+    # Собрать треды + посчитать агрегаты
+    threads = []
+    sold_count = 0
+    total_negotiated_eur = 0
+    last_active_thread_id = None
+    for r in rows:
+        brief = _parse_deal_brief(r["deal_brief_json"]) if "deal_brief_json" in r.keys() else None
+        status = r["last_status"] or ""
+        # last_active_thread_id — первый (свежий) тред не в закрытых статусах
+        if last_active_thread_id is None and status not in _CLOSED_STATUSES:
+            last_active_thread_id = r["thread_id"]
+        # sold_count / total_negotiated_eur
+        if status == "skipped_sold" and brief:
+            price = brief.get("negotiated_price_eur") or 0
+            if price and price > 0:
+                sold_count += 1
+                total_negotiated_eur += price
+        threads.append({
             "thread_id": r["thread_id"],
             "ad_title": r["ad_title"],
             "ad_id": r["ad_id"],
             "ad_price": r["ad_price"],
             "msg_count": r["msg_count"],
             "last_at": r["last_at"],
-            "last_status": r["last_status"],
-            "deal_brief": _parse_deal_brief(r.get("deal_brief_json")),
-        }
-        for r in rows
-    ]
-    return {"buyer_email": email, "threads": threads}
+            "last_status": status,
+            "deal_brief": brief,
+        })
+
+    return {
+        "buyer_email": email,
+        "display_name": display_name,
+        "total_cost_usd": total_cost_usd,
+        "tags": tags,
+        "note": note,
+        "sold_count": sold_count,
+        "total_negotiated_eur": total_negotiated_eur,
+        "last_active_thread_id": last_active_thread_id,
+        "threads": threads,
+    }
 
 
 def _parse_deal_brief(raw) -> dict | None:
