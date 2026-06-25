@@ -18,6 +18,7 @@ import config
 from modules import operator_lock, telegram_bot
 import scheduler
 from modules import claude
+from modules import claude_scout
 from modules import scout_runner
 from modules.tg_init_data import verify_init_data_dep
 
@@ -1356,7 +1357,7 @@ async def ma_scout_generate(body: ScoutGenerateBody,
     import asyncio
     existing = [q["keywords"] for q in db.list_scout_queries()]
     result = await asyncio.to_thread(
-        claude.generate_scout_queries, existing_keywords=existing,
+        claude_scout.generate_scout_queries, existing_keywords=existing,
         extra_instruction=body.extra.strip(),
     )
     added = 0

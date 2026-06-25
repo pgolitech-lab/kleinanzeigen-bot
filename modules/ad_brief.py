@@ -12,7 +12,7 @@ from typing import Any, Optional
 import anthropic
 
 import config
-from modules.claude import _calc_cost  # переиспользуем подсчёт стоимости
+from modules.claude_utils import _calc_cost
 
 logger = logging.getLogger(__name__)
 

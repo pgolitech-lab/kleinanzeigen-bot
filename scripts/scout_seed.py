@@ -2,11 +2,11 @@
 Запуск: PYTHONPATH=/home/pg/kleinanzeigen-bot python3 scripts/scout_seed.py
 """
 import database as db
-from modules import claude
+from modules import claude_scout
 
 db.init_db()
 existing = [q["keywords"] for q in db.list_scout_queries()]
-r = claude.generate_scout_queries(existing_keywords=existing)
+r = claude_scout.generate_scout_queries(existing_keywords=existing)
 added = 0
 for q in r["queries"]:
     if db.scout_query_exists(q["kind"], q["keywords"], q["category"]):

@@ -27,7 +27,7 @@ from playwright.sync_api import Page, sync_playwright
 
 import config
 import database as db
-from modules import claude
+from modules import claude_scout
 from modules.plz import plz_to_bundesland
 
 logger = logging.getLogger(__name__)
@@ -495,7 +495,7 @@ def verify_listings(batch_size: int = 25, max_items: int = 1000) -> dict[str, An
         items = [{"ad_id": r["ad_id"], "title": r["title"], "description": r["description"]}
                  for r in batch]
         try:
-            res = claude.classify_scout_listings(items, examples=examples)
+            res = claude_scout.classify_scout_listings(items, examples=examples)
         except Exception:
             logger.exception("scout: classify batch fail")
             continue
