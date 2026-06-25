@@ -204,3 +204,41 @@ def test_client_history_returns_tags_from_profile(client):
     body = res.json()
     assert body["tags"] == ["Серьёзный", "Торгуется"]
     assert body["note"] == "заметка теста"
+
+def test_client_profile_post_saves_tags_and_note(client):
+    c, mdb = client
+    init = make_init_data(TEST_USER)
+    res = c.post(
+        f"/api/ma/clients/{quote('buyer@test.com')}/profile",
+        headers={"X-Telegram-Init-Data": init},
+        json={"tags": ["Серьёзный", "Торгуется"], "note": "важный клиент"},
+    )
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+    mdb.upsert_client_profile.assert_called_once_with(
+        "buyer@test.com", ["Серьёзный", "Торгуется"], "важный клиент"
+    )
+
+
+def test_client_profile_post_filters_invalid_tags(client):
+    c, mdb = client
+    init = make_init_data(TEST_USER)
+    res = c.post(
+        f"/api/ma/clients/{quote('x@y.com')}/profile",
+        headers={"X-Telegram-Init-Data": init},
+        json={"tags": ["Серьёзный", "НеизвестныйТег", "Мошенник"], "note": ""},
+    )
+    assert res.status_code == 200
+    # НеизвестныйТег отфильтрован, сохранены только допустимые в том же порядке
+    mdb.upsert_client_profile.assert_called_once_with(
+        "x@y.com", ["Серьёзный", "Мошенник"], ""
+    )
+
+
+def test_client_profile_post_requires_auth(client):
+    c, mdb = client
+    res = c.post(
+        f"/api/ma/clients/{quote('x@y.com')}/profile",
+        json={"tags": [], "note": ""},
+    )
+    assert res.status_code == 422

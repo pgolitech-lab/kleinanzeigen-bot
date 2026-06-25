@@ -233,6 +233,25 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
     }
 
 
+
+
+class ClientProfilePayload(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+    note: str = Field(default="")
+
+
+@router.post("/clients/{email}/profile")
+async def ma_client_profile_save(
+    email: str,
+    payload: ClientProfilePayload,
+    user: dict = Depends(verify_init_data_dep),
+) -> dict[str, Any]:
+    """Сохранить теги и заметку оператора для покупателя."""
+    clean_tags = [t for t in payload.tags if t in _ALLOWED_TAGS]
+    db.upsert_client_profile(email, clean_tags, payload.note)
+    return {"ok": True}
+
+
 def _parse_deal_brief(raw) -> dict | None:
     """Parse messages.deal_brief_json. None при NULL/empty/invalid JSON."""
     if not raw:
