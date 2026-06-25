@@ -395,7 +395,11 @@ def list_threads_for_client(buyer_email: str) -> list[sqlite3.Row]:
             (SELECT ad_price FROM messages s
              WHERE s.gmail_thread_id = m.gmail_thread_id
                AND ad_price IS NOT NULL AND ad_price != ''
-             ORDER BY s.id DESC LIMIT 1) AS ad_price
+             ORDER BY s.id DESC LIMIT 1) AS ad_price,
+            (SELECT deal_brief_json FROM messages s
+             WHERE s.gmail_thread_id = m.gmail_thread_id
+               AND s.deal_brief_json IS NOT NULL AND s.deal_brief_json != ''
+             ORDER BY s.id DESC LIMIT 1) AS deal_brief_json
         FROM messages m
         WHERE m.buyer_name = ?
           AND m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''

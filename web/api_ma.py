@@ -166,6 +166,7 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
             "msg_count": r["msg_count"],
             "last_at": r["last_at"],
             "last_status": r["last_status"],
+            "deal_brief": _parse_deal_brief(r.get("deal_brief_json")),
         }
         for r in rows
     ]
