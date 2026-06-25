@@ -28,6 +28,21 @@ BACKUP_PREFIX = "kleinanzeigen_"
 BACKUP_MIME = "application/x-sqlite3"
 
 
+def _extract_folder_id(raw: str) -> str:
+    """Извлечь Drive folder ID из строки — голый ID или полный URL.
+
+    Принимает:
+      - "1A2B3C4D..."           → возвращает как есть
+      - "https://drive.google.com/drive/folders/1A2B3C4D..."  → "1A2B3C4D..."
+    """
+    raw = raw.strip().rstrip("/")
+    if raw.startswith("http"):
+        # берём последний сегмент пути, отбрасывая ?usp=... и прочие query params
+        path = raw.split("?")[0]
+        return path.rstrip("/").rsplit("/", 1)[-1]
+    return raw
+
+
 # --- Авторизация ---
 
 def _get_drive_service() -> Any:
@@ -39,6 +54,13 @@ def _get_drive_service() -> Any:
         info = json.loads(creds_json)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Невалидный JSON в google_drive_credentials_json: {e}")
+
+    if info.get("type") != "service_account" or not info.get("client_email"):
+        raise RuntimeError(
+            "google_drive_credentials_json: нужен ключ сервис-аккаунта "
+            "(type=service_account с client_email/private_key). "
+            "GCP: IAM → Service Accounts → Keys → Add key → JSON."
+        )
 
     creds = service_account.Credentials.from_service_account_info(
         info, scopes=DRIVE_SCOPES
@@ -73,7 +95,7 @@ def _create_snapshot() -> Path:
 
 def backup_now() -> dict[str, Any]:
     """Залить текущую БД в указанную папку Google Drive. Возвращает метаданные файла."""
-    folder_id = config.google_drive_folder_id()
+    folder_id = _extract_folder_id(config.google_drive_folder_id() or "")
     if not folder_id:
         raise RuntimeError("Не задан Google Drive folder_id в настройках")
 
@@ -102,7 +124,7 @@ def backup_now() -> dict[str, Any]:
 
 def list_backups() -> list[dict[str, Any]]:
     """Список бэкапов в указанной папке Drive. Сортировка: новые первые."""
-    folder_id = config.google_drive_folder_id()
+    folder_id = _extract_folder_id(config.google_drive_folder_id() or "")
     if not folder_id:
         raise RuntimeError("Не задан Google Drive folder_id в настройках")
 
@@ -166,7 +188,7 @@ def test_credentials() -> tuple[bool, str]:
     except Exception as e:
         return False, f"Credentials: {e}"
 
-    folder_id = config.google_drive_folder_id()
+    folder_id = _extract_folder_id(config.google_drive_folder_id() or "")
     if not folder_id:
         return False, "Не задан folder_id"
 

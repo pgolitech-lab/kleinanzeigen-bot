@@ -758,7 +758,8 @@ def poll_all_accounts() -> str:
     total_orphans = 0
     for acc in accounts:
         try:
-            new_emails = gmail.fetch_new(
+            new_emails = gmail._imap_retry(
+                gmail.fetch_new,
                 acc["gmail_email"], acc["gmail_app_password"],
                 from_filter=from_filter,
             )
@@ -780,7 +781,8 @@ def poll_all_accounts() -> str:
         # уже попали в messages/processed_messages, recovery не подымет их зря.
         try:
             known = db.known_message_ids_since(since_days=3)
-            orphans = gmail.find_orphan_seen_uids(
+            orphans = gmail._imap_retry(
+                gmail.find_orphan_seen_uids,
                 acc["gmail_email"], acc["gmail_app_password"],
                 known_message_ids=known,
                 from_filter=from_filter,

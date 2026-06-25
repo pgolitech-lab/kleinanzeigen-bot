@@ -3,13 +3,17 @@
 
 import email
 import imaplib
+import logging as _log
 import re
 import smtplib
 import ssl
+import time as _time
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import make_msgid, parseaddr
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
+
+_T = TypeVar("_T")
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
@@ -22,6 +26,20 @@ SMTP_PORT = 465  # SSL
 # письмо от Fahrig дошло, но не было обработано. 30s — компромисс между
 # защитой от hang-а и допуском медленных соединений.
 IMAP_TIMEOUT = 30
+IMAP_RETRY_DELAY = 3  # секунд между попытками при TimeoutError
+
+
+def _imap_retry(fn: Callable[..., _T], *args: Any, retries: int = 1, **kwargs: Any) -> _T:
+    """Вызвать fn, повторив до `retries` раз при IMAP-таймауте (TimeoutError/OSError)."""
+    for attempt in range(retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except (TimeoutError, OSError) as exc:
+            if attempt >= retries:
+                raise
+            _log.warning("IMAP %s таймаут (попытка %d/%d), повтор через %ds: %s",
+                         fn.__name__, attempt + 1, retries + 1, IMAP_RETRY_DELAY, exc)
+            _time.sleep(IMAP_RETRY_DELAY)
 
 
 # --- Вспомогательные функции ---

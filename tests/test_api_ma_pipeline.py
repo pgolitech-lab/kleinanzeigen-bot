@@ -43,6 +43,7 @@ def client():
         mc.telegram_authorized_ids.return_value = {"999"}
         # Default: pipeline_threads пустой; per-test переопределяет.
         mdb.pipeline_threads.return_value = []
+        mdb.list_accounts.return_value = []
         mdb.get_thread_autopilot.return_value = None
         mdb.get_message.return_value = None
         from web.app import app
@@ -55,7 +56,7 @@ def test_pipeline_empty_returns_empty_sections(client):
     res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
     body = res.json()
-    assert body == {"red": [], "green": []}
+    assert body == {"red": [], "green": [], "accounts": []}
 
 
 def test_pipeline_splits_by_last_event_kind(client):
