@@ -161,8 +161,9 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
     """Профиль клиента: треды + deal_brief + теги + агрегаты."""
     rows = db.list_threads_for_client(email)
 
-    # display_name из последнего сообщения с непустым полем
+    # display_name и total_cost — один коннект
     display_name = email
+    total_cost_usd = 0.0
     with db.get_conn() as conn:
         dn_row = conn.execute(
             "SELECT buyer_display_name FROM messages "
@@ -172,14 +173,12 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
         ).fetchone()
         if dn_row:
             display_name = dn_row["buyer_display_name"]
-
-    # total_cost_usd — сумма по всем сообщениям клиента
-    with db.get_conn() as conn:
         cost_row = conn.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM messages WHERE buyer_name = ?",
             (email,),
         ).fetchone()
-    total_cost_usd = round(float(cost_row["total"]), 5) if cost_row else 0.0
+        if cost_row:
+            total_cost_usd = round(float(cost_row["total"]), 5)
 
     # Теги и заметка из client_profiles
     profile = db.get_client_profile(email)
@@ -198,17 +197,18 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
     total_negotiated_eur = 0
     last_active_thread_id = None
     for r in rows:
-        brief = _parse_deal_brief(r["deal_brief_json"]) if "deal_brief_json" in r.keys() else None
+        brief = _parse_deal_brief(dict(r).get("deal_brief_json"))
         status = r["last_status"] or ""
         # last_active_thread_id — первый (свежий) тред не в закрытых статусах
         if last_active_thread_id is None and status not in _CLOSED_STATUSES:
             last_active_thread_id = r["thread_id"]
         # sold_count / total_negotiated_eur
-        if status == "skipped_sold" and brief:
-            price = brief.get("negotiated_price_eur") or 0
-            if price and price > 0:
-                sold_count += 1
-                total_negotiated_eur += price
+        if status == "skipped_sold":
+            sold_count += 1
+            if brief:
+                price = brief.get("negotiated_price_eur") or 0
+                if price and price > 0:
+                    total_negotiated_eur += price
         threads.append({
             "thread_id": r["thread_id"],
             "ad_title": r["ad_title"],
@@ -237,7 +237,7 @@ async def ma_client_history(email: str, user: dict = Depends(verify_init_data_de
 
 class ClientProfilePayload(BaseModel):
     tags: list[str] = Field(default_factory=list)
-    note: str = Field(default="")
+    note: str = Field(default="", max_length=4000)
 
 
 @router.post("/clients/{email}/profile")

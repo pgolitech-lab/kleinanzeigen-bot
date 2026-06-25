@@ -242,3 +242,27 @@ def test_client_profile_post_requires_auth(client):
         json={"tags": [], "note": ""},
     )
     assert res.status_code == 422
+
+def test_client_history_sold_count_without_deal_brief(client):
+    c, mdb = client
+    mdb.list_threads_for_client.return_value = [
+        _row(thread_id="t1", ad_title="A", ad_id="1", ad_price="100€",
+             msg_count=1, last_at="2026-06-24T10:00:00", last_status="skipped_sold",
+             deal_brief_json=None),
+    ]
+    mdb.get_client_profile.return_value = None
+    init = make_init_data(TEST_USER)
+    with patch("web.api_ma.db.get_conn") as mock_conn:
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        ctx.execute.return_value.fetchone.return_value = None
+        mock_conn.return_value = ctx
+        res = c.get(
+            f"/api/ma/clients/{quote('x@y.com')}/history",
+            headers={"X-Telegram-Init-Data": init},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["sold_count"] == 1        # counted even without deal_brief
+    assert body["total_negotiated_eur"] == 0  # no price to sum
