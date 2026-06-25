@@ -348,6 +348,15 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             )
         """)
+        # client_profiles — теги и заметки оператора по покупателю
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_profiles (
+                buyer_email TEXT PRIMARY KEY,
+                tags_json   TEXT NOT NULL DEFAULT '[]',
+                note        TEXT NOT NULL DEFAULT '',
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
 
 
 # --- ACCOUNTS ---

@@ -549,3 +549,34 @@ def list_threads() -> list[sqlite3.Row]:
         return conn.execute(sql).fetchall()
 
 
+
+# --- CLIENT PROFILES ---
+
+def get_client_profile(buyer_email: str) -> Optional[sqlite3.Row]:
+    """Теги и заметка оператора по покупателю. None если профиль не создан."""
+    if not buyer_email:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM client_profiles WHERE buyer_email = ?",
+            (buyer_email,),
+        ).fetchone()
+
+
+def upsert_client_profile(buyer_email: str, tags: list[str], note: str) -> None:
+    """Сохранить или обновить теги + заметку для покупателя."""
+    if not buyer_email:
+        return
+    import json as _json
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO client_profiles (buyer_email, tags_json, note, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(buyer_email) DO UPDATE SET
+                tags_json  = excluded.tags_json,
+                note       = excluded.note,
+                updated_at = excluded.updated_at
+            """,
+            (buyer_email, _json.dumps(tags, ensure_ascii=False), note),
+        )
