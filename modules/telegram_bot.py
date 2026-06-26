@@ -351,3 +351,48 @@ def broadcast_after_external_action(msg_id: int) -> None:
 def broadcast_thread_state(gmail_thread_id: str) -> None:
     """No-op: мини-карточек треда в боте больше нет."""
     return None
+
+
+# ============================================================
+# ============================================================
+# Обработка устаревших callback-кнопок (до переписки 2026-06-23)
+# ============================================================
+
+def start_callback_poller() -> None:
+    """Daemon-поток: получать callback_query и отвечать «кнопка устарела».
+
+    Нужно для старых TG-сообщений (до 2026-06-23) с inline callback-кнопками
+    («Обновить», «Очистить»). Без answerCallbackQuery Telegram показывает
+    вечный спиннер на кнопке.
+    """
+    import threading
+    import time
+
+    def _run() -> None:
+        offset = 0
+        while True:
+            try:
+                r = _http_post_single("getUpdates", {
+                    "timeout": 25,
+                    "offset": offset,
+                    "allowed_updates": ["callback_query"],
+                })
+                for u in (r if isinstance(r, list) else []):
+                    offset = u["update_id"] + 1
+                    cb = u.get("callback_query")
+                    if cb:
+                        try:
+                            _http_post_single("answerCallbackQuery", {
+                                "callback_query_id": cb["id"],
+                                "text": "Эта кнопка устарела. Используй Mini App — кнопка «📋 MA» снизу чата.",
+                                "show_alert": True,
+                            })
+                        except Exception:
+                            logger.exception("answerCallbackQuery fail cb=%s", cb.get("id"))
+            except Exception:
+                logger.exception("callback_query poll cycle fail")
+                time.sleep(5)
+
+    t = threading.Thread(target=_run, daemon=True, name="cb-poller")
+    t.start()
+    logger.info("Callback-query poller запущен (daemon)")

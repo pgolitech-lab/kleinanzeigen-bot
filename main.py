@@ -37,6 +37,13 @@ def main() -> None:
     except Exception:
         log.exception("set_menu_button failed")
 
+    # 2c. Минимальный callback-поллер для старых inline-кнопок (до переписки 2026-06-23)
+    log.info("Запуск callback-query poller...")
+    try:
+        telegram_bot.start_callback_poller()
+    except Exception:
+        log.exception("start_callback_poller failed")
+
     # 3. Запустить FastAPI. uvicorn сам ловит SIGINT/SIGTERM и
     #    корректно завершает worker-ы — после этого управление возвращается сюда.
     host = config.web_host()

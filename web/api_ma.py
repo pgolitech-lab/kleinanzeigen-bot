@@ -69,7 +69,7 @@ def _row_to_pipeline_item(row: Any, autopilot_row: Any) -> dict[str, Any]:
 async def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, list]:
     """Pipeline активных тредов: разделение на red (ждут нас) / green (ждём клиента).
 
-    Сортировка внутри секции — ASC по last_event_at (старые сверху).
+    Сортировка внутри секции — DESC по last_event_at (новые сверху).
     """
     rows = db.pipeline_threads()
     red: list[dict[str, Any]] = []
@@ -82,8 +82,8 @@ async def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, l
             red.append(item)
         else:
             green.append(item)
-    red.sort(key=lambda x: x["last_event_at"] or "")
-    green.sort(key=lambda x: x["last_event_at"] or "")
+    red.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
+    green.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
     accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
     return {"red": red, "green": green, "accounts": accounts}
 

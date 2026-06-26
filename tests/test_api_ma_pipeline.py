@@ -73,9 +73,9 @@ def test_pipeline_splits_by_last_event_kind(client):
     body = res.json()
     assert len(body["red"]) == 2
     assert len(body["green"]) == 1
-    # Сортировка ASC внутри красной — t3 (09:00) перед t1 (10:00)
-    assert body["red"][0]["thread_id"] == "t3"
-    assert body["red"][1]["thread_id"] == "t1"
+    # Сортировка DESC внутри красной — t1 (10:00) перед t3 (09:00)
+    assert body["red"][0]["thread_id"] == "t1"
+    assert body["red"][1]["thread_id"] == "t3"
     assert body["green"][0]["thread_id"] == "t2"
 
 
