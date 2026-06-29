@@ -37,7 +37,14 @@ def main() -> None:
     except Exception:
         log.exception("set_menu_button failed")
 
-    # 2c. Минимальный callback-поллер для старых inline-кнопок (до переписки 2026-06-23)
+    # 2c. Регистрация команд бота + callback-поллер (команды + legacy-кнопки)
+    log.info("Регистрация команд бота...")
+    try:
+        telegram_bot.set_bot_commands()
+    except Exception:
+        log.exception("set_bot_commands failed")
+
+    # Callback/message поллер: /tasks, close_THREAD, legacy-кнопки
     log.info("Запуск callback-query poller...")
     try:
         telegram_bot.start_callback_poller()

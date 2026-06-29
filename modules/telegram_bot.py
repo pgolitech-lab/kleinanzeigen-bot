@@ -1,8 +1,8 @@
-"""Telegram-бот: ТОЛЬКО исходящие уведомления оператору (sync, urllib stdlib).
+"""Telegram-бот: уведомления оператору + интерактивная сводка задач (sync, urllib stdlib).
 
-Архитектура (2026-06-23): ставка на сервер. Вся работа оператора — в Mini App /
-веб-морде. Бот НЕ принимает ввод — нет long-polling, нет PTB, нет handlers.
-Каждое событие → одно сообщение + одна web_app-кнопка «Открыть» в нужный экран MA.
+Архитектура (2026-06-23): Вся основная работа оператора — в Mini App / веб-морде.
+Бот шлёт уведомления-ссылки в MA и обрабатывает команду /tasks (сводка висячих задач
+с кнопками «открыть» → MA и «🗑 закрыть тред»).
 
 Lock/thread-busy обёртки оставлены здесь (их зовут scheduler/api_ma) — они про
 in-memory concurrency поверх modules/operator_lock, к Telegram отношения не имеют.
@@ -376,12 +376,68 @@ def broadcast_thread_state(gmail_thread_id: str) -> None:
 # Обработка устаревших callback-кнопок (до переписки 2026-06-23)
 # ============================================================
 
-def start_callback_poller() -> None:
-    """Daemon-поток: получать callback_query и отвечать «кнопка устарела».
+def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> None:
+    """Отправить/обновить сводку висячих задач. edit_msg_id → edit in-place."""
+    threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
+    if not threads:
+        text = "✅ <b>Нет висячих задач</b>"
+        kb: list = []
+    else:
+        text = f"📋 <b>Висячих задач: {len(threads)}</b>"
+        kb = []
+        for t in threads[:15]:
+            mid = _safe(t, "id")
+            thread_id = _safe(t, "gmail_thread_id") or ""
+            buyer = (_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?")[:18]
+            snippet = (_safe(t, "de_client") or "").replace("\n", " ").strip()[:35]
+            n = _safe(t, "pending_drafts_count") or 1
+            status = _safe(t, "status") or "new"
+            icon = {"new": "🆕", "pending": "⏳", "edited": "✏️",
+                    "approved": "✅", "deferred": "⏸"}.get(status, "❓")
+            count_s = f"({n}) " if n > 1 else ""
+            btn_label = f"{icon} {count_s}{buyer} · {snippet}"[:60]
+            kb.append([
+                {"text": btn_label, "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
+                {"text": "🗑", "callback_data": f"close_{thread_id}"},
+            ])
+    kb.append([{"text": "🔄 Обновить", "callback_data": "tasks"}])
+    markup = {"inline_keyboard": kb}
+    if edit_msg_id:
+        try:
+            _http_post_single("editMessageText", {
+                "chat_id": chat_id, "message_id": edit_msg_id,
+                "text": text, "parse_mode": "HTML",
+                "reply_markup": markup,
+            })
+        except Exception:
+            logger.exception("send_pending_summary edit fail")
+    else:
+        try:
+            _http_post_single("sendMessage", {
+                "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                "reply_markup": markup,
+            })
+        except Exception:
+            logger.exception("send_pending_summary send fail")
 
-    Нужно для старых TG-сообщений (до 2026-06-23) с inline callback-кнопками
-    («Обновить», «Очистить»). Без answerCallbackQuery Telegram показывает
-    вечный спиннер на кнопке.
+
+def set_bot_commands() -> None:
+    """Регистрация /tasks в меню бота (показывается при вводе /)."""
+    try:
+        _http_post_single("setMyCommands", {"commands": [
+            {"command": "tasks", "description": "Список висячих задач"},
+        ]})
+    except Exception:
+        logger.exception("setMyCommands fail")
+
+
+def start_callback_poller() -> None:
+    """Daemon-поток: обрабатывать callback_query и команды (message).
+
+    - /tasks → send_pending_summary в чат отправителя
+    - callback tasks → обновить сводку in-place
+    - callback close_THREAD_ID → закрыть тред + обновить сводку
+    - прочие callback → «кнопка устарела» (legacy до 2026-06-23)
     """
     import threading
     import time
@@ -393,20 +449,51 @@ def start_callback_poller() -> None:
                 r = _http_post_single("getUpdates", {
                     "timeout": 25,
                     "offset": offset,
-                    "allowed_updates": ["callback_query"],
+                    "allowed_updates": ["callback_query", "message"],
                 })
                 for u in (r if isinstance(r, list) else []):
                     offset = u["update_id"] + 1
+                    # ── Команда /tasks ──────────────────────────────────────
+                    msg = u.get("message")
+                    if msg:
+                        text = (msg.get("text") or "").strip()
+                        chat_id = (msg.get("chat") or {}).get("id")
+                        if chat_id and text.lower().startswith("/tasks"):
+                            try:
+                                send_pending_summary(chat_id)
+                            except Exception:
+                                logger.exception("send_pending_summary fail")
+                        continue
+                    # ── Callback-кнопки ─────────────────────────────────────
                     cb = u.get("callback_query")
-                    if cb:
-                        try:
+                    if not cb:
+                        continue
+                    data = (cb.get("data") or "").strip()
+                    cb_msg = cb.get("message") or {}
+                    cb_chat = (cb_msg.get("chat") or {}).get("id")
+                    cb_mid = cb_msg.get("message_id")
+                    try:
+                        if data == "tasks":
+                            # Обновить сводку на месте
+                            send_pending_summary(cb_chat, edit_msg_id=cb_mid)
+                            _http_post_single("answerCallbackQuery",
+                                              {"callback_query_id": cb["id"]})
+                        elif data.startswith("close_"):
+                            thread_id = data[6:]
+                            db.close_thread(thread_id, closed_by="bot-task-dismiss")
+                            send_pending_summary(cb_chat, edit_msg_id=cb_mid)
+                            _http_post_single("answerCallbackQuery", {
+                                "callback_query_id": cb["id"],
+                                "text": "🏁 Тред закрыт",
+                            })
+                        else:
                             _http_post_single("answerCallbackQuery", {
                                 "callback_query_id": cb["id"],
                                 "text": "Эта кнопка устарела. Используй Mini App — кнопка «📋 MA» снизу чата.",
                                 "show_alert": True,
                             })
-                        except Exception:
-                            logger.exception("answerCallbackQuery fail cb=%s", cb.get("id"))
+                    except Exception:
+                        logger.exception("callback handler fail data=%r", data)
             except Exception:
                 logger.exception("callback_query poll cycle fail")
                 time.sleep(5)
