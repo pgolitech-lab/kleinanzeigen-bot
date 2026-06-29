@@ -16,6 +16,13 @@ from modules import claude, gmail, telegram_bot
 
 logger = logging.getLogger(__name__)
 
+def _row_get(row: Any, key: str) -> Any:
+    """Безопасный getter для sqlite3.Row — None если колонки нет."""
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return None
+
 def drain_deferred_thread(thread_id: str) -> int:
     """Поднять отложенные review-карточки треда.
 

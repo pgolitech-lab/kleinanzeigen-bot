@@ -266,12 +266,25 @@ def send_autopilot_start_notification(msg_id: int, floor: float, actor: str) -> 
 # SMTP-отправка — новые incoming для треда откладываются (status 'deferred').
 # kinds: {'operator', 'sending'}.
 _THREAD_BUSY: dict[str, dict[str, Any]] = {}
+# thread_id -> msg_id of the operator currently holding the lock (for expiry detection)
+_THREAD_OP_MSG: dict[str, int] = {}
 
 
 def thread_is_busy(thread_id: Optional[str]) -> bool:
     if not thread_id:
         return False
     entry = _THREAD_BUSY.get(thread_id)
+    if not entry or not entry.get("kinds"):
+        return False
+    # Auto-expire stale "operator" kind when the actual lock has expired
+    if "operator" in entry["kinds"]:
+        mid = _THREAD_OP_MSG.get(thread_id)
+        if mid is not None and operator_lock.state(mid) is None:
+            entry["kinds"].discard("operator")
+            _THREAD_OP_MSG.pop(thread_id, None)
+            if not entry["kinds"]:
+                _THREAD_BUSY.pop(thread_id, None)
+                return False
     return bool(entry and entry.get("kinds"))
 
 
@@ -314,13 +327,18 @@ def _check_lock(msg_id: int, actor: str) -> Optional[str]:
 
 def _acquire_lock(msg_id: int, actor: str) -> None:
     operator_lock.remember(msg_id, actor)
-    mark_thread_busy(_msg_thread_id(msg_id), "operator", actor)
+    tid = _msg_thread_id(msg_id)
+    mark_thread_busy(tid, "operator", actor)
+    if tid:
+        _THREAD_OP_MSG[tid] = msg_id
 
 
 def _release_lock(msg_id: int) -> None:
     operator_lock.forget(msg_id)
     thread_id = _msg_thread_id(msg_id)
     clear_thread_busy(thread_id, "operator")
+    if thread_id:
+        _THREAD_OP_MSG.pop(thread_id, None)
     if thread_id:
         try:
             import scheduler as _sched

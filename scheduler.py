@@ -281,6 +281,18 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
+    # Страховка от застрявших deferred-сообщений (когда operator-lock истёк без release).
+    # При нормальной работе не делает ничего (drain_deferred_thread проверяет busy-флаг).
+    sched.add_job(
+        drain_all_deferred,
+        trigger="interval",
+        minutes=5,
+        id="drain_deferred",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     return sched
 
 
