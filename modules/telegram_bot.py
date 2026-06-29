@@ -137,6 +137,53 @@ def _open_kb(start_param: str, label: str = "📋 Открыть в MA") -> dict
     }]]}
 
 
+def _review_kb(message_id: int) -> dict:
+    """Keyboard для review-уведомления: открыть MA + кнопка Прочитал."""
+    return {"inline_keyboard": [[
+        {"text": "📋 Открыть MA", "web_app": {"url": _ma_deep_link(f"review_{message_id}")}},
+        {"text": "👁 Прочитал", "callback_data": f"read_{message_id}"},
+    ]]}
+
+
+def _build_review_text(message_id: int, reads: list[str]) -> str:
+    """Строит текст уведомления: событие + список активных задач + read-метки."""
+    msg = db.get_message(message_id)
+    if not msg:
+        return f"Сообщение #{message_id}"
+    thread_id = _safe(msg, "gmail_thread_id") or ""
+    is_followup = False
+    try:
+        is_followup = len(db.thread_history(thread_id)) > 1 if thread_id else False
+    except Exception:
+        pass
+    buyer = _html(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент")
+    ad = _html(_safe(msg, "ad_title") or "—")
+    price = _safe(msg, "ad_price")
+    snippet = _html((_safe(msg, "de_client") or "").replace("\n", " ").strip()[:150])
+    head = "💬 <b>Ответил клиент</b>" if is_followup else "🆕 <b>Новое обращение</b>"
+    price_s = f" · {_html(str(price))}" if price else ""
+    text = (f"{head} · #{message_id}\n"
+            f"👤 {buyer} · 🏷 {ad}{price_s}\n"
+            f"<i>{snippet}</i>")
+    # Список других активных задач
+    try:
+        all_threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
+        others = [t for t in all_threads if _safe(t, "gmail_thread_id") != thread_id]
+        if others:
+            lines = []
+            for t in others[:5]:
+                b = (_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?")[:14]
+                sn = (_safe(t, "de_client") or "").replace("\n", " ").strip()[:28]
+                lines.append(f"• {_html(b)} — {_html(sn)}")
+            extra = f" (+{len(others) - 5})" if len(others) > 5 else ""
+            text += f"\n\n📋 Ещё активных: {len(all_threads)}{extra}\n" + "\n".join(lines)
+    except Exception:
+        pass
+    if reads:
+        text += "\n\n👁 " + " · ".join(reads)
+    return text
+
+
 def notify(text: str, start_param: Optional[str] = None,
            label: str = "📋 Открыть в MA") -> dict[str, Any]:
     """Универсальное уведомление: текст + (если задан target) кнопка «Открыть»."""
@@ -165,34 +212,56 @@ def set_menu_button() -> None:
 
 
 def send_for_review(message_id: int) -> Optional[int]:
-    """Уведомление о входящем (новое обращение / ответ клиента) + кнопка → review-экран MA."""
-    msg = db.get_message(message_id)
-    if not msg:
+    """Уведомление о входящем: список активных + кнопки MA + Прочитал. Fanout в все DM."""
+    if not db.get_message(message_id):
         logger.warning("send_for_review: сообщение %s не найдено", message_id)
         return None
-    thread_id = _safe(msg, "gmail_thread_id") or ""
-    is_followup = False
-    try:
-        is_followup = len(db.thread_history(thread_id)) > 1 if thread_id else False
-    except Exception:
-        pass
-    buyer = _html(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент")
-    ad = _html(_safe(msg, "ad_title") or "—")
-    price = _safe(msg, "ad_price")
-    snippet = _html((_safe(msg, "de_client") or "").replace("\n", " ").strip()[:180])
-    head = "💬 <b>Клиент ответил</b>" if is_followup else "🆕 <b>Новое обращение</b>"
-    price_s = f" · {_html(str(price))}" if price else ""
-    text = (f"{head} · #{message_id}\n"
-            f"👤 {buyer} · 🏷 {ad}{price_s}\n"
-            f"<i>{snippet}</i>")
-    r = notify(text, f"review_{message_id}")
-    mid = r.get("message_id") if isinstance(r, dict) else None
-    if mid:
+    text = _build_review_text(message_id, reads=[])
+    kb = _review_kb(message_id)
+    dm_ids = config.telegram_operator_dm_ids() or [str(config.telegram_chat_id())]
+    db.clear_card_dispatches(message_id)
+    first_mid: Optional[int] = None
+    for dm_id in dm_ids:
         try:
-            db.update_message(message_id, telegram_message_id=mid)
+            r = _http_post_single("sendMessage", {
+                "chat_id": dm_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": kb,
+            })
+            tg_mid = r.get("message_id") if isinstance(r, dict) else None
+            if tg_mid:
+                db.add_card_dispatch(message_id, str(dm_id), tg_mid)
+                if first_mid is None:
+                    first_mid = tg_mid
+        except Exception:
+            logger.exception("send_for_review fanout to %s failed", dm_id)
+    if first_mid:
+        try:
+            db.update_message(message_id, telegram_message_id=first_mid)
         except Exception:
             pass
-    return mid
+    return first_mid
+
+
+def _edit_all_dispatches(message_id: int, text: str, kb: dict) -> None:
+    """Обновить все fanout-копии уведомления (для read-receipt и пр.)."""
+    for d in db.list_card_dispatches(message_id):
+        try:
+            _http_post_single("editMessageText", {
+                "chat_id": d["chat_id"],
+                "message_id": d["tg_msg_id"],
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": kb,
+            })
+        except RuntimeError as e:
+            if "message is not modified" not in str(e):
+                logger.error("edit dispatch %s/%s fail: %s", d["chat_id"], d["tg_msg_id"], e)
+        except Exception:
+            logger.exception("edit dispatch %s/%s fail", d["chat_id"], d["tg_msg_id"])
 
 
 def send_reminder_offer(out_message_id: int, days_silent: int) -> Optional[int]:
@@ -379,11 +448,12 @@ def broadcast_thread_state(gmail_thread_id: str) -> None:
 def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int:
     """Отправить/обновить сводку висячих задач. edit_msg_id → edit in-place."""
     threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
+    ts = datetime.now().strftime("%H:%M:%S")
     if not threads:
-        text = "✅ <b>Нет висячих задач</b>"
+        text = f"✅ <b>Нет висячих задач</b>\n<i>Обновлено: {ts}</i>"
         kb: list = []
     else:
-        text = f"📋 <b>Висячих задач: {len(threads)}</b>"
+        text = f"📋 <b>Висячих задач: {len(threads)}</b>\n<i>Обновлено: {ts}</i>"
         kb = []
         for t in threads[:15]:
             mid = _safe(t, "id")
@@ -411,7 +481,7 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int
             })
         except RuntimeError as exc:
             if "message is not modified" in str(exc):
-                logger.debug("send_pending_summary: сообщение не изменилось")
+                logger.warning("send_pending_summary: сообщение не изменилось (не должно случаться с timestamp)")
             else:
                 logger.error("send_pending_summary edit fail: %s", exc)
         except Exception:
@@ -480,7 +550,6 @@ def start_callback_poller() -> None:
                     cb_mid = cb_msg.get("message_id")
                     try:
                         if data == "tasks":
-                            # Обновить сводку на месте
                             count = send_pending_summary(cb_chat, edit_msg_id=cb_mid)
                             cb_text = f"✅ {count} задач" if count else "✅ Нет задач"
                             _http_post_single("answerCallbackQuery", {
@@ -488,6 +557,28 @@ def start_callback_poller() -> None:
                                 "text": cb_text,
                             })
                             logger.info("tasks refresh: chat=%s count=%d", cb_chat, count)
+                        elif data.startswith("read_"):
+                            # Прочитал — пометить + обновить все копии уведомления
+                            try:
+                                msg_id = int(data[5:])
+                            except ValueError:
+                                raise RuntimeError(f"bad read_ data: {data!r}")
+                            from_user = cb.get("from") or {}
+                            reader = from_user.get("first_name") or from_user.get("username") or "?"
+                            ts = datetime.now().strftime("%H:%M")
+                            db.mark_card_dispatch_read(msg_id, str(cb_chat), f"{reader} · {ts}")
+                            reads = [
+                                dict(d)["read_by"]
+                                for d in db.list_card_dispatches(msg_id)
+                                if dict(d).get("read_by")
+                            ]
+                            new_text = _build_review_text(msg_id, reads)
+                            _edit_all_dispatches(msg_id, new_text, _review_kb(msg_id))
+                            _http_post_single("answerCallbackQuery", {
+                                "callback_query_id": cb["id"],
+                                "text": "✅ Отмечено",
+                            })
+                            logger.info("read: msg=%s reader=%s", msg_id, reader)
                         elif data.startswith("close_"):
                             thread_id = data[6:]
                             db.close_thread(thread_id, closed_by="bot-task-dismiss")

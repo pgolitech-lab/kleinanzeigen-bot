@@ -222,12 +222,18 @@ def init_db() -> None:
                 chat_id TEXT NOT NULL,
                 tg_msg_id INTEGER NOT NULL,
                 sent_at TEXT NOT NULL,
+                read_by TEXT DEFAULT NULL,
                 FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
             )
         """)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_card_dispatches_msg ON card_dispatches(message_id)"
         )
+        # migration: add read_by if missing (for existing DBs)
+        try:
+            conn.execute("ALTER TABLE card_dispatches ADD COLUMN read_by TEXT DEFAULT NULL")
+        except Exception:
+            pass
 
         # closed_threads — треды завершённые оператором кнопкой «🏁 Завершить беседу».
         # Не отображаются в pipeline/reminder. Если в закрытом треде приходит новое
@@ -581,6 +587,15 @@ def list_card_dispatches(message_id: int) -> list[sqlite3.Row]:
             "SELECT * FROM card_dispatches WHERE message_id = ? ORDER BY id",
             (message_id,),
         ).fetchall()
+
+
+def mark_card_dispatch_read(message_id: int, chat_id: str, reader_label: str) -> None:
+    """Пометить что оператор (chat_id) прочитал уведомление. reader_label = 'Имя · ЧЧ:ММ'."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE card_dispatches SET read_by = ? WHERE message_id = ? AND chat_id = ?",
+            (reader_label, message_id, str(chat_id)),
+        )
 
 
 def list_thread_dispatches(gmail_thread_id: str) -> list[sqlite3.Row]:
