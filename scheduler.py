@@ -61,72 +61,84 @@ def _job_listener(event: Any) -> None:
 # Polling Gmail: входящие → парсинг → Claude → Telegram
 # ============================================================
 
-def poll_all_accounts() -> str:
-    """Job: пройти по всем активным аккаунтам и обработать новые письма.
+def _poll_one_account(acc: Any, from_filter: Any) -> tuple[int, int, int]:
+    """Опросить один аккаунт: fetch + process + orphan-recovery.
+    
+    Возвращает (new_count, orphans_count, failed_flag).
+    Запускается в отдельном потоке из poll_all_accounts.
+    """
+    new_count = orphans_count = failed = 0
+    try:
+        new_emails = gmail._imap_retry(
+            gmail.fetch_new,
+            acc["gmail_email"], acc["gmail_app_password"],
+            from_filter=from_filter,
+        )
+    except Exception as e:
+        logger.error("IMAP fetch для аккаунта %s упал: %s", acc["id"], e)
+        return 0, 0, 1
+    if new_emails:
+        logger.info("Аккаунт %s: %d новых писем", acc["gmail_email"], len(new_emails))
+    new_count = len(new_emails)
+    for em in new_emails:
+        try:
+            _process_incoming(acc, em)
+        except Exception:
+            logger.exception("Ошибка обработки письма")
+    # Orphan-recovery (best-effort)
+    try:
+        known = db.known_message_ids_since(since_days=3)
+        orphans = gmail._imap_retry(
+            gmail.find_orphan_seen_uids,
+            acc["gmail_email"], acc["gmail_app_password"],
+            known_message_ids=known,
+            from_filter=from_filter,
+            since_days=2,
+        )
+        if orphans:
+            logger.warning(
+                "Orphan-recovery: account=%s найдено %d SEEN-сирот, "
+                "снимаю Seen → подхватятся следующим poll-ом",
+                acc["gmail_email"], len(orphans),
+            )
+            gmail.unmark_seen(
+                acc["gmail_email"], acc["gmail_app_password"], orphans,
+            )
+            orphans_count = len(orphans)
+    except Exception:
+        logger.exception("orphan-recovery упал для аккаунта %s", acc["id"])
+    return new_count, orphans_count, failed
 
-    После регулярного UNSEEN-fetch — orphan-recovery scan: ищем SEEN-письма за
-    последние 2 дня, которых нет ни в `messages`, ни в `processed_messages`
-    (например бот завис в IMAP-recv до `_process_incoming` или crash посередине).
-    Найденным сиротам снимаем флаг Seen → следующий poll-цикл их подхватит как
-    обычные UNSEEN.
+
+def poll_all_accounts() -> str:
+    """Job: пройти по всем активным аккаунтам параллельно и обработать новые письма.
+
+    Аккаунты опрашиваются в параллельных потоках — максимальное время цикла
+    равно самому медленному аккаунту (не сумме). Каждый поток: fetch_new →
+    _process_incoming → orphan-recovery.
 
     Возвращает короткое summary для отображения в /api/status.
     """
+    import concurrent.futures
     if config.polling_paused():
         return "⏸ Polling на паузе (через /pause)"
     accounts = db.list_accounts(only_active=True)
     from_filter = config.gmail_from_filter() or None
-    total_new = 0
-    failed_imap = 0
-    total_orphans = 0
-    for acc in accounts:
-        try:
-            new_emails = gmail._imap_retry(
-                gmail.fetch_new,
-                acc["gmail_email"], acc["gmail_app_password"],
-                from_filter=from_filter,
-            )
-        except Exception as e:
-            failed_imap += 1
-            logger.error("IMAP fetch для аккаунта %s упал: %s", acc["id"], e)
-            continue
-        if new_emails:
-            logger.info("Аккаунт %s: %d новых писем", acc["gmail_email"], len(new_emails))
-        total_new += len(new_emails)
-        for em in new_emails:
+    total_new = total_orphans = total_failed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(accounts) or 1) as ex:
+        futures = {ex.submit(_poll_one_account, acc, from_filter): acc for acc in accounts}
+        for fut in concurrent.futures.as_completed(futures):
             try:
-                _process_incoming(acc, em)
+                new_c, orphans_c, fail_c = fut.result()
+                total_new += new_c
+                total_orphans += orphans_c
+                total_failed += fail_c
             except Exception:
-                logger.exception("Ошибка обработки письма")
-
-        # Orphan-recovery (best-effort, не валим polling если упадёт).
-        # known_message_ids_since собирается ПОСЛЕ обработки выше — свежие ID
-        # уже попали в messages/processed_messages, recovery не подымет их зря.
-        try:
-            known = db.known_message_ids_since(since_days=3)
-            orphans = gmail._imap_retry(
-                gmail.find_orphan_seen_uids,
-                acc["gmail_email"], acc["gmail_app_password"],
-                known_message_ids=known,
-                from_filter=from_filter,
-                since_days=2,
-            )
-            if orphans:
-                logger.warning(
-                    "Orphan-recovery: account=%s найдено %d SEEN-сирот, "
-                    "снимаю Seen → подхватятся следующим poll-ом",
-                    acc["gmail_email"], len(orphans),
-                )
-                gmail.unmark_seen(
-                    acc["gmail_email"], acc["gmail_app_password"], orphans,
-                )
-                total_orphans += len(orphans)
-        except Exception:
-            logger.exception("orphan-recovery упал для аккаунта %s", acc["id"])
-
+                logger.exception("poll_one_account future failed")
+                total_failed += 1
     return (
         f"Аккаунтов: {len(accounts)}, новых писем: {total_new}"
-        + (f", IMAP-ошибок: {failed_imap}" if failed_imap else "")
+        + (f", IMAP-ошибок: {total_failed}" if total_failed else "")
         + (f", сирот восстановлено: {total_orphans}" if total_orphans else "")
     )
 

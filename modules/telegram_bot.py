@@ -376,7 +376,7 @@ def broadcast_thread_state(gmail_thread_id: str) -> None:
 # Обработка устаревших callback-кнопок (до переписки 2026-06-23)
 # ============================================================
 
-def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> None:
+def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int:
     """Отправить/обновить сводку висячих задач. edit_msg_id → edit in-place."""
     threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
     if not threads:
@@ -409,6 +409,11 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> Non
                 "text": text, "parse_mode": "HTML",
                 "reply_markup": markup,
             })
+        except RuntimeError as exc:
+            if "message is not modified" in str(exc):
+                logger.debug("send_pending_summary: сообщение не изменилось")
+            else:
+                logger.error("send_pending_summary edit fail: %s", exc)
         except Exception:
             logger.exception("send_pending_summary edit fail")
     else:
@@ -419,6 +424,7 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> Non
             })
         except Exception:
             logger.exception("send_pending_summary send fail")
+    return len(threads)
 
 
 def set_bot_commands() -> None:
@@ -475,17 +481,22 @@ def start_callback_poller() -> None:
                     try:
                         if data == "tasks":
                             # Обновить сводку на месте
-                            send_pending_summary(cb_chat, edit_msg_id=cb_mid)
-                            _http_post_single("answerCallbackQuery",
-                                              {"callback_query_id": cb["id"]})
+                            count = send_pending_summary(cb_chat, edit_msg_id=cb_mid)
+                            cb_text = f"✅ {count} задач" if count else "✅ Нет задач"
+                            _http_post_single("answerCallbackQuery", {
+                                "callback_query_id": cb["id"],
+                                "text": cb_text,
+                            })
+                            logger.info("tasks refresh: chat=%s count=%d", cb_chat, count)
                         elif data.startswith("close_"):
                             thread_id = data[6:]
                             db.close_thread(thread_id, closed_by="bot-task-dismiss")
-                            send_pending_summary(cb_chat, edit_msg_id=cb_mid)
+                            count = send_pending_summary(cb_chat, edit_msg_id=cb_mid)
                             _http_post_single("answerCallbackQuery", {
                                 "callback_query_id": cb["id"],
-                                "text": "🏁 Тред закрыт",
+                                "text": f"🏁 Тред закрыт · осталось {count}",
                             })
+                            logger.info("close thread: %s remaining=%d", thread_id, count)
                         else:
                             _http_post_single("answerCallbackQuery", {
                                 "callback_query_id": cb["id"],
