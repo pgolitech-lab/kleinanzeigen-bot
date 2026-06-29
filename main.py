@@ -37,6 +37,12 @@ def main() -> None:
     except Exception:
         log.exception("set_menu_button failed")
 
+    log.info("Очистка legacy reply-keyboard...")
+    try:
+        telegram_bot.clear_reply_keyboards()
+    except Exception:
+        log.exception("clear_reply_keyboards failed")
+
     # 2c. Регистрация команд бота + callback-поллер (команды + legacy-кнопки)
     log.info("Регистрация команд бота...")
     try:

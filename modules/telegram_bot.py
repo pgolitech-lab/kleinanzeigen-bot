@@ -211,6 +211,27 @@ def set_menu_button() -> None:
             logger.exception("set_menu_button fail chat=%s", chat)
 
 
+def clear_reply_keyboards() -> None:
+    """Убрать старую reply-keyboard (Обновить / Назад) в DM каждого оператора.
+    Отправляем служебное сообщение с remove_keyboard и сразу удаляем его."""
+    dm_ids = config.telegram_operator_dm_ids() or [str(config.telegram_chat_id())]
+    for chat in dm_ids:
+        try:
+            r = _http_post_single("sendMessage", {
+                "chat_id": chat,
+                "text": "⚙️",
+                "reply_markup": {"remove_keyboard": True},
+            })
+            msg_id = r.get("message_id") if isinstance(r, dict) else None
+            if msg_id:
+                try:
+                    _http_post_single("deleteMessage", {"chat_id": chat, "message_id": msg_id})
+                except Exception:
+                    pass
+        except Exception:
+            logger.exception("clear_reply_keyboards fail chat=%s", chat)
+
+
 def send_for_review(message_id: int) -> Optional[int]:
     """Уведомление о входящем: список активных + кнопки MA + Прочитал. Fanout в все DM."""
     if not db.get_message(message_id):
@@ -534,11 +555,14 @@ def start_callback_poller() -> None:
                     if msg:
                         text = (msg.get("text") or "").strip()
                         chat_id = (msg.get("chat") or {}).get("id")
-                        if chat_id and text.lower().startswith("/tasks"):
+                        if not chat_id:
+                            continue
+                        if text.lower().startswith("/tasks") or text == "Обновить":
                             try:
                                 send_pending_summary(chat_id)
                             except Exception:
                                 logger.exception("send_pending_summary fail")
+                        # Назад и прочие legacy-тексты — игнорируем молча
                         continue
                     # ── Callback-кнопки ─────────────────────────────────────
                     cb = u.get("callback_query")
