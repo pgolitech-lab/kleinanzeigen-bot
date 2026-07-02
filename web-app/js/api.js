@@ -1,4 +1,4 @@
-import { initData, close } from "./tg.js?v=20260624-024500";
+import { initData, close } from "./tg.js?v=20260702-000003";
 
 // Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
 // Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.

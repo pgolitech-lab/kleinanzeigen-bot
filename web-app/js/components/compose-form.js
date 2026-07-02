@@ -1,23 +1,28 @@
-// Compose form: пишешь по-русски → «Перевести» (предпросмотр DE + обратный RU) → «Отправить».
-import { api } from "../api.js?v=20260624-024500";
-import { el } from "../utils.js?v=20260624-024500";
-import { tg } from "../tg.js?v=20260624-024500";
+// Compose form: пишешь по-русски → «Перевести» (предпросмотр, редактируемый) →
+// «Подтвердить и отправить». Отправка ВСЕГДА идёт через explicit-review шаг: то, что
+// оператор видит (и может поправить) в окне предпросмотра — это буквально то, что
+// уйдёт клиенту. compose больше не переводит повторно при отправке (см. modules/outgoing.py,
+// инцидент 2026-07-02: ответ на немецком без предпросмотра ушёл клиенту переведённым на русский).
+import { api } from "../api.js?v=20260702-000003";
+import { el } from "../utils.js?v=20260702-000003";
+import { tg, confirm as tgConfirm } from "../tg.js?v=20260702-000003";
 
 export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
   const form = el(`
     <div class="compose-form border-top pt-3 mt-3">
       <div class="text-muted small mb-2 fw-semibold">✉️ Написать клиенту (на русском — переведём)</div>
-      <textarea class="form-control mb-2 ru-input" rows="5" placeholder="Введите текст по-русски…"></textarea>
-      <div class="preview d-none mb-2">
-        <div class="text-muted small">DE → клиенту</div>
-        <div class="de-preview p-2 rounded bg-primary-subtle small"></div>
-        <div class="text-muted small mt-1">RU обратный перевод (проверь смысл)</div>
-        <div class="back-preview p-2 rounded fst-italic small"></div>
-      </div>
-      <div class="d-flex gap-2 flex-wrap">
+      <textarea class="form-control mb-2 ru-input" rows="5" placeholder="Введите текст по-русски… (или «на немецком: …» / «in english: …»)"></textarea>
+      <div class="d-flex gap-2 flex-wrap mb-2">
         <button class="btn btn-outline-info translate-btn">🔁 Перевести</button>
-        <button class="btn btn-primary save-btn">📨 Отправить</button>
         <button class="btn btn-outline-secondary cancel-btn">✕ Отмена</button>
+      </div>
+      <div class="preview d-none mb-2">
+        <div class="text-muted small fw-semibold mt-1">Текст клиенту — проверьте и при необходимости исправьте перед отправкой</div>
+        <textarea class="form-control de-preview mb-2" rows="5"></textarea>
+        <div class="translate-note text-warning small mb-2 d-none"></div>
+        <div class="text-muted small">RU обратный перевод (проверь смысл)</div>
+        <div class="back-preview p-2 rounded fst-italic small mb-2"></div>
+        <button class="btn btn-primary confirm-send-btn">✅ Подтвердить и отправить</button>
       </div>
       <div class="form-error text-danger small mt-2 d-none"></div>
     </div>
@@ -27,10 +32,16 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
   const errEl = form.querySelector(".form-error");
   const previewBox = form.querySelector(".preview");
   const dePrev = form.querySelector(".de-preview");
+  const noteEl = form.querySelector(".translate-note");
   const backPrev = form.querySelector(".back-preview");
   const translateBtn = form.querySelector(".translate-btn");
-  const saveBtn = form.querySelector(".save-btn");
+  const confirmSendBtn = form.querySelector(".confirm-send-btn");
   const cancelBtn = form.querySelector(".cancel-btn");
+
+  // Заполняется ответом /compose-preview; обнуляется при правке ru-input.
+  // Отправка возможна только когда это заполнено — гарантирует, что перевод
+  // (и его подтверждение оператором) произошёл ДО отправки.
+  let lastPreview = null; // { ru_text, target_lang }
 
   function showErr(m) { errEl.textContent = m; errEl.classList.remove("d-none"); }
   function clearErr() { errEl.classList.add("d-none"); }
@@ -42,8 +53,11 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
     return text;
   }
 
-  // Сброс предпросмотра при правке текста
-  textarea.addEventListener("input", () => previewBox.classList.add("d-none"));
+  // Правка исходного RU-текста делает предпросмотр неактуальным — обязателен повторный перевод.
+  textarea.addEventListener("input", () => {
+    previewBox.classList.add("d-none");
+    lastPreview = null;
+  });
 
   translateBtn.addEventListener("click", async () => {
     clearErr();
@@ -55,8 +69,15 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
       const r = await api(`/api/ma/threads/${encodeURIComponent(threadId)}/compose-preview`, {
         method: "POST", body: { text },
       });
-      dePrev.textContent = r.translated ?? "";
+      dePrev.value = r.translated ?? "";
       backPrev.textContent = r.back_ru ?? "";
+      if (r.note) {
+        noteEl.textContent = "⚠️ " + r.note;
+        noteEl.classList.remove("d-none");
+      } else {
+        noteEl.classList.add("d-none");
+      }
+      lastPreview = { ru_text: r.ru_text ?? text, target_lang: r.target_lang ?? "de" };
       previewBox.classList.remove("d-none");
     } catch (e) {
       showErr(e.message ?? String(e));
@@ -68,14 +89,20 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
 
   cancelBtn.addEventListener("click", () => onCancel());
 
-  saveBtn.addEventListener("click", async () => {
+  confirmSendBtn.addEventListener("click", async () => {
     clearErr();
-    const text = validate();
-    if (!text) return;
-    saveBtn.disabled = true; cancelBtn.disabled = true; translateBtn.disabled = true;
+    if (!lastPreview) { showErr("Сначала переведите текст"); return; }
+    const finalText = dePrev.value.trim();
+    if (!finalText) { showErr("Текст клиенту не может быть пустым"); return; }
+
+    const ok = await tgConfirm(`Отправить это сообщение клиенту (${lastPreview.target_lang.toUpperCase()})?\n\n${finalText}`);
+    if (!ok) return;
+
+    confirmSendBtn.disabled = true; cancelBtn.disabled = true; translateBtn.disabled = true;
     try {
       const res = await api(`/api/ma/threads/${encodeURIComponent(threadId)}/compose`, {
-        method: "POST", body: { text },
+        method: "POST",
+        body: { text: lastPreview.ru_text, final_text: finalText, target_lang: lastPreview.target_lang },
       });
       try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (e) {}
       try {
@@ -88,7 +115,7 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
       } catch (e) { onSubmitComplete(res); }
     } catch (e) {
       showErr(e.message ?? String(e));
-      saveBtn.disabled = false; cancelBtn.disabled = false; translateBtn.disabled = false;
+      confirmSendBtn.disabled = false; cancelBtn.disabled = false; translateBtn.disabled = false;
     }
   });
 

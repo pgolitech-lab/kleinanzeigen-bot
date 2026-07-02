@@ -26,6 +26,18 @@ export function close() {
   tg?.close();
 }
 
+// Диалог подтверждения перед необратимым действием (напр. отправка письма клиенту).
+// Возвращает Promise<boolean>. Фоллбэк на window.confirm вне Telegram WebApp.
+export function confirm(message) {
+  return new Promise((resolve) => {
+    if (tg?.showConfirm) {
+      tg.showConfirm(message, (ok) => resolve(!!ok));
+    } else {
+      resolve(window.confirm(message));
+    }
+  });
+}
+
 // Открыть внешнюю ссылку (объявление Kleinanzeigen) в браузере.
 export function openLink(url) {
   if (tg?.openLink) tg.openLink(url);

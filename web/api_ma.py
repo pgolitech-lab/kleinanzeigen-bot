@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 import json
+import re
 
 import database as db
 import config
@@ -678,10 +679,21 @@ class ComposeBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
 
 
+class ComposeSendBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000, description="ru_text из ответа /compose-preview")
+    final_text: str = Field(..., min_length=1, max_length=4000, description="итоговый текст клиенту — из превью, возможно отредактированный оператором")
+    target_lang: str = Field(..., min_length=2, max_length=5, description="target_lang из ответа /compose-preview")
+
+
 @router.post("/threads/{thread_id}/compose")
-async def ma_compose(thread_id: str, body: ComposeBody,
+async def ma_compose(thread_id: str, body: ComposeSendBody,
                      user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Operator-initiated message in thread (compose mode)."""
+    """Operator-initiated message in thread (compose mode).
+
+    Требует, чтобы оператор сначала вызвал /compose-preview и подтвердил (возможно
+    отредактировав) итоговый текст — final_text уходит клиенту КАК ЕСТЬ, без повторного
+    перевода. Это осознанное решение после инцидента 2026-07-02 (см. modules/outgoing.py).
+    """
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
@@ -689,7 +701,7 @@ async def ma_compose(thread_id: str, body: ComposeBody,
 
     import asyncio
     result = await asyncio.to_thread(
-        scheduler.send_manual_compose, source_msg_id, body.text
+        scheduler.send_manual_compose, source_msg_id, body.text, body.final_text, body.target_lang
     )
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "compose failed"))
@@ -1357,30 +1369,67 @@ async def ma_clients(user: dict = Depends(verify_init_data_dep)) -> dict[str, An
     ]}
 
 
+_CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁ]")
+
+
 @router.post("/threads/{thread_id}/compose-preview")
 async def ma_compose_preview(thread_id: str, body: ComposeBody,
                              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Предпросмотр перевода ответа: RU → язык клиента + обратный перевод RU."""
+    """Предпросмотр перевода ответа: RU → язык клиента + обратный перевод RU.
+
+    Это ЕДИНСТВЕННОЕ место, где происходит перевод — /compose (отправка) больше не
+    переводит повторно, а берёт итоговый (возможно отредактированный оператором здесь)
+    текст как есть. См. инцидент 2026-07-02: оператор напечатал ответ сразу на немецком
+    без директивы «на немецком: ...»; бэкенд слепо считал текст русским (translate_only
+    без source_lang жёстко подставляет «русского» в промпт) и получил на выходе русский
+    текст, который ушёл клиенту. Защита ниже: если в тексте оператора вообще нет
+    кириллицы — это не может быть русский, перевод не выполняется, текст идёт как есть.
+    """
     from fastapi import HTTPException
     import asyncio
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
     client_lang = "de"
+    ad_ctx = ""
     for m in reversed(history):
         try:
             if m["direction"] == "in" and m["client_lang"]:
                 client_lang = m["client_lang"]
+                ad_ctx = m["ad_title"] or ""
                 break
         except (KeyError, IndexError):
             continue
-    tr = await asyncio.to_thread(claude.translate_only, body.text,
-                                 target_lang=client_lang, source_lang="ru")
-    translated = tr.get("translation", "") if isinstance(tr, dict) else ""
-    back = await asyncio.to_thread(claude.translate_only, translated,
-                                   target_lang="ru", source_lang=client_lang)
-    back_ru = back.get("translation", "") if isinstance(back, dict) else ""
-    return {"translated": translated, "back_ru": back_ru, "target_lang": client_lang}
+
+    override_lang, ru_text = claude.detect_lang_override(body.text)
+    target_lang = override_lang or client_lang
+
+    note = None
+    if target_lang == "ru":
+        translated = ru_text
+    elif not _CYRILLIC_RE.search(ru_text):
+        # Текст не содержит кириллицы — оператор явно печатал не по-русски.
+        # НЕ отдаём его переводчику как "русский" (см. докстрока выше) — шлём как есть.
+        translated = ru_text
+        note = (
+            f"В тексте нет кириллицы — похоже, он уже не на русском. "
+            f"Перевод НЕ выполнялся, текст будет отправлен как есть. Проверьте, что это {target_lang.upper()}."
+        )
+    else:
+        tr = await asyncio.to_thread(claude.translate_only, ru_text,
+                                     target_lang=target_lang, source_lang="ru", context=ad_ctx)
+        translated = tr.get("translation", "") if isinstance(tr, dict) else ""
+
+    if target_lang == "ru":
+        back_ru = translated
+    else:
+        back = await asyncio.to_thread(claude.translate_only, translated,
+                                       target_lang="ru", source_lang=target_lang)
+        back_ru = back.get("translation", "") if isinstance(back, dict) else ""
+    result = {"translated": translated, "back_ru": back_ru, "target_lang": target_lang, "ru_text": ru_text}
+    if note:
+        result["note"] = note
+    return result
 
 
 # ============================================================

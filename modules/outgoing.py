@@ -3,6 +3,11 @@
 #   drain_deferred_thread, drain_all_deferred
 #   _send_reply, send_one, send_approved_replies
 #   send_followup_ping, send_manual_compose
+#
+# send_manual_compose НЕ переводит текст — перевод и обязательное подтверждение
+# оператором происходят на шаге /compose-preview (web/api_ma.py). Это намеренно:
+# см. инцидент 2026-07-02 — оператор написал ответ на немецком без предпросмотра,
+# бэкенд "перевёл" его вслепую и результат ушёл клиенту на русском.
 
 import json
 import logging
@@ -383,12 +388,16 @@ def send_followup_ping(out_message_id: int) -> dict[str, Any]:
     return result
 
 
-def send_manual_compose(source_msg_id: int, operator_text: str) -> dict[str, Any]:
+def send_manual_compose(source_msg_id: int, ru_text: str, final_text: str, target_lang: str) -> dict[str, Any]:
     """Operator-initiated сообщение клиенту (compose-режим из thread-detail карточки).
 
     source_msg_id: id любой row в нужном треде (берём оттуда thread_id, аккаунт).
-    operator_text: что написал оператор. Если на русском — переводим на client_lang.
-                   Поддерживается директива «на немецком: ...» / «in english: ...».
+    ru_text: исходный текст оператора (что он напечатал, для записи/истории).
+    final_text: текст, который РЕАЛЬНО уйдёт клиенту — уже переведённый (или как есть,
+                если target_lang == ru) и, возможно, вручную отредактированный оператором
+                в окне проверки. НЕ переводим здесь повторно — перевод и его подтверждение
+                уже произошли на шаге /compose-preview, это финальная, подтверждённая версия.
+    target_lang: язык final_text (ISO-код) — как определено на шаге preview.
 
     Шлётся как SMTP reply на ПОСЛЕДНЕЕ incoming-сообщение клиента в треде
     (для Gmail-thread continuity). Создаётся row с direction='out', status sent/sent_debug.
@@ -410,29 +419,9 @@ def send_manual_compose(source_msg_id: int, operator_text: str) -> dict[str, Any
     if not account:
         return {"kind": "error", "message": "Аккаунт удалён"}
 
-    # Распознаём директиву языка
-    override_lang, ru_text = claude.detect_lang_override(operator_text)
     client_lang = (
         last_in["client_lang"] or src["client_lang"] or "de"
     )
-    target_lang = override_lang or client_lang
-
-    # Если target == ru — без перевода
-    if target_lang == "ru":
-        translated = ru_text
-        cost = 0.0
-        in_t = out_t = 0
-    else:
-        try:
-            ad_ctx = (last_in["ad_title"] if last_in else None) or src["ad_title"] or ""
-            r = claude.translate_only(ru_text, target_lang=target_lang, context=ad_ctx)
-            translated = r["translation"]
-            cost = r["cost_usd"]
-            in_t = r["tokens_in"]
-            out_t = r["tokens_out"]
-        except Exception as e:
-            logger.exception("send_manual_compose: translate упал")
-            return {"kind": "error", "message": f"перевод упал: {e}"}
 
     # Создаём out-row с status='approved' → передаём в _send_reply
     new_id = db.add_message(
@@ -448,12 +437,12 @@ def send_manual_compose(source_msg_id: int, operator_text: str) -> dict[str, Any
         buyer_display_name=_row_get(last_in, "buyer_display_name"),
         email_subject=_row_get(last_in, "email_subject"),
         ru_answer=ru_text,
-        de_answer=translated,
+        de_answer=final_text,
         client_lang=client_lang,
         answer_lang=target_lang,
-        tokens_in=in_t,
-        tokens_out=out_t,
-        cost_usd=cost,
+        tokens_in=0,
+        tokens_out=0,
+        cost_usd=0.0,
         status="approved",
     )
     new_row = db.get_message(new_id)
