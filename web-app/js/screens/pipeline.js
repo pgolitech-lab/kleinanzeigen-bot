@@ -208,18 +208,19 @@ function renderWith(mount, data) {
     const countLine = el(`<div class="text-muted small text-center sel-count mb-2">Ничего не выбрано</div>`);
     const btns = el(`<div class="d-flex gap-2 justify-content-center flex-wrap"></div>`);
     const actions = [
-      ["pin",   "📌 Закрепить",   "btn-outline-primary"],
-      ["unpin", "📌 Открепить",   "btn-outline-secondary"],
-      ["read",  "✉️ Прочитано",   "btn-outline-success"],
-      ["unread","🔔 Непрочитано", "btn-outline-warning"],
-      ["close", "🗑 Убрать",      "btn-danger"],
+      ["pin",   "📌 Закрепить",   "btn-outline-primary",   null],
+      ["unpin", "📌 Открепить",   "btn-outline-secondary", null],
+      ["read",  "✉️ Прочитано",   "btn-outline-success",   null],
+      ["unread","🔔 Непрочитано", "btn-outline-warning",   null],
+      ["close", "🗑 Убрать",      "btn-danger",            true],
     ];
-    actions.forEach(([action, label, cls]) => {
+    actions.forEach(([action, label, cls, needConfirm]) => {
       const btn = el(`<button class="btn btn-sm ${cls}" data-action="${action}"></button>`);
       btn.textContent = label;
       btn.disabled = true;
       btn.addEventListener("click", async () => {
         if (!sel.ids.size) return;
+        if (needConfirm && !confirm(`Убрать ${sel.ids.size} треда(ов) из входящих?`)) return;
         btn.disabled = true;
         try {
           await api("/api/ma/threads/bulk-action", {
