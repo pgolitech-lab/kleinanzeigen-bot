@@ -35,6 +35,7 @@ def client():
         msched.send_manual_compose.return_value = {"kind": "ok", "message_id": 99}
         # Реалистичное поведение detect_lang_override по умолчанию: директивы нет.
         mclaude.detect_lang_override.side_effect = lambda text: (None, text)
+        mclaude.is_empty_directive.return_value = False
         # db.get_conn() context manager returning a MagicMock conn whose
         # execute(...).fetchall() yields an empty list (no pending drafts to skip).
         conn_cm = MagicMock()
@@ -184,6 +185,18 @@ def test_compose_preview_non_cyrillic_input_skips_translation(client):
     mclaude.translate_only.assert_called_once_with(
         german_text, target_lang="ru", source_lang="de",
     )
+
+
+def test_compose_preview_empty_directive_returns_400(client):
+    """«на немецком:» без текста после двоеточия — понятная ошибка, а не запрос к LLM."""
+    c, mdb, msched, mclaude = client
+    mclaude.is_empty_directive.return_value = True
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/threads/abc/compose-preview",
+                 json={"text": "на немецком:"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 400
+    mclaude.translate_only.assert_not_called()
 
 
 def test_compose_preview_respects_language_override_directive(client):

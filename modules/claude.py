@@ -101,6 +101,27 @@ def detect_lang_override(operator_text: str) -> tuple[Optional[str], str]:
     return None, text
 
 
+def is_empty_directive(operator_text: str) -> bool:
+    """True если оператор набрал языковую директиву («на немецком:», «in english:»)
+    и не дописал само сообщение после неё.
+
+    detect_lang_override() в этом случае молча игнорирует директиву и возвращает
+    исходный текст целиком («на немецком:») — что затем уходит в переводчик как
+    обычное сообщение и провоцирует LLM на бессмысленный ответ (см. живую проверку
+    2026-07-02). Здесь — явная проверка ДО перевода, чтобы вернуть понятную ошибку.
+    """
+    text = operator_text or ""
+    for p in _LANG_DIRECTIVE_PATTERNS:
+        m = p.match(text)
+        if not m:
+            continue
+        if m.group(1).lower() not in _LANG_NAME_TO_CODE:
+            continue
+        if not (m.group(2) or "").strip():
+            return True
+    return False
+
+
 def _build_user_message(
     de_client_text: str,
     ad_title: str = "",

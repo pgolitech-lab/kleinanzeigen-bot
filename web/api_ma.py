@@ -1387,6 +1387,8 @@ async def ma_compose_preview(thread_id: str, body: ComposeBody,
     """
     from fastapi import HTTPException
     import asyncio
+    if claude.is_empty_directive(body.text):
+        raise HTTPException(400, "Указан язык («на X:»), но само сообщение не дописано")
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
