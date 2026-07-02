@@ -90,6 +90,46 @@ def is_thread_waiting(gmail_thread_id: str) -> bool:
     return bool(row)
 
 
+# --- THREAD FLAGS ---
+
+def get_thread_flags(gmail_thread_id: str):
+    """Получить флаги треда (is_pinned, operator_unread). None если строки нет."""
+    if not gmail_thread_id:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM thread_flags WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        ).fetchone()
+
+
+def set_thread_flags(
+    gmail_thread_id: str,
+    *,
+    is_pinned=None,
+    operator_unread=None,
+) -> None:
+    """Upsert флаги треда. Передавай только те поля, что нужно изменить."""
+    if not gmail_thread_id:
+        return
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO thread_flags (gmail_thread_id, updated_at) VALUES (?, ?)",
+            (gmail_thread_id, now),
+        )
+        if is_pinned is not None:
+            conn.execute(
+                "UPDATE thread_flags SET is_pinned=?, updated_at=? WHERE gmail_thread_id=?",
+                (is_pinned, now, gmail_thread_id),
+            )
+        if operator_unread is not None:
+            conn.execute(
+                "UPDATE thread_flags SET operator_unread=?, updated_at=? WHERE gmail_thread_id=?",
+                (operator_unread, now, gmail_thread_id),
+            )
+
+
 # --- PROCESSED MESSAGES (orphan-recovery support) ---
 
 def mark_processed(
@@ -478,6 +518,12 @@ def pipeline_threads() -> list[sqlite3.Row]:
                 AND m2.direction = 'in'
           )
         GROUP BY m.gmail_thread_id  -- в случае tie по created_at оставит одну
+    ),
+    flags AS (
+        SELECT gmail_thread_id,
+               COALESCE(is_pinned, 0)       AS is_pinned,
+               COALESCE(operator_unread, 0) AS operator_unread
+          FROM thread_flags
     )
     SELECT li.*,
            le.last_event_at,
@@ -487,10 +533,13 @@ def pipeline_threads() -> list[sqlite3.Row]:
            COALESCE(c.pending_drafts_count, 0)   AS pending_drafts_count,
            CASE WHEN COALESCE(c.any_sent_count, 0) > 0 THEN 1 ELSE 0 END   AS has_any_sent,
            CASE WHEN COALESCE(c.real_sent_count, 0) > 0 THEN 1 ELSE 0 END  AS has_real_reply,
-           CASE WHEN COALESCE(c.pending_drafts_count, 0) > 0 THEN 1 ELSE 0 END AS has_pending_draft
+           CASE WHEN COALESCE(c.pending_drafts_count, 0) > 0 THEN 1 ELSE 0 END AS has_pending_draft,
+           COALESCE(f.is_pinned, 0)       AS is_pinned,
+           COALESCE(f.operator_unread, 0) AS operator_unread
     FROM last_in li
     LEFT JOIN counts c ON c.gmail_thread_id = li.gmail_thread_id
     LEFT JOIN last_event le ON le.gmail_thread_id = li.gmail_thread_id
+    LEFT JOIN flags f ON f.gmail_thread_id = li.gmail_thread_id
     WHERE (COALESCE(c.any_sent_count, 0) > 0
            OR COALESCE(c.pending_drafts_count, 0) > 0
            OR li.status IN ('pending', 'new', 'edited', 'approved'))

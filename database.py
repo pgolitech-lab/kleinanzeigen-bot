@@ -364,6 +364,16 @@ def init_db() -> None:
             )
         """)
 
+        # thread_flags — операторские флаги тредов: закрепить, непрочитано.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS thread_flags (
+                gmail_thread_id TEXT PRIMARY KEY,
+                is_pinned       INTEGER NOT NULL DEFAULT 0,
+                operator_unread INTEGER NOT NULL DEFAULT 0,
+                updated_at      TEXT    NOT NULL
+            )
+        """)
+
 
 # --- ACCOUNTS ---
 
@@ -731,6 +741,10 @@ from modules.db_threads import (  # noqa: F401
     list_threads_for_client,
     pipeline_threads,
     list_threads,
+    get_client_profile,
+    upsert_client_profile,
+    get_thread_flags,
+    set_thread_flags,
 )
 
 # re-export sales-функций (перенесены в modules/db_sales.py)

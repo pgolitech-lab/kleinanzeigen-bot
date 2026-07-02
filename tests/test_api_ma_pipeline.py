@@ -56,7 +56,7 @@ def test_pipeline_empty_returns_empty_sections(client):
     res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
     body = res.json()
-    assert body == {"red": [], "green": [], "accounts": []}
+    assert body == {"pinned": [], "red": [], "green": [], "accounts": []}
 
 
 def test_pipeline_splits_by_last_event_kind(client):
@@ -126,3 +126,57 @@ def test_pipeline_rejects_bad_hash(client):
         headers={"X-Telegram-Init-Data": "user=%7B%22id%22%3A1%7D&auth_date=99&hash=fake"},
     )
     assert res.status_code == 401
+
+
+def _row_with_flags(**overrides):
+    """Как _row(), но включает is_pinned и operator_unread."""
+    defaults = {
+        "id": 1,
+        "gmail_thread_id": "thread_abc",
+        "ad_title": "Sitzbank",
+        "ad_price": "1500€",
+        "ad_url": None,
+        "buyer_display_name": "Osman",
+        "deal_brief_json": None,
+        "last_event_at": "2026-05-10T10:00:00",
+        "last_event_kind": "in",
+        "pending_drafts_count": 0,
+        "any_sent_count": 1,
+        "real_sent_count": 1,
+        "is_pinned": 0,
+        "operator_unread": 0,
+    }
+    defaults.update(overrides)
+    row = MagicMock()
+    row.__getitem__.side_effect = defaults.__getitem__
+    row.keys.return_value = list(defaults.keys())
+    return row
+
+
+def test_pipeline_includes_is_pinned_and_operator_unread(client):
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [
+        _row_with_flags(gmail_thread_id="t1", is_pinned=0, operator_unread=1),
+    ]
+    init = make_init_data(TEST_USER)
+    res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    item = res.json()["red"][0]
+    assert item["is_pinned"] is False
+    assert item["operator_unread"] is True
+
+
+def test_pipeline_pinned_thread_goes_to_pinned_section(client):
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [
+        _row_with_flags(gmail_thread_id="t1", is_pinned=1, last_event_kind="in"),
+        _row_with_flags(gmail_thread_id="t2", is_pinned=0, last_event_kind="in"),
+    ]
+    init = make_init_data(TEST_USER)
+    res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
+    body = res.json()
+    assert "pinned" in body
+    assert len(body["pinned"]) == 1
+    assert body["pinned"][0]["thread_id"] == "t1"
+    assert len(body["red"]) == 1
+    assert body["red"][0]["thread_id"] == "t2"

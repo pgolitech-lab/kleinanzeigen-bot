@@ -1,6 +1,6 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260624-024500";
+import * as pipeline from "./screens/pipeline.js?v=20260702-000000";
 import * as thread from "./screens/thread.js?v=20260624-024500";
 import * as client from "./screens/client.js?v=20260625-1";
 import * as settings from "./screens/settings.js?v=20260624-024500";

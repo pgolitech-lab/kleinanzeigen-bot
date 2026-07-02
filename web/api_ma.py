@@ -62,6 +62,8 @@ def _row_to_pipeline_item(row: Any, autopilot_row: Any) -> dict[str, Any]:
         "is_autopilot": is_autopilot,
         "account_id": row["account_id"] if "account_id" in row.keys() else None,
         "ru_client": row["ru_client"] if "ru_client" in row.keys() else None,
+        "is_pinned": bool(row["is_pinned"]) if "is_pinned" in row.keys() else False,
+        "operator_unread": bool(row["operator_unread"]) if "operator_unread" in row.keys() else False,
     }
 
 
@@ -72,20 +74,24 @@ async def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, l
     Сортировка внутри секции — DESC по last_event_at (новые сверху).
     """
     rows = db.pipeline_threads()
+    pinned: list[dict[str, Any]] = []
     red: list[dict[str, Any]] = []
     green: list[dict[str, Any]] = []
     for row in rows:
         thread_id = row["gmail_thread_id"]
         autopilot_row = db.get_thread_autopilot(thread_id)
         item = _row_to_pipeline_item(row, autopilot_row)
-        if item["last_event_kind"] == "in":
+        if item["is_pinned"]:
+            pinned.append(item)
+        elif item["last_event_kind"] == "in":
             red.append(item)
         else:
             green.append(item)
+    pinned.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
     red.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
     green.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
     accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
-    return {"red": red, "green": green, "accounts": accounts}
+    return {"pinned": pinned, "red": red, "green": green, "accounts": accounts}
 
 
 from fastapi import HTTPException
@@ -149,6 +155,35 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
         "matches": [_related_match(r) for r in related_matches],
     }
     return {"header": header, "events": events, "related": related}
+
+
+class BulkActionBody(BaseModel):
+    thread_ids: list[str] = Field(..., min_length=1)
+    action: str  # "pin" | "unpin" | "read" | "unread" | "close"
+
+
+@router.post("/threads/bulk-action")
+async def ma_bulk_action(
+    body: BulkActionBody,
+    user: dict = Depends(verify_init_data_dep),
+) -> dict[str, Any]:
+    """Bulk-действия над несколькими тредами."""
+    _ALLOWED = {"pin", "unpin", "read", "unread", "close"}
+    if body.action not in _ALLOWED:
+        raise HTTPException(400, f"unknown action: {body.action!r}")
+    actor = user.get("username") or str(user.get("id", ""))
+    for thread_id in body.thread_ids:
+        if body.action == "close":
+            db.close_thread(thread_id, closed_by=actor)
+        elif body.action == "pin":
+            db.set_thread_flags(thread_id, is_pinned=1)
+        elif body.action == "unpin":
+            db.set_thread_flags(thread_id, is_pinned=0)
+        elif body.action == "read":
+            db.set_thread_flags(thread_id, operator_unread=0)
+        elif body.action == "unread":
+            db.set_thread_flags(thread_id, operator_unread=1)
+    return {"ok": True, "affected": len(body.thread_ids)}
 
 
 @router.get("/threads/{thread_id}")
@@ -544,12 +579,14 @@ async def ma_edit_ru(msg_id: int, body: EditTextBody,
 
     import asyncio
     target_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
-    de_text = await asyncio.to_thread(
-        claude.translate_only, body.text, "ru", target_lang
+    de_res = await asyncio.to_thread(
+        claude.translate_only, body.text, target_lang=target_lang, source_lang="ru"
     )
-    ru_back = await asyncio.to_thread(
-        claude.translate_only, de_text, target_lang, "ru"
+    de_text = de_res.get("translation", "") if isinstance(de_res, dict) else str(de_res)
+    ru_res = await asyncio.to_thread(
+        claude.translate_only, de_text, target_lang="ru", source_lang=target_lang
     )
+    ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
     db.update_message(msg_id, ru_answer=body.text, de_answer=de_text,
                       ru_translation=ru_back, status="edited")
     telegram_bot.broadcast_after_external_action(msg_id)
@@ -572,9 +609,10 @@ async def ma_edit_de(msg_id: int, body: EditTextBody,
 
     import asyncio
     source_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
-    ru_back = await asyncio.to_thread(
-        claude.translate_only, body.text, source_lang, "ru"
+    ru_res = await asyncio.to_thread(
+        claude.translate_only, body.text, target_lang="ru", source_lang=source_lang
     )
+    ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
     db.update_message(msg_id, de_answer=body.text, ru_translation=ru_back,
                       status="edited")
     telegram_bot.broadcast_after_external_action(msg_id)
