@@ -1,7 +1,7 @@
 // Action grid — sticky-bottom компонент с inline confirm state machine.
 
-import { api } from "../api.js?v=20260702-000003";
-import { el } from "../utils.js?v=20260702-000003";
+import { api } from "../api.js?v=20260704-203337";
+import { el } from "../utils.js?v=20260704-203337";
 
 const CONFIRM_TIMEOUT_MS = 5000;
 
