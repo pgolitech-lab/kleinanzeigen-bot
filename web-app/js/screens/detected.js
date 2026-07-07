@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260704-203937";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260704-203937";
+import { api } from "../api.js?v=20260707-044632";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260707-044632";
 
 function eur(n) {
   if (n == null) return "—";

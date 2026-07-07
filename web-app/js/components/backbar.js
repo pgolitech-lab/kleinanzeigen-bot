@@ -1,7 +1,7 @@
 // Централизованная in-app кнопка «← Назад» (sticky сверху). Гарантирует back
 // на КАЖДОМ deep-экране, не полагаясь на нативную Telegram BackButton.
 // Router вызывает showBack(handler) на не-root экранах и hideBack() на табах.
-import { el } from "../utils.js?v=20260704-203937";
+import { el } from "../utils.js?v=20260707-044632";
 
 let _handler = null;
 
