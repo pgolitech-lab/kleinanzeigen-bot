@@ -1,6 +1,6 @@
 // Нижний таб-бар (как в нормальном приложении). Монтируется один раз в body,
 // подсвечивает активную вкладку по location.hash.
-import { el } from "../utils.js?v=20260710-050902";
+import { el } from "../utils.js?v=20260711-082129";
 
 const TABS = [
   { label: "📥 Входящие", hash: "#/pipeline", match: /^#\/(pipeline|thread|review)/ },

@@ -1,6 +1,6 @@
 // 📥 Входящие — единый инбокс всех аккаунтов.
-import { api } from "../api.js?v=20260710-050902";
-import { el, berlinTime, setLoading, setError, accountBadge } from "../utils.js?v=20260710-050902";
+import { api } from "../api.js?v=20260711-082129";
+import { el, berlinTime, setLoading, setError, accountBadge } from "../utils.js?v=20260711-082129";
 
 const state = { account: "", status: "all" };
 const sel = { active: false, ids: new Set() };
