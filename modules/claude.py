@@ -454,7 +454,12 @@ def generate_autopilot_reply(
         messages=[{"role": "user", "content": full_user}],
     )
 
-    text = next((b.text for b in response.content if b.type == "text"), "")
+    # web_search — server-side tool: response.content может быть
+    # [text(нарратив), server_tool_use, web_search_tool_result, text(финальный JSON)].
+    # Берём ПОСЛЕДНИЙ text-блок (это JSON по схеме), а не первый — первый может
+    # быть нарративом модели ("Сейчас проверю…") и ломать json.loads.
+    _texts = [b.text for b in response.content if b.type == "text"]
+    text = _texts[-1] if _texts else ""
     if not text:
         raise RuntimeError("Claude вернул пустой ответ (autopilot)")
 
@@ -467,6 +472,12 @@ def generate_autopilot_reply(
         data = json.loads(text)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Autopilot reply невалидный JSON: {e}\n{text[:500]}")
+
+    # Автопилот отправляет письмо БЕЗ ревью оператора — валидируем обязательные
+    # поля, чтобы не уйти пустой/битый ответ клиенту (как в generate_reply).
+    for key in ("client_lang", "ru_client", "ru_answer", "client_answer"):
+        if not isinstance(data.get(key), str) or not data[key].strip():
+            raise RuntimeError(f"В autopilot-ответе Claude отсутствует поле '{key}'")
 
     in_t, out_t, cost = _calc_cost(config.claude_model(), response.usage)
     deal_brief = {

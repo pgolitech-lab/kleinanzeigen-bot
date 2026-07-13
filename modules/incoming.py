@@ -418,6 +418,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 "Пропускаем не-Kleinanzeigen письмо: from=%s, subj=%r",
                 from_email, subject[:60],
             )
+            # Помечаем seen + журналим, иначе письмо перечитывается и заново
+            # прогоняется через платный Haiku-classifier на КАЖДОМ поле навсегда.
+            _skip_email(account, email, "skipped_filter")
             return
 
     # Поиск URL: text → html. Если нет — конструируем из ID.

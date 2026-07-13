@@ -8,6 +8,7 @@
 """
 
 import logging
+import threading
 from collections import deque
 from datetime import datetime
 from typing import Optional
@@ -15,20 +16,27 @@ from typing import Optional
 
 _BUFFER: deque[dict] = deque(maxlen=2000)
 _counter = 0
+# Логи пишутся из многих потоков (scheduler jobs, IMAP, uvicorn), а /api/logs
+# читает буфер конкурентно. Без блокировки deque кидает
+# "RuntimeError: deque mutated during iteration". Один лок защищает и append,
+# и снапшот при чтении, и инкремент счётчика id.
+_LOCK = threading.Lock()
 
 
 class _RingBufferHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         global _counter
-        _counter += 1
         try:
-            _BUFFER.append({
-                "id": _counter,
+            entry = {
                 "ts": datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
                 "level": record.levelname,
                 "name": record.name,
                 "msg": self.format(record),
-            })
+            }
+            with _LOCK:
+                _counter += 1
+                entry["id"] = _counter
+                _BUFFER.append(entry)
         except Exception:
             pass
 
@@ -45,9 +53,11 @@ def install() -> None:
 
 def get_since(since_id: Optional[int] = None, limit: int = 500) -> list[dict]:
     """Вернуть записи с id > since_id. Если since_id=None — последние limit штук."""
+    with _LOCK:
+        snapshot = list(_BUFFER)
     if since_id is None:
-        return list(_BUFFER)[-limit:]
-    return [r for r in _BUFFER if r["id"] > since_id][-limit:]
+        return snapshot[-limit:]
+    return [r for r in snapshot if r["id"] > since_id][-limit:]
 
 
 def last_id() -> int:
