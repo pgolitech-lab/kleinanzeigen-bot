@@ -50,7 +50,7 @@ log "найдены ошибки (sig=$SIG) — запускаю claude autofix"
 RUNLOG="$LOGDIR/$(date '+%Y%m%d-%H%M%S')-$SIG.log"
 
 # --- 3. Промпт с жёсткими рамками AGENTS.md ---
-PROMPT=$(cat <<'EOF)
+PROMPT=$(cat <<'EOF'
 Ты автономный дежурный по проду kleinanzeigen-bot (/home/pg/kleinanzeigen-bot).
 В логах journalctl -u kleinanzeigen-bot за последние ~35 минут найдены ошибки.
 Задача: разобраться в первопричине и починить, СОБЛЮДАЯ рамки AGENTS.md.
