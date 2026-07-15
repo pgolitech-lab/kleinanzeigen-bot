@@ -1,0 +1,13 @@
+[Unit]
+Description=Run LLM autofix log-scan every 30 minutes
+
+[Timer]
+# Первый прогон через 5 мин после загрузки (бот и туннель успевают подняться)
+OnBootSec=5min
+OnUnitActiveSec=30min
+# Если машина была выключена в момент планового запуска — догнать при следующей возможности
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

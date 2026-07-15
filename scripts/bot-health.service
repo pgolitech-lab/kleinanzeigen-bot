@@ -1,0 +1,9 @@
+[Unit]
+Description=Watchdog: keep kleinanzeigen-bot alive (service + /health), alert Telegram
+After=network-online.target kleinanzeigen-bot.service
+
+[Service]
+Type=oneshot
+User=pg
+WorkingDirectory=/home/pg/kleinanzeigen-bot
+ExecStart=/home/pg/kleinanzeigen-bot/scripts/bot_health.sh

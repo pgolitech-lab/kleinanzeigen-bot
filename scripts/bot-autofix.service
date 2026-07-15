@@ -1,0 +1,14 @@
+[Unit]
+Description=LLM autofix: scan bot logs every 30 min, fix code via claude headless, alert Telegram
+After=network-online.target kleinanzeigen-bot.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pg
+WorkingDirectory=/home/pg/kleinanzeigen-bot
+Environment=HOME=/home/pg
+Environment=PATH=/home/pg/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# claude-прогон внутри ограничен timeout 900; даём systemd запас, чтобы не убить его раньше
+TimeoutStartSec=1200
+ExecStart=/home/pg/kleinanzeigen-bot/scripts/bot_autofix.sh

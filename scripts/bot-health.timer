@@ -1,0 +1,10 @@
+[Unit]
+Description=Run bot-health watchdog every 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+RandomizedDelaySec=20
+
+[Install]
+WantedBy=timers.target
