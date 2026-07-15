@@ -139,6 +139,31 @@ def is_real_inquiry_subject(subject: str) -> bool:
     return any(p.search(subject) for p in INQUIRY_SUBJECT_PATTERNS)
 
 
+# Маркеры автоматических/системных писем Kleinanzeigen в ТЕЛЕ (не в subject).
+# Используются чтобы системка, залетевшая в активный тред, не прошла через
+# classifier-bypass follow-up'ов (Bug 7).
+SYSTEM_BODY_PATTERNS: list[re.Pattern] = [
+    re.compile(r'automatisch\s+(?:generierte?|erstellte?|versendete?|erzeugte?)\s+(?:E-?Mail|Nachricht)', re.IGNORECASE),
+    re.compile(r'automatisch\s+generiert', re.IGNORECASE),
+    re.compile(r'Diese\s+(?:E-?Mail|Nachricht)\s+wurde\s+automatisch', re.IGNORECASE),
+    re.compile(r'Bitte\s+(?:antworten\s+Sie\s+)?nicht\s+(?:direkt\s+)?auf\s+diese\s+E-?Mail', re.IGNORECASE),
+    re.compile(r'Antworten\s+Sie\s+nicht\s+auf\s+diese', re.IGNORECASE),
+    re.compile(r'\bno-?reply\b', re.IGNORECASE),
+]
+
+
+def is_system_message_body(body: str) -> bool:
+    """Похоже ли тело письма на автоматическое/системное сообщение Kleinanzeigen.
+
+    Дешёвая эвристика по маркерам («automatisch generierte E-Mail», «bitte nicht
+    auf diese E-Mail antworten»). Применяется в classifier-bypass follow-up'ов,
+    чтобы системка не прошла в Claude/оператора без проверки Haiku.
+    """
+    if not body:
+        return False
+    return any(p.search(body) for p in SYSTEM_BODY_PATTERNS)
+
+
 def clean_email_body(text: str) -> str:
     """Срезать шаблонные заголовки/футеры Kleinanzeigen + лишние отступы и пустые строки.
 

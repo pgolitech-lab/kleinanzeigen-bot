@@ -345,10 +345,16 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 "SELECT 1 FROM messages WHERE gmail_thread_id=? AND direction='in' LIMIT 1",
                 (inbound_thread_id,),
             ).fetchone()
-        if prior:
+        if prior and not parser.is_system_message_body(body):
             skip_classifier = True
             logger.info(
                 "Classifier bypass: thread %s уже имеет inquiry, follow-up принят без проверки",
+                inbound_thread_id,
+            )
+        elif prior:
+            logger.info(
+                "Classifier NOT bypassed для thread %s — тело похоже на системное "
+                "письмо, прогоняем Haiku несмотря на follow-up",
                 inbound_thread_id,
             )
 
