@@ -1,69 +1,58 @@
-// Дашборд-экран MA: сводка (pipeline-счётчики, сегодня, баланс, продажи)
-// + КЛИКАБЕЛЬНЫЙ список входящих (клик → переписка треда с историей).
-import { api } from "../api.js?v=20260715-183110";
-import { el, setLoading, setError } from "../utils.js?v=20260715-183110";
-import { threadCard } from "./pipeline.js?v=20260715-183110";
+// 📊 Обзор (редизайн 2026-07-15): KPI-плитки с моно-цифрами + живой инбокс
+// (красная/зелёная секции, карточки из pipeline). Клик по плитке → раздел.
+import { api } from "../api.js?v=20260715-2";
+import { el, setLoading, setError } from "../utils.js?v=20260715-2";
+import { threadCard } from "./pipeline.js?v=20260715-2";
+
+function kpi(value, label, colorCls, href) {
+  const tag = href ? "a" : "div";
+  const t = el(`<${tag} class="kpi"><div class="kv"></div><div class="kl"></div></${tag}>`);
+  if (href) t.href = href;
+  if (colorCls) t.classList.add(colorCls);
+  t.querySelector(".kv").textContent = String(value);
+  t.querySelector(".kl").textContent = label;
+  return t;
+}
 
 function statsBlock(d) {
   const p = d.pipeline || {}, t = d.today || {}, b = d.api_balance || {};
   const s7 = d.sales_7d || {}, s30 = d.sales_30d || {};
-  const wrap = el(`<div class="d-flex flex-column gap-2"></div>`);
+  const wrap = el(`<div></div>`);
 
-  const pc = el(`
-    <a href="#/pipeline" class="card text-decoration-none text-reset" role="button"><div class="card-body p-3">
-      <div class="row text-center g-2">
-        <div class="col"><div class="fs-4 fw-bold red">0</div><div class="small text-muted">🔴 ждут нас</div></div>
-        <div class="col"><div class="fs-4 fw-bold green">0</div><div class="small text-muted">🟢 ждём</div></div>
-        <div class="col"><div class="fs-4 fw-bold drafts">0</div><div class="small text-muted">📝 драфты</div></div>
-        <div class="col"><div class="fs-4 fw-bold ap">0</div><div class="small text-muted">🤖 автопилот</div></div>
-      </div>
-    </div></a>`);
-  pc.querySelector(".red").textContent = p.red ?? 0;
-  pc.querySelector(".green").textContent = p.green ?? 0;
-  pc.querySelector(".drafts").textContent = p.drafts ?? 0;
-  pc.querySelector(".ap").textContent = p.autopilot_active ?? 0;
-  wrap.appendChild(pc);
+  const g1 = el(`<div class="kgrid"></div>`);
+  g1.appendChild(kpi(p.red ?? 0, "ждут нас", "k-red", "#/pipeline"));
+  g1.appendChild(kpi(p.green ?? 0, "ждём клиента", "k-grn", "#/pipeline"));
+  g1.appendChild(kpi(p.drafts ?? 0, "драфты", "k-blu", "#/pipeline"));
+  g1.appendChild(kpi(p.autopilot_active ?? 0, "автопилот", "k-amb", "#/pipeline"));
+  wrap.appendChild(g1);
 
-  const tc = el(`
-    <div class="card"><div class="card-body p-2">
-      <div class="d-flex justify-content-around align-items-center">
-        <div class="text-center"><span class="fw-bold tnew">0</span> <span class="small text-muted">🆕 сегодня</span></div>
-        <div class="text-center"><span class="fw-bold tsent">0</span> <span class="small text-muted">✉️ отпр.</span></div>
-        <div class="text-center"><span class="fw-bold tsold">0</span> <span class="small text-muted">💰 продано</span></div>
-      </div>
-    </div></div>`);
-  tc.querySelector(".tnew").textContent = t.new ?? 0;
-  tc.querySelector(".tsent").textContent = t.sent ?? 0;
-  tc.querySelector(".tsold").textContent = t.sold ?? 0;
-  wrap.appendChild(tc);
+  wrap.appendChild(el(`<div class="sec">Сегодня</div>`));
+  const g2 = el(`<div class="kgrid k3"></div>`);
+  g2.appendChild(kpi(t.new ?? 0, "новых"));
+  g2.appendChild(kpi(t.sent ?? 0, "отправлено"));
+  g2.appendChild(kpi(t.sold ?? 0, "продано", "k-grn"));
+  wrap.appendChild(g2);
 
-  const row = el(`
-    <div class="row g-2">
-      <div class="col-6"><div class="card h-100 balcard"><div class="card-body p-2 text-center">
-        <div class="small text-muted">💵 баланс API</div><div class="fw-bold balv"></div></div></div></div>
-      <div class="col-6"><a href="#/sales" class="card h-100 text-decoration-none text-reset" role="button"><div class="card-body p-2 text-center">
-        <div class="small text-muted">📈 продажи 7/30д</div><div class="fw-bold salesv"></div></div></a></div>
-    </div>`);
-  let balText = "—";
+  wrap.appendChild(el(`<div class="sec">Ресурсы</div>`));
+  const g3 = el(`<div class="kgrid"></div>`);
+  let balText = "—", balLabel = "баланс API", balCls = "";
   if (b.remaining_usd != null) {
-    balText = `~$${b.remaining_usd}`;
-    if (b.days_remaining != null && b.days_remaining < 3650) balText += ` (${Math.round(b.days_remaining)}д)`;
-    const cls = b.remaining_usd < 2 ? "border-danger" : (b.remaining_usd < 10 ? "border-warning" : "border-success");
-    row.querySelector(".balcard").classList.add(cls);
+    balText = `$${b.remaining_usd}`;
+    if (b.days_remaining != null && b.days_remaining < 3650) balLabel = `баланс API · ~${Math.round(b.days_remaining)} дн`;
+    balCls = b.remaining_usd < 2 ? "k-red" : (b.remaining_usd < 10 ? "k-amb" : "k-grn");
   }
-  row.querySelector(".balv").textContent = balText;
-  row.querySelector(".salesv").textContent = `${s7.count ?? 0}шт · ${s30.count ?? 0}шт`;
-  wrap.appendChild(row);
+  g3.appendChild(kpi(balText, balLabel, balCls, "#/settings"));
+  g3.appendChild(kpi(`${s7.count ?? 0} / ${s30.count ?? 0}`, "продажи 7д / 30д", "", "#/sales"));
+  wrap.appendChild(g3);
+
   return wrap;
 }
 
-function requestsBlock(color, title, threads, accountsById) {
-  const sec = el(`
-    <div class="mb-2">
-      <h6 class="text-muted small text-uppercase mb-1 sec-title"></h6>
-      <div class="list-group list-group-flush sec-list"></div>
-    </div>`);
-  sec.querySelector(".sec-title").textContent = `${color} ${title}: ${threads.length}`;
+function requestsBlock(title, cls, threads, accountsById) {
+  const sec = el(`<div><div class="sec sec-title"></div><div class="sec-list"></div></div>`);
+  const hdr = sec.querySelector(".sec-title");
+  hdr.classList.add(cls);
+  hdr.textContent = `${title} · ${threads.length}`;
   const list = sec.querySelector(".sec-list");
   if (!threads.length) {
     list.appendChild(el(`<div class="text-muted small fst-italic px-2 py-1">пусто</div>`));
@@ -83,24 +72,20 @@ export async function render(mount, params) {
   const accountsById = {};
   (pipe.accounts ?? []).forEach(a => { accountsById[a.id] = a; });
 
-  const root = el(`<div class="d-flex flex-column gap-3"></div>`);
+  const root = el(`<div></div>`);
+
   const head = el(`
-    <div class="d-flex justify-content-between align-items-center">
-      <h5 class="mb-0">📊 Обзор</h5>
-      <div class="d-flex gap-1">
-        <button class="btn btn-sm btn-outline-secondary refresh">↻</button>
-        <a class="btn btn-sm btn-outline-secondary" href="#/settings">⚙</a>
-      </div>
+    <div class="frow">
+      <button type="button" class="fch refresh">↻ Обновить</button>
+      <a class="fch" href="#/settings" style="text-decoration:none">⚙ Настройки</a>
     </div>`);
   head.querySelector(".refresh").addEventListener("click", () => render(mount, params));
   root.appendChild(head);
 
   root.appendChild(statsBlock(stats));
 
-  const reqs = el(`<div><div class="fw-semibold mb-2">📨 Входящие запросы</div></div>`);
-  reqs.appendChild(requestsBlock("🔴", "ждут нас", pipe.red ?? [], accountsById));
-  reqs.appendChild(requestsBlock("🟢", "ждём клиента", pipe.green ?? [], accountsById));
-  root.appendChild(reqs);
+  root.appendChild(requestsBlock("Ждут нас", "sec-red", pipe.red ?? [], accountsById));
+  root.appendChild(requestsBlock("Ждём клиента", "sec-grn", pipe.green ?? [], accountsById));
 
   mount.replaceChildren(root);
 }

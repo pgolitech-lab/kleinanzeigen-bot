@@ -1,26 +1,22 @@
 // 👥 Клиенты — база обращений (CRM). Список покупателей с агрегатами + поиск.
 // Клик → история клиента (#/client/<email> → все его переписки).
-import { api } from "../api.js?v=20260715-183110";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260715-183110";
+import { api } from "../api.js?v=20260715-2";
+import { el, berlinTime, setLoading, setError } from "../utils.js?v=20260715-2";
 
 function clientRow(c) {
   const row = el(`
-    <a class="list-group-item list-group-item-action py-2" role="button">
-      <div class="d-flex justify-content-between align-items-start">
-        <div class="flex-grow-1 me-2">
-          <div class="name fw-semibold"></div>
-          <div class="meta text-muted small mt-1"></div>
-        </div>
-        <div class="text-end small text-muted">
-          <div class="when"></div>
-        </div>
+    <a class="tcard">
+      <div class="tc-m">
+        <div class="tc-t"><b class="name"></b></div>
+        <div class="tc-sub meta"></div>
       </div>
+      <div class="tc-side"><time class="when"></time></div>
     </a>`);
   const name = c.display_name || c.email || "?";
   row.href = `#/client/${encodeURIComponent(c.email)}`;
-  row.querySelector(".name").textContent = `👤 ${name}`;
+  row.querySelector(".name").textContent = name;
   row.querySelector(".meta").textContent =
-    `${c.thread_count ?? 0} обращ. · ${c.ad_count ?? 0} товаров · ${c.msg_count ?? 0} сообщ.`;
+    `${c.email ?? ""} · ${c.thread_count ?? 0} обращ. · ${c.ad_count ?? 0} товаров · ${c.msg_count ?? 0} сообщ.`;
   row.querySelector(".when").textContent = berlinTime(c.last_at);
   return row;
 }
@@ -50,14 +46,11 @@ export async function render(mount, params) {
 
   const root = el(`
     <div>
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h5 class="mb-0">👥 Клиенты</h5>
-        <span class="text-muted small total"></span>
-      </div>
-      <input type="search" class="form-control form-control-sm mb-2 search" placeholder="🔎 Поиск по имени / email…">
-      <div class="list-group list-group-flush clist"></div>
+      <input type="search" class="form-control mb-2 search" placeholder="Поиск по имени / email…">
+      <div class="sec total"></div>
+      <div class="clist"></div>
     </div>`);
-  root.querySelector(".total").textContent = `всего: ${_all.length}`;
+  root.querySelector(".total").textContent = `Всего: ${_all.length}`;
   const listEl = root.querySelector(".clist");
   const search = root.querySelector(".search");
   search.addEventListener("input", () => applyFilter(listEl, search.value));

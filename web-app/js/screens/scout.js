@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260715-183110";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260715-183110";
-import { openLink } from "../tg.js?v=20260715-183110";
+import { api } from "../api.js?v=20260715-2";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260715-2";
+import { openLink } from "../tg.js?v=20260715-2";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -553,12 +553,11 @@ function renderShell(mount) {
   const ov = S.overview;
   const root = el(`
     <div>
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h5 class="mb-0">🔎 Разведка рынка</h5>
+      <div class="d-flex justify-content-end align-items-center mb-2">
         <span class="small">
           <span class="badge bg-secondary me-1 cc"></span>
           <span class="badge bg-secondary pc"></span>
-          <span class="badge bg-warning text-dark ms-1 uc" style="display:none"></span>
+          <span class="badge bg-warning ms-1 uc" style="display:none"></span>
         </span>
       </div>
       <div class="small text-muted mb-2 autostat"></div>

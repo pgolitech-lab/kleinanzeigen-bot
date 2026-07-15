@@ -50,8 +50,22 @@ export function accountColor(id) {
 }
 
 export function accountBadge(id, name) {
-  const b = el(`<span class="badge me-1 acct-badge"></span>`);
+  const b = el(`<span class="acct"></span>`);
   b.style.backgroundColor = accountColor(id);
   b.textContent = name ?? `acc${id}`;
   return b;
+}
+
+// Чип состояния: kind ∈ red|grn|amb|blu|mut (см. .chip в app.css)
+export function chip(kind, label) {
+  const c = el(`<span class="chip"></span>`);
+  c.classList.add(`c-${kind}`);
+  c.textContent = label;
+  return c;
+}
+
+// € с немецкой локалью; null → «—»
+export function eur(n) {
+  if (n == null) return "—";
+  return n.toLocaleString("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + " €";
 }

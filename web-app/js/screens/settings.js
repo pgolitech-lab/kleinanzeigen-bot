@@ -1,7 +1,7 @@
 // Settings screen — KV editor с per-field save.
 
-import { api } from "../api.js?v=20260715-183110";
-import { el, esc, setLoading, setError } from "../utils.js?v=20260715-183110";
+import { api } from "../api.js?v=20260715-2";
+import { el, esc, setLoading, setError } from "../utils.js?v=20260715-2";
 
 
 const FIELDS = [
@@ -124,9 +124,7 @@ export async function render(mount, params) {
     const data = await api("/api/ma/settings");
     const container = el(`
       <div>
-        <h5 class="mb-3">⚙ Настройки</h5>
         <div class="fields-list"></div>
-        <a class="btn btn-sm btn-outline-secondary mt-3" href="#/pipeline">↩ К pipeline</a>
       </div>
     `);
     const list = container.querySelector(".fields-list");

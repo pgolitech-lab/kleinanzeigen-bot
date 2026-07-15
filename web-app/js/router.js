@@ -1,31 +1,31 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260715-183110";
-import * as thread from "./screens/thread.js?v=20260715-183110";
-import * as client from "./screens/client.js?v=20260715-183110";
-import * as settings from "./screens/settings.js?v=20260715-183110";
-import * as review from "./screens/review.js?v=20260715-183110";
-import * as sales from "./screens/sales.js?v=20260715-183110";
-import * as detected from "./screens/detected.js?v=20260715-183110";
-import * as dashboard from "./screens/dashboard.js?v=20260715-183110";
-import * as clients from "./screens/clients.js?v=20260715-183110";
-import * as scout from "./screens/scout.js?v=20260715-183110";
-import { setError } from "./utils.js?v=20260715-183110";
-import { hideBack, showBack } from "./components/backbar.js?v=20260715-183110";
+import * as pipeline from "./screens/pipeline.js?v=20260715-2";
+import * as thread from "./screens/thread.js?v=20260715-2";
+import * as client from "./screens/client.js?v=20260715-2";
+import * as settings from "./screens/settings.js?v=20260715-2";
+import * as review from "./screens/review.js?v=20260715-2";
+import * as sales from "./screens/sales.js?v=20260715-2";
+import * as detected from "./screens/detected.js?v=20260715-2";
+import * as dashboard from "./screens/dashboard.js?v=20260715-2";
+import * as clients from "./screens/clients.js?v=20260715-2";
+import * as scout from "./screens/scout.js?v=20260715-2";
+import { setError } from "./utils.js?v=20260715-2";
+import { hideBack, showBack, setTitle } from "./components/backbar.js?v=20260715-2";
 
 const ROUTES = [
-  { pattern: /^#?\/?$/,                   screen: pipeline, params: () => ({}) },
-  { pattern: /^#\/pipeline\/?$/,          screen: pipeline, params: () => ({}) },
-  { pattern: /^#\/dashboard\/?$/,         screen: dashboard, params: () => ({}) },
-  { pattern: /^#\/clients\/?$/,          screen: clients, params: () => ({}) },
-  { pattern: /^#\/sales\/?$/,             screen: sales,    params: () => ({}) },
-  { pattern: /^#\/scout\/?$/,             screen: scout,    params: () => ({}) },
-  { pattern: /^#\/detected\/?$/,          screen: detected, params: () => ({}) },
-  { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }) },  // focused deep-link
-  { pattern: /^#\/thread\/([^/]+)\/?$/,         screen: thread, params: m => ({ thread_id: decodeURIComponent(m[1]) }) },
-  { pattern: /^#\/client\/(.+)$/,         screen: client, params: m => ({ email: decodeURIComponent(m[1]) }) },
-  { pattern: /^#\/settings\/?$/,          screen: settings, params: () => ({}) },
-  { pattern: /^#\/review\/(.+)$/,         screen: review, params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
+  { pattern: /^#?\/?$/,                   screen: pipeline, title: "Входящие", params: () => ({}) },
+  { pattern: /^#\/pipeline\/?$/,          screen: pipeline, title: "Входящие", params: () => ({}) },
+  { pattern: /^#\/dashboard\/?$/,         screen: dashboard, title: "Обзор", params: () => ({}) },
+  { pattern: /^#\/clients\/?$/,          screen: clients, title: "Клиенты", params: () => ({}) },
+  { pattern: /^#\/sales\/?$/,             screen: sales,    title: "Продажи", params: () => ({}) },
+  { pattern: /^#\/scout\/?$/,             screen: scout,    title: "Рынок", params: () => ({}) },
+  { pattern: /^#\/detected\/?$/,          screen: detected, title: "Проверка продаж", params: () => ({}) },
+  { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, title: "Переписка", params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }) },  // focused deep-link
+  { pattern: /^#\/thread\/([^/]+)\/?$/,         screen: thread, title: "Переписка", params: m => ({ thread_id: decodeURIComponent(m[1]) }) },
+  { pattern: /^#\/client\/(.+)$/,         screen: client, title: "Клиент", params: m => ({ email: decodeURIComponent(m[1]) }) },
+  { pattern: /^#\/settings\/?$/,          screen: settings, title: "Настройки", params: () => ({}) },
+  { pattern: /^#\/review\/(.+)$/,         screen: review, title: "Открываю…", params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
 ];
 
 function navigateBack() {
@@ -64,6 +64,7 @@ export function start(mount) {
         } else {
           showBack(navigateBack);
         }
+        setTitle(r.title);
         try {
           r.screen.render(mount, r.params(m));
         } catch (e) {

@@ -1,6 +1,9 @@
-// 📥 Входящие — единый инбокс всех аккаунтов.
-import { api } from "../api.js?v=20260715-183110";
-import { el, berlinTime, setLoading, setError, accountBadge } from "../utils.js?v=20260715-183110";
+// 📥 Входящие — единый инбокс всех аккаунтов (редизайн 2026-07-15).
+// Карточки с цветной полоской аккаунта, чипы состояний вместо эмодзи,
+// фильтры-чипы, тёмная bulk-панель. Логика API/поллинга без изменений.
+import { api } from "../api.js?v=20260715-2";
+import { el, berlinTime, setLoading, setError, accountColor, chip } from "../utils.js?v=20260715-2";
+import { confirmSheet } from "../components/sheet.js?v=20260715-2";
 
 const state = { account: "", status: "all" };
 const sel = { active: false, ids: new Set() };
@@ -29,10 +32,10 @@ function teardown() {
   if (_hashHandler) { window.removeEventListener("hashchange", _hashHandler); _hashHandler = null; }
 }
 
-function chip(label, active, onClick) {
-  const b = el(`<button class="btn btn-sm me-1 mb-1"></button>`);
+function filterChip(label, active, onClick) {
+  const b = el(`<button type="button" class="fch"></button>`);
   b.textContent = label;
-  b.classList.add(active ? "btn-primary" : "btn-outline-secondary");
+  if (active) b.classList.add("on");
   b.addEventListener("click", onClick);
   return b;
 }
@@ -48,25 +51,27 @@ function matchFilter(t, kind) {
 
 export function threadCard(thread, accountsById = {}, selMode = false) {
   const card = el(`
-    <div class="list-group-item list-group-item-action py-2" style="cursor:pointer">
-      <div class="d-flex justify-content-between align-items-start gap-2">
-        <div class="flex-grow-1 me-2 min-w-0">
-          <div class="title fw-semibold"></div>
-          <div class="meta text-muted small mt-1"></div>
-          <div class="ru-preview small mt-1"></div>
+    <article class="tcard">
+      <div class="tc-m">
+        <div class="tc-t">
+          <span class="acct-slot"></span>
+          <b class="title"></b>
+          <span class="price"></span>
         </div>
-        <div class="text-end small flex-shrink-0">
-          <div class="when text-muted"></div>
-          <div class="badges mt-1"></div>
-        </div>
+        <div class="tc-sub"></div>
       </div>
-    </div>
+      <div class="tc-side">
+        <time class="when"></time>
+        <div class="badges d-flex gap-1 flex-wrap justify-content-end"></div>
+      </div>
+    </article>
   `);
+  card.style.setProperty("--ac", accountColor(thread.account_id));
 
   if (selMode) {
     const chk = document.createElement("input");
     chk.type = "checkbox";
-    chk.className = "form-check-input flex-shrink-0 mt-1 me-2";
+    chk.className = "form-check-input flex-shrink-0 mt-1";
     chk.checked = sel.ids.has(thread.thread_id);
     // stop propagation so checkbox click doesn't also fire card click
     chk.addEventListener("click", e => e.stopPropagation());
@@ -75,7 +80,7 @@ export function threadCard(thread, accountsById = {}, selMode = false) {
       else sel.ids.delete(thread.thread_id);
       updateBulkBar();
     });
-    card.querySelector(".d-flex").prepend(chk);
+    card.prepend(chk);
     card.addEventListener("click", () => {
       chk.checked = !chk.checked;
       if (chk.checked) sel.ids.add(thread.thread_id);
@@ -88,20 +93,25 @@ export function threadCard(thread, accountsById = {}, selMode = false) {
     });
   }
 
-  const title = card.querySelector(".title");
-  if (thread.operator_unread) title.classList.add("fw-bold");
-  const acc = accountsById[thread.account_id];
-  if (acc) title.appendChild(accountBadge(thread.account_id, acc.name));
-  title.appendChild(document.createTextNode(
-    ` ${thread.ad_title ?? "(без названия)"} · ${thread.ad_price ?? "?"}`));
+  const titleEl = card.querySelector(".title");
+  titleEl.textContent = thread.ad_title ?? "(без названия)";
   if (thread.operator_unread) {
-    const dot = document.createElement("span");
-    dot.className = "ms-1 badge rounded-pill bg-primary";
-    dot.style.cssText = "width:8px;height:8px;padding:0;vertical-align:middle;display:inline-block";
-    title.appendChild(dot);
+    titleEl.style.fontWeight = "700";
+    titleEl.appendChild(el(`<span class="unread-dot"></span>`));
   }
 
-  card.querySelector(".meta").textContent = `👤 ${thread.buyer_display_name ?? "?"}`;
+  const acc = accountsById[thread.account_id];
+  const accSlot = card.querySelector(".acct-slot");
+  if (acc) {
+    const badge = el(`<span class="acct"></span>`);
+    badge.style.backgroundColor = accountColor(thread.account_id);
+    badge.textContent = acc.name;
+    accSlot.replaceWith(badge);
+  } else {
+    accSlot.remove();
+  }
+
+  card.querySelector(".price").textContent = thread.ad_price ?? "";
 
   let preview = (thread.ru_client ?? "").replace(/\s+/g, " ").trim();
   if (!preview && thread.deal_brief_json) {
@@ -112,19 +122,18 @@ export function threadCard(thread, accountsById = {}, selMode = false) {
     } catch (e) { /* skip */ }
   }
   if (preview.length > 110) preview = preview.slice(0, 110) + "…";
-  const ruEl = card.querySelector(".ru-preview");
-  if (preview) ruEl.textContent = `💬 ${preview}`; else ruEl.remove();
+  const sub = card.querySelector(".tc-sub");
+  sub.textContent = preview
+    ? `${thread.buyer_display_name ?? "?"} · ${preview}`
+    : (thread.buyer_display_name ?? "?");
 
   card.querySelector(".when").textContent = berlinTime(thread.last_event_at);
 
   const badges = card.querySelector(".badges");
-  if (thread.is_autopilot) {
-    badges.appendChild(el(`<span class="badge bg-warning text-dark">🤖</span>`));
-  }
+  if (thread.is_autopilot) badges.appendChild(chip("amb", "автопилот"));
   if (thread.pending_drafts_count > 0) {
-    const b = el(`<span class="badge bg-info ms-1"></span>`);
-    b.textContent = `📝 ${thread.pending_drafts_count}`;
-    badges.appendChild(b);
+    badges.appendChild(chip("blu", thread.pending_drafts_count > 1
+      ? `драфт ${thread.pending_drafts_count}` : "драфт"));
   }
   return card;
 }
@@ -136,58 +145,50 @@ function renderWith(mount, data) {
 
   const container = el(`<div class="${sel.active ? "pb-5" : ""}"></div>`);
 
-  // Хедер
-  const head = el(`
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <h5 class="mb-0">📥 Входящие</h5>
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-secondary refresh-btn">↻</button>
-        <button class="btn btn-sm sel-toggle"></button>
-      </div>
-    </div>`);
+  // Фильтры (только в обычном режиме); ↻ и «Выбрать» — в конце второго ряда
+  if (!sel.active) {
+    const accBar = el(`<div class="frow"></div>`);
+    accBar.appendChild(filterChip("Все аккаунты", state.account === "",
+      () => { state.account = ""; _cachedData = null; paint(mount); }));
+    (data.accounts ?? []).forEach(a => {
+      accBar.appendChild(filterChip(a.name, String(state.account) === String(a.id),
+        () => { state.account = a.id; _cachedData = null; paint(mount); }));
+    });
+    container.appendChild(accBar);
+  }
 
-  const selToggle = head.querySelector(".sel-toggle");
-  selToggle.textContent = sel.active ? "Отмена" : "Выбрать";
-  selToggle.classList.add(sel.active ? "btn-secondary" : "btn-outline-primary");
-
-  head.querySelector(".refresh-btn").addEventListener("click", async () => {
-    _cachedData = null;
-    await paint(mount);
-  });
-  selToggle.addEventListener("click", () => {
+  const stBar = el(`<div class="frow"></div>`);
+  if (!sel.active) {
+    [["all", "Все"], ["red", "Ждут нас"], ["green", "Ждём"], ["ap", "Автопилот"]]
+      .forEach(([k, lbl]) => stBar.appendChild(filterChip(lbl, state.status === k,
+        () => { state.status = k; renderWith(mount, data); })));
+    const refresh = filterChip("↻", false, async () => { _cachedData = null; await paint(mount); });
+    refresh.style.marginLeft = "auto";
+    stBar.appendChild(refresh);
+  }
+  const selToggle = filterChip(sel.active ? "Отмена" : "Выбрать", sel.active, () => {
     sel.active = !sel.active;
     sel.ids.clear();
     renderWith(mount, data); // re-render without API fetch
   });
-  container.appendChild(head);
-
-  // Фильтры (только в обычном режиме)
-  if (!sel.active) {
-    const accBar = el(`<div class="mb-1"></div>`);
-    accBar.appendChild(chip("Все аккаунты", state.account === "",
-      () => { state.account = ""; _cachedData = null; paint(mount); }));
-    (data.accounts ?? []).forEach(a => {
-      accBar.appendChild(chip(a.name, String(state.account) === String(a.id),
-        () => { state.account = a.id; _cachedData = null; paint(mount); }));
-    });
-    container.appendChild(accBar);
-
-    const stBar = el(`<div class="mb-2"></div>`);
-    [["all", "Все"], ["red", "🔴 ждут нас"], ["green", "🟢 ждём"], ["ap", "🤖 автопилот"]]
-      .forEach(([k, lbl]) => stBar.appendChild(chip(lbl, state.status === k,
-        () => { state.status = k; renderWith(mount, data); })));
-    container.appendChild(stBar);
-  }
+  if (!sel.active) selToggle.style.flexShrink = "0";
+  stBar.appendChild(selToggle);
+  container.appendChild(stBar);
 
   // Секции
   const pinned = (data.pinned ?? []).filter(t => matchFilter(t, "pinned"));
   const red    = (data.red   ?? []).filter(t => matchFilter(t, "red"));
   const green  = (data.green ?? []).filter(t => matchFilter(t, "green"));
-  const list = el(`<div class="list-group list-group-flush"></div>`);
+  const list = el(`<div></div>`);
 
-  function addSection(label, items) {
-    const hdr = el(`<div class="text-muted small text-uppercase mt-2 mb-1 px-1"></div>`);
-    hdr.textContent = `${label}: ${items.length}`;
+  function addSection(label, items, cls) {
+    const hdr = el(`<div class="sec"></div>`);
+    if (cls) hdr.classList.add(cls);
+    hdr.innerHTML = "";
+    hdr.appendChild(document.createTextNode(`${label} · `));
+    const n = el(`<b></b>`);
+    n.textContent = String(items.length);
+    hdr.appendChild(n);
     list.appendChild(hdr);
     items.forEach(t => list.appendChild(threadCard(t, accountsById, sel.active)));
   }
@@ -196,31 +197,31 @@ function renderWith(mount, data) {
     list.appendChild(el(`<div class="text-muted small fst-italic px-2 py-3 text-center">Нет обращений по фильтру</div>`));
   } else {
     if (pinned.length) addSection("📌 Закреплённые", pinned);
-    if (red.length)    addSection("🔴 Ждут нас", red);
-    if (green.length)  addSection("🟢 Ждём клиента", green);
+    if (red.length)    addSection("Ждут нас", red, "sec-red");
+    if (green.length)  addSection("Ждём клиента", green, "sec-grn");
   }
   container.appendChild(list);
   mount.replaceChildren(container);
 
-  // Bulk action bar
+  // Bulk-панель (тёмная, токены — не белая)
   if (sel.active) {
-    _bulkBar = el(`<div class="position-fixed bottom-0 start-0 end-0 bg-white border-top p-2 shadow-lg" style="z-index:1050"></div>`);
-    const countLine = el(`<div class="text-muted small text-center sel-count mb-2">Ничего не выбрано</div>`);
-    const btns = el(`<div class="d-flex gap-2 justify-content-center flex-wrap"></div>`);
+    _bulkBar = el(`<div class="bulkbar"></div>`);
+    const countLine = el(`<b class="small sel-count">Ничего не выбрано</b>`);
+    const btns = el(`<div class="brow"></div>`);
     const actions = [
-      ["pin",   "📌 Закрепить",   "btn-outline-primary",   null],
-      ["unpin", "📌 Открепить",   "btn-outline-secondary", null],
-      ["read",  "✉️ Прочитано",   "btn-outline-success",   null],
-      ["unread","🔔 Непрочитано", "btn-outline-warning",   null],
-      ["close", "🗑 Убрать",      "btn-danger",            true],
+      ["pin",   "📌 Закрепить",  "btn-sm",        null],
+      ["unpin", "Открепить",     "btn-sm",        null],
+      ["read",  "Прочитано",     "btn-sm",        null],
+      ["unread","Непрочитано",   "btn-sm",        null],
+      ["close", "🗑 Убрать",     "btn-sm btn-danger", true],
     ];
     actions.forEach(([action, label, cls, needConfirm]) => {
-      const btn = el(`<button class="btn btn-sm ${cls}" data-action="${action}"></button>`);
+      const btn = el(`<button class="btn ${cls}" data-action="${action}"></button>`);
       btn.textContent = label;
       btn.disabled = true;
       btn.addEventListener("click", async () => {
         if (!sel.ids.size) return;
-        if (needConfirm && !confirm(`Убрать ${sel.ids.size} треда(ов) из входящих?`)) return;
+        if (needConfirm && !(await confirmSheet(`Убрать ${sel.ids.size} треда(ов) из входящих?`, "Убрать"))) return;
         btn.disabled = true;
         try {
           await api("/api/ma/threads/bulk-action", {
@@ -264,13 +265,14 @@ export async function render(mount, params) {
   await paint(mount);
 
   _timer = setInterval(async () => {
-    if (document.visibilityState === "visible") {
+    // не дёргаем список пока оператор выбирает карточки
+    if (document.visibilityState === "visible" && !sel.active) {
       _cachedData = null;
       await paint(mount);
     }
   }, REFRESH_MS);
   _visHandler = async () => {
-    if (document.visibilityState === "visible") { _cachedData = null; await paint(mount); }
+    if (document.visibilityState === "visible" && !sel.active) { _cachedData = null; await paint(mount); }
   };
   document.addEventListener("visibilitychange", _visHandler);
   _hashHandler = () => {

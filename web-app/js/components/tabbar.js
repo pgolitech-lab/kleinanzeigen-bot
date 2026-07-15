@@ -1,22 +1,22 @@
-// Нижний таб-бар (как в нормальном приложении). Монтируется один раз в body,
-// подсвечивает активную вкладку по location.hash.
-import { el } from "../utils.js?v=20260715-183110";
+// Нижний таб-бар: иконка + подпись, активная вкладка подсвечена акцентом.
+import { el } from "../utils.js?v=20260715-2";
 
 const TABS = [
-  { label: "📥 Входящие", hash: "#/pipeline", match: /^#\/(pipeline|thread|review)/ },
-  { label: "👥 Клиенты",  hash: "#/clients",  match: /^#\/(clients|client)/ },
-  { label: "💰 Продажи",  hash: "#/sales",    match: /^#\/sales/ },
-  { label: "🔎 Рынок",    hash: "#/scout",    match: /^#\/scout/ },
-  { label: "📊 Обзор",    hash: "#/dashboard", match: /^#\/dashboard/ },
+  { icon: "📥", label: "Входящие", hash: "#/pipeline", match: /^#\/(pipeline|thread|review)/ },
+  { icon: "👥", label: "Клиенты",  hash: "#/clients",  match: /^#\/(clients|client)/ },
+  { icon: "💰", label: "Продажи",  hash: "#/sales",    match: /^#\/(sales|detected)/ },
+  { icon: "🔎", label: "Рынок",    hash: "#/scout",    match: /^#\/scout/ },
+  { icon: "📊", label: "Обзор",    hash: "#/dashboard", match: /^#\/(dashboard|settings)/ },
 ];
 
 export function mountTabbar() {
   if (document.getElementById("tabbar")) return;
-  const nav = el(`<nav id="tabbar"></nav>`);
+  const nav = el(`<nav id="tabbar" aria-label="Разделы"></nav>`);
   TABS.forEach(t => {
-    const a = el(`<a class="tab"></a>`);
+    const a = el(`<a class="tab"><span class="ti"></span><span class="tl"></span></a>`);
     a.href = t.hash;
-    a.textContent = t.label;
+    a.querySelector(".ti").textContent = t.icon;
+    a.querySelector(".tl").textContent = t.label;
     nav.appendChild(a);
   });
   document.body.appendChild(nav);

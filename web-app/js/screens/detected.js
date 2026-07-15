@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260715-183110";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260715-183110";
+import { api } from "../api.js?v=20260715-2";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260715-2";
 
 function eur(n) {
   if (n == null) return "—";
@@ -117,12 +117,7 @@ export async function render(mount, params) {
 
 function paint(mount, data) {
   const root = el(`<div></div>`);
-  root.appendChild(el(`
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="mb-0">🔍 Возможные продажи (${data.count})</h5>
-      <a class="btn btn-sm btn-outline-secondary" href="#/sales">↩ Продажи</a>
-    </div>
-  `));
+  root.appendChild(el(`<div class="sec">Возможные продажи · <b>${data.count}</b></div>`));
 
   root.appendChild(el(`
     <div class="alert alert-secondary small mb-3">
