@@ -52,31 +52,47 @@ def outgoing_language_ok(text: str, client_lang: Optional[str]) -> bool:
 def extract_json_object(text_blocks: list[str]) -> dict[str, Any]:
     """Устойчиво достать JSON-объект из текстовых блоков ответа модели.
 
-    С web_search модель может вернуть блоки вида [нарратив, tool, JSON, хвост].
-    Идём по блокам С КОНЦА; в каждом вырезаем первый сбалансированный {...} и
-    пробуем json.loads. Возвращаем первый распарсенный dict. RuntimeError, если
-    валидного JSON-объекта нет ни в одном блоке."""
-    for block in reversed(list(text_blocks)):
+    С web_search модель может вернуть блоки вида [нарратив, tool, JSON, хвост],
+    и внутри ОДНОГО блока может быть несколько объектов (черновик + финал).
+    Предпочитаем ПОСЛЕДНИЙ валидный dict в порядке чтения (финальный ответ):
+    идём по всем блокам и всем сбалансированным {...} слева-направо, пробуем
+    json.loads, запоминаем последний успешный dict. RuntimeError, если ни один
+    блок не содержит валидного JSON-объекта."""
+    last_valid: Optional[dict[str, Any]] = None
+    for block in text_blocks:
         if not block:
             continue
-        candidate = _find_json_object(block)
-        if candidate is None:
-            continue
-        try:
-            data = json.loads(candidate)
-        except (ValueError, json.JSONDecodeError):
-            continue
-        if isinstance(data, dict):
-            return data
-    raise RuntimeError("no JSON object found in model response")
+        for candidate in _iter_json_objects(block):
+            try:
+                data = json.loads(candidate)
+            except (ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict):
+                last_valid = data
+    if last_valid is None:
+        raise RuntimeError("no JSON object found in model response")
+    return last_valid
 
 
-def _find_json_object(text: str) -> Optional[str]:
-    """Вырезать первый сбалансированный {...}-объект из текста, корректно
-    учитывая вложенность и строковые литералы с экранированием."""
-    start = text.find("{")
-    if start == -1:
-        return None
+def _iter_json_objects(text: str):
+    """Генератор: все top-level сбалансированные {...}-подстроки в порядке чтения."""
+    idx = 0
+    while True:
+        start = text.find("{", idx)
+        if start == -1:
+            return
+        end = _balanced_end(text, start)
+        if end is None:
+            idx = start + 1
+            continue
+        yield text[start:end + 1]
+        idx = end + 1
+
+
+def _balanced_end(text: str, start: int) -> Optional[int]:
+    """Индекс закрывающей }, балансирующей { в позиции start; None если не
+    сбалансировано. Корректно учитывает вложенность и строковые литералы с
+    экранированием."""
     depth = 0
     in_str = False
     esc = False
@@ -97,5 +113,5 @@ def _find_json_object(text: str) -> Optional[str]:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return i
     return None

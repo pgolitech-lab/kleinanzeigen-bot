@@ -67,3 +67,9 @@ def test_extract_raises_when_no_json():
         g.extract_json_object(['nothing', 'still nothing'])
     with pytest.raises(RuntimeError):
         g.extract_json_object([])
+
+def test_extract_prefers_last_object_within_one_block():
+    # Draft price then a corrected final price inside ONE text block —
+    # must return the FINAL object, not the stale draft.
+    block = 'draft: {"price": 900, "note": "stale"} final: {"price": 1500, "final": true}'
+    assert g.extract_json_object([block]) == {"price": 1500, "final": True}
