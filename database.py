@@ -735,6 +735,7 @@ from modules.db_threads import (  # noqa: F401
     known_message_ids_since,
     append_extra_note,
     find_by_gmail_message_id,
+    has_recent_identical_incoming,
     find_reminder_candidates,
     thread_history,
     thread_events,

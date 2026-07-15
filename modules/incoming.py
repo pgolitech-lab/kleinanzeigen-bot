@@ -316,6 +316,19 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         _skip_email(account, email, "skipped_purchase_side")
         return
 
+    # Контент-дедуп: тот же текст в том же треде от того же отправителя за окно —
+    # это relay-повтор Kleinanzeigen с новым Message-ID (Message-ID-дедуп его не ловит, Bug 9).
+    inbound_thread_dedup = (email.get("gmail_thread_id") or "").strip()
+    from_email_dedup = (email.get("from_email") or "").strip()
+    if (not force and inbound_thread_dedup and from_email_dedup
+            and db.has_recent_identical_incoming(inbound_thread_dedup, from_email_dedup, body)):
+        logger.info(
+            "Skip: контент-дубликат incoming в треде %s от %s (relay-повтор)",
+            inbound_thread_dedup, from_email_dedup,
+        )
+        _skip_email(account, email, "skipped_dedup")
+        return
+
     # AI-классификатор (Haiku): финальный gate перед дорогими операциями.
     # Дешёвая модель решает «buyer-inquiry или системная рассылка».
     # Срабатывает на всё что прошло cheap-фильтры (noreply / age / junk-subject blacklist).

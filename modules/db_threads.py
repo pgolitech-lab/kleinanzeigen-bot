@@ -1,6 +1,7 @@
 # Thread-state, history, clients, pipeline queries.
 # Выделено из database.py.
 
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -245,6 +246,42 @@ def find_by_gmail_message_id(gmail_message_id: str) -> Optional[sqlite3.Row]:
             "SELECT * FROM messages WHERE gmail_message_id = ?",
             (gmail_message_id,),
         ).fetchone()
+
+
+def _normalize_body(text: Optional[str]) -> str:
+    """Нормализовать тело письма для сравнения: collapse whitespace, strip, lower."""
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def has_recent_identical_incoming(
+    gmail_thread_id: str,
+    buyer_email: str,
+    de_client: str,
+    within_hours: float = 12.0,
+) -> bool:
+    """Есть ли уже недавнее incoming с идентичным телом в этом треде от этого
+    отправителя — защита от relay-повторов Kleinanzeigen с новым Message-ID (Bug 9).
+
+    Сравнение по нормализованному тексту (collapse whitespace / lower). Окно
+    within_hours ограничивает совпадение свежими повторами, чтобы легитимные
+    одинаковые короткие сообщения («Danke») спустя дни не глотались.
+    """
+    if not (gmail_thread_id and buyer_email and de_client):
+        return False
+    norm = _normalize_body(de_client)
+    if not norm:
+        return False
+    cutoff = (datetime.utcnow() - timedelta(hours=float(within_hours))).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT de_client FROM messages "
+            "WHERE gmail_thread_id = ? AND buyer_name = ? AND direction = 'in' "
+            "AND created_at > ? AND de_client IS NOT NULL",
+            (gmail_thread_id, buyer_email, cutoff),
+        ).fetchall()
+    return any(_normalize_body(r["de_client"]) == norm for r in rows)
 
 
 def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
