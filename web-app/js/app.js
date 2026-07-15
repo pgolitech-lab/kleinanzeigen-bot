@@ -1,9 +1,9 @@
 // Mini App entry point. Bootstrap → router.start.
 
-import { ready, startParam } from "./tg.js?v=20260715-2";
-import { start as startRouter } from "./router.js?v=20260715-2";
-import { mountTabbar } from "./components/tabbar.js?v=20260715-2";
-import { mountBackbar } from "./components/backbar.js?v=20260715-2";
+import { ready, startParam } from "./tg.js?v=20260715-213447";
+import { start as startRouter } from "./router.js?v=20260715-213447";
+import { mountTabbar } from "./components/tabbar.js?v=20260715-213447";
+import { mountBackbar } from "./components/backbar.js?v=20260715-213447";
 
 function applyStartParam() {
   // First try Telegram SDK (works for /start commands, startapp deep-links, etc.)
