@@ -266,6 +266,12 @@ def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
               SELECT 1 FROM closed_threads ct
                WHERE ct.gmail_thread_id = m.gmail_thread_id
           )
+          -- Треды под активным автопилотом не пингуем — автопилот сам ведёт диалог
+          AND NOT EXISTS (
+              SELECT 1 FROM thread_autopilot ta
+               WHERE ta.gmail_thread_id = m.gmail_thread_id
+                 AND ta.active = 1
+          )
         ORDER BY le.at_time ASC
     """
     with get_conn() as conn:
