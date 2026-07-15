@@ -1,7 +1,7 @@
 // Unified suggest+edit+send form. Used когда оператор нажимает 🤖 Предложить.
 
-import { api } from "../api.js?v=20260711-082129";
-import { el } from "../utils.js?v=20260711-082129";
+import { api } from "../api.js?v=20260715-183110";
+import { el } from "../utils.js?v=20260715-183110";
 
 
 export function buildSuggestForm({msgId, threadId, review, onSubmitComplete, onCancel}) {
