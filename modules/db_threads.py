@@ -1,6 +1,7 @@
 # Thread-state, history, clients, pipeline queries.
 # Выделено из database.py.
 
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -88,6 +89,38 @@ def is_thread_waiting(gmail_thread_id: str) -> bool:
             (gmail_thread_id,),
         ).fetchone()
     return bool(row)
+
+
+# --- SOLD-REOPEN GUARD ---
+
+# closed_by значения, означающие продажу: новое письмо в такой тред НЕ должно
+# авто-реоткрывать его (не воскрешать pipeline/автопилот). См. Bug 6.
+SALE_CLOSE_REASONS = {"sold", "detected-sale"}
+
+
+def thread_close_reason(gmail_thread_id: str) -> Optional[str]:
+    """Причина закрытия треда (closed_by) или None, если тред не закрыт."""
+    if not gmail_thread_id:
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT closed_by FROM closed_threads WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        ).fetchone()
+    return row["closed_by"] if row else None
+
+
+def should_reopen_closed_thread(gmail_thread_id: str) -> bool:
+    """Можно ли авто-реоткрывать закрытый тред при новом incoming.
+
+    False, если тред закрыт как продажа (sold / detected-sale) — такое письмо
+    уйдёт оператору на ревью, но тред остаётся закрытым и автопилот не воскресает.
+    False также если тред вообще не закрыт (реоткрывать нечего).
+    """
+    reason = thread_close_reason(gmail_thread_id)
+    if reason is None:
+        return False
+    return reason not in SALE_CLOSE_REASONS
 
 
 # --- THREAD FLAGS ---
@@ -215,6 +248,42 @@ def find_by_gmail_message_id(gmail_message_id: str) -> Optional[sqlite3.Row]:
         ).fetchone()
 
 
+def _normalize_body(text: Optional[str]) -> str:
+    """Нормализовать тело письма для сравнения: collapse whitespace, strip, lower."""
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def has_recent_identical_incoming(
+    gmail_thread_id: str,
+    buyer_email: str,
+    de_client: str,
+    within_hours: float = 12.0,
+) -> bool:
+    """Есть ли уже недавнее incoming с идентичным телом в этом треде от этого
+    отправителя — защита от relay-повторов Kleinanzeigen с новым Message-ID (Bug 9).
+
+    Сравнение по нормализованному тексту (collapse whitespace / lower). Окно
+    within_hours ограничивает совпадение свежими повторами, чтобы легитимные
+    одинаковые короткие сообщения («Danke») спустя дни не глотались.
+    """
+    if not (gmail_thread_id and buyer_email and de_client):
+        return False
+    norm = _normalize_body(de_client)
+    if not norm:
+        return False
+    cutoff = (datetime.utcnow() - timedelta(hours=float(within_hours))).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT de_client FROM messages "
+            "WHERE gmail_thread_id = ? AND buyer_name = ? AND direction = 'in' "
+            "AND created_at > ? AND de_client IS NOT NULL",
+            (gmail_thread_id, buyer_email, cutoff),
+        ).fetchall()
+    return any(_normalize_body(r["de_client"]) == norm for r in rows)
+
+
 def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
     """Найти треды, в которых последнее по ВРЕМЕНИ событие — наш отправленный ответ.
 
@@ -265,6 +334,12 @@ def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
           AND NOT EXISTS (
               SELECT 1 FROM closed_threads ct
                WHERE ct.gmail_thread_id = m.gmail_thread_id
+          )
+          -- Треды под активным автопилотом не пингуем — автопилот сам ведёт диалог
+          AND NOT EXISTS (
+              SELECT 1 FROM thread_autopilot ta
+               WHERE ta.gmail_thread_id = m.gmail_thread_id
+                 AND ta.active = 1
           )
         ORDER BY le.at_time ASC
     """
@@ -373,25 +448,26 @@ def list_clients() -> list[sqlite3.Row]:
 
 
 def find_related_inquiries(
-    display_name: Optional[str],
+    buyer_email: Optional[str],
     exclude_thread_id: Optional[str] = None,
     limit: int = 10,
 ) -> list[sqlite3.Row]:
-    """Найти ДРУГИЕ треды от того же клиента (по buyer_display_name).
+    """Найти ДРУГИЕ треды того же клиента — по email (buyer_name).
 
-    Если у нескольких inquiries (даже на разные объявления / в разные аккаунты)
-    одинаковое display_name — почти всегда тот же человек.
+    Раньше матчили по buyer_display_name, из-за чего однофамильцы
+    («Hans», «Peter») склеивались в одного человека (Bug 8). Email
+    relay-адреса — надёжный идентификатор конкретного покупателя.
 
-    Возвращает по одной row на gmail_thread_id (последний incoming в треде).
-    Сортировка — DESC по последнему событию.
+    Возвращает по одной row на gmail_thread_id (последний incoming в треде),
+    отсортировано DESC по времени последнего события.
     """
-    if not display_name or not display_name.strip():
+    if not buyer_email or not buyer_email.strip():
         return []
     sql = """
     WITH last_in AS (
         SELECT m.* FROM messages m
         WHERE m.direction = 'in'
-          AND m.buyer_display_name = ?
+          AND m.buyer_name = ?
           AND m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
           AND m.id = (
               SELECT MAX(m2.id) FROM messages m2
@@ -402,7 +478,7 @@ def find_related_inquiries(
     SELECT * FROM last_in
     WHERE 1=1
     """
-    params: list[Any] = [display_name.strip()]
+    params: list[Any] = [buyer_email.strip()]
     if exclude_thread_id:
         sql += " AND gmail_thread_id != ?"
         params.append(exclude_thread_id)

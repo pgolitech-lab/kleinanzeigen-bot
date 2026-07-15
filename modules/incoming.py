@@ -316,6 +316,19 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         _skip_email(account, email, "skipped_purchase_side")
         return
 
+    # Контент-дедуп: тот же текст в том же треде от того же отправителя за окно —
+    # это relay-повтор Kleinanzeigen с новым Message-ID (Message-ID-дедуп его не ловит, Bug 9).
+    inbound_thread_dedup = (email.get("gmail_thread_id") or "").strip()
+    from_email_dedup = (email.get("from_email") or "").strip()
+    if (not force and inbound_thread_dedup and from_email_dedup
+            and db.has_recent_identical_incoming(inbound_thread_dedup, from_email_dedup, body)):
+        logger.info(
+            "Skip: контент-дубликат incoming в треде %s от %s (relay-повтор)",
+            inbound_thread_dedup, from_email_dedup,
+        )
+        _skip_email(account, email, "skipped_dedup")
+        return
+
     # AI-классификатор (Haiku): финальный gate перед дорогими операциями.
     # Дешёвая модель решает «buyer-inquiry или системная рассылка».
     # Срабатывает на всё что прошло cheap-фильтры (noreply / age / junk-subject blacklist).
@@ -332,10 +345,16 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 "SELECT 1 FROM messages WHERE gmail_thread_id=? AND direction='in' LIMIT 1",
                 (inbound_thread_id,),
             ).fetchone()
-        if prior:
+        if prior and not parser.is_system_message_body(body):
             skip_classifier = True
             logger.info(
                 "Classifier bypass: thread %s уже имеет inquiry, follow-up принят без проверки",
+                inbound_thread_id,
+            )
+        elif prior:
+            logger.info(
+                "Classifier NOT bypassed для thread %s — тело похоже на системное "
+                "письмо, прогоняем Haiku несмотря на follow-up",
                 inbound_thread_id,
             )
 
@@ -484,11 +503,20 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # тред снова появится в pipeline (клиент написал ещё раз).
     inbound_thread = email.get("gmail_thread_id") or ""
     if inbound_thread and db.is_thread_closed(inbound_thread):
-        db.reopen_thread(inbound_thread)
-        logger.info(
-            "Reopened closed thread %s — клиент написал в архивный тред",
-            inbound_thread,
-        )
+        if db.should_reopen_closed_thread(inbound_thread):
+            db.reopen_thread(inbound_thread)
+            logger.info(
+                "Reopened closed thread %s — клиент написал в архивный тред",
+                inbound_thread,
+            )
+        else:
+            # Тред закрыт как продажа — не воскрешаем pipeline/автопилот.
+            # Письмо всё равно уйдёт оператору через send_for_review ниже.
+            logger.info(
+                "Sold thread %s получил новое письмо — оставляем закрытым, "
+                "уйдёт оператору на ревью, автопилот не воскрешаем",
+                inbound_thread,
+            )
     # Аналогично — снимаем «⏳ Ждать ответа»: клиент ответил, секцию пайплайна
     # должно пересчитать заново (last_event_kind='in' → 🔴).
     if inbound_thread and db.is_thread_waiting(inbound_thread):
