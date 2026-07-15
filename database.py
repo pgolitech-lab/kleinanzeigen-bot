@@ -729,6 +729,8 @@ from modules.db_threads import (  # noqa: F401
     mark_thread_waiting,
     unmark_thread_waiting,
     is_thread_waiting,
+    thread_close_reason,
+    should_reopen_closed_thread,
     mark_processed,
     known_message_ids_since,
     append_extra_note,

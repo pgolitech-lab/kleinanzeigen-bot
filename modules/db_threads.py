@@ -90,6 +90,38 @@ def is_thread_waiting(gmail_thread_id: str) -> bool:
     return bool(row)
 
 
+# --- SOLD-REOPEN GUARD ---
+
+# closed_by значения, означающие продажу: новое письмо в такой тред НЕ должно
+# авто-реоткрывать его (не воскрешать pipeline/автопилот). См. Bug 6.
+SALE_CLOSE_REASONS = {"sold", "detected-sale"}
+
+
+def thread_close_reason(gmail_thread_id: str) -> Optional[str]:
+    """Причина закрытия треда (closed_by) или None, если тред не закрыт."""
+    if not gmail_thread_id:
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT closed_by FROM closed_threads WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        ).fetchone()
+    return row["closed_by"] if row else None
+
+
+def should_reopen_closed_thread(gmail_thread_id: str) -> bool:
+    """Можно ли авто-реоткрывать закрытый тред при новом incoming.
+
+    False, если тред закрыт как продажа (sold / detected-sale) — такое письмо
+    уйдёт оператору на ревью, но тред остаётся закрытым и автопилот не воскресает.
+    False также если тред вообще не закрыт (реоткрывать нечего).
+    """
+    reason = thread_close_reason(gmail_thread_id)
+    if reason is None:
+        return False
+    return reason not in SALE_CLOSE_REASONS
+
+
 # --- THREAD FLAGS ---
 
 def get_thread_flags(gmail_thread_id: str):

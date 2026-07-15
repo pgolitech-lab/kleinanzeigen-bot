@@ -484,11 +484,20 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # тред снова появится в pipeline (клиент написал ещё раз).
     inbound_thread = email.get("gmail_thread_id") or ""
     if inbound_thread and db.is_thread_closed(inbound_thread):
-        db.reopen_thread(inbound_thread)
-        logger.info(
-            "Reopened closed thread %s — клиент написал в архивный тред",
-            inbound_thread,
-        )
+        if db.should_reopen_closed_thread(inbound_thread):
+            db.reopen_thread(inbound_thread)
+            logger.info(
+                "Reopened closed thread %s — клиент написал в архивный тред",
+                inbound_thread,
+            )
+        else:
+            # Тред закрыт как продажа — не воскрешаем pipeline/автопилот.
+            # Письмо всё равно уйдёт оператору через send_for_review ниже.
+            logger.info(
+                "Sold thread %s получил новое письмо — оставляем закрытым, "
+                "уйдёт оператору на ревью, автопилот не воскрешаем",
+                inbound_thread,
+            )
     # Аналогично — снимаем «⏳ Ждать ответа»: клиент ответил, секцию пайплайна
     # должно пересчитать заново (last_event_kind='in' → 🔴).
     if inbound_thread and db.is_thread_waiting(inbound_thread):
