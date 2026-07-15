@@ -123,6 +123,64 @@ def should_reopen_closed_thread(gmail_thread_id: str) -> bool:
     return reason not in SALE_CLOSE_REASONS
 
 
+# --- NEGOTIATION STATE (Track B) ---
+
+NEGOTIATION_PHASES = {"opening", "negotiating", "closing", "escalated", "stopped"}
+NEGOTIATION_MODES = {"manual", "auto"}
+
+# Колонки negotiation_state, которые разрешено писать через upsert (кроме PK/updated_at).
+_NEG_STATE_COLS = {
+    "phase", "mode", "list_price_eur", "floor_eur",
+    "our_last_offer_eur", "buyer_last_offer_eur", "escalation_reason",
+}
+
+
+def get_negotiation_state(gmail_thread_id: str) -> Optional[sqlite3.Row]:
+    """Состояние сделки треда или None, если ещё не создано."""
+    if not gmail_thread_id:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM negotiation_state WHERE gmail_thread_id = ?",
+            (gmail_thread_id,),
+        ).fetchone()
+
+
+def upsert_negotiation_state(gmail_thread_id: str, **fields: Any) -> None:
+    """Создать/обновить состояние сделки. Пишутся только известные колонки
+    (`_NEG_STATE_COLS`); неизвестные ключи молча игнорируются. Всегда обновляет
+    updated_at. Пустой thread_id — no-op."""
+    if not gmail_thread_id:
+        return
+    known = {k: v for k, v in fields.items() if k in _NEG_STATE_COLS}
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO negotiation_state (gmail_thread_id, updated_at) "
+            "VALUES (?, ?)",
+            (gmail_thread_id, now),
+        )
+        for col, val in known.items():
+            conn.execute(
+                f"UPDATE negotiation_state SET {col} = ?, updated_at = ? "
+                "WHERE gmail_thread_id = ?",
+                (val, now, gmail_thread_id),
+            )
+        if not known:
+            conn.execute(
+                "UPDATE negotiation_state SET updated_at = ? WHERE gmail_thread_id = ?",
+                (now, gmail_thread_id),
+            )
+
+
+def record_our_offer(gmail_thread_id: str, offer_eur: float) -> None:
+    """Зафиксировать последнюю цену, которую озвучили МЫ (якорь ratchet).
+    Пишется кодом при реальной отправке оферты."""
+    if not gmail_thread_id:
+        return
+    upsert_negotiation_state(gmail_thread_id, our_last_offer_eur=float(offer_eur))
+
+
 # --- THREAD FLAGS ---
 
 def get_thread_flags(gmail_thread_id: str):

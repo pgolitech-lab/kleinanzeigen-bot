@@ -197,6 +197,24 @@ def init_db() -> None:
                 stop_reason TEXT
             )
         """)
+        # negotiation_state — структурное состояние сделки per-thread (Track B).
+        # «Код владеет числами»: our_last_offer_eur пишется ТОЛЬКО кодом при
+        # реальной отправке оферты — надёжный якорь ratchet вместо чтения из
+        # неоднозначного deal_brief.negotiated_price_eur. Заполняется/используется
+        # в Инкременте 3; здесь только схема + базовые CRUD-хелперы.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS negotiation_state (
+                gmail_thread_id TEXT PRIMARY KEY,
+                phase TEXT NOT NULL DEFAULT 'opening',
+                mode TEXT NOT NULL DEFAULT 'manual',
+                list_price_eur REAL,
+                floor_eur REAL,
+                our_last_offer_eur REAL,
+                buyer_last_offer_eur REAL,
+                escalation_reason TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
         # similar_buyers_json — список JSON {msg_id, display_name, suspicion_score, reason}
         # для подозрительно похожих по стилю incoming-сообщений от других клиентов
         # (для детекта «один и тот же человек под разными именами/в разные аккаунты»).
@@ -731,6 +749,9 @@ from modules.db_threads import (  # noqa: F401
     is_thread_waiting,
     thread_close_reason,
     should_reopen_closed_thread,
+    get_negotiation_state,
+    upsert_negotiation_state,
+    record_our_offer,
     mark_processed,
     known_message_ids_since,
     append_extra_note,

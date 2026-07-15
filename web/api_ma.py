@@ -1205,6 +1205,7 @@ ALLOWED_SETTING_KEYS = {
     "anthropic_api_key", "telegram_bot_token",
     "google_drive_credentials_json", "google_drive_folder_id", "backup_interval_hours",
     "web_port", "web_host",
+    "autopilot_message_cap", "autopilot_shadow_mode",
 }
 
 SENSITIVE_KEYS = {
@@ -1219,6 +1220,8 @@ VALIDATORS = {
     "gmail_poll_interval_sec": lambda v: v.isdigit() and 10 <= int(v) <= 3600,
     "inquiry_max_age_days": lambda v: v.isdigit() and 1 <= int(v) <= 365,
     "max_discount_percent": lambda v: v.replace(".", "", 1).isdigit() and 0 <= float(v) <= 100,
+    "autopilot_message_cap": lambda v: v.isdigit() and 0 <= int(v) <= 1000,
+    "autopilot_shadow_mode": lambda v: v in {"0", "1"},
 }
 
 

@@ -44,6 +44,10 @@ DEFAULTS: dict[str, str] = {
     "inquiry_max_age_days": "7",
     "backup_interval_hours": "24",
     "max_discount_percent": "10",
+    # Автопилот (Track B Increment 2): персистентный cap на кол-во авто-отправок
+    # на тред + shadow-режим (генерировать/логировать, но НЕ слать). Раскатка — Инкремент 3.
+    "autopilot_message_cap": "20",
+    "autopilot_shadow_mode": "1",
     "web_port": "8080",
     "web_host": "0.0.0.0",
     "system_prompt": DEFAULT_SYSTEM_PROMPT,
@@ -203,6 +207,17 @@ def backup_interval_hours() -> int:
 
 def max_discount_percent() -> int:
     return get_int("max_discount_percent", 10)
+
+
+def autopilot_message_cap() -> int:
+    """Максимум авто-отправок автопилота на тред (персистентный cap)."""
+    return get_int("autopilot_message_cap", 20)
+
+
+def autopilot_shadow_mode() -> bool:
+    """Shadow-режим автопилота: генерировать и логировать, но НЕ отправлять.
+    По умолчанию включён (безопасно) — снимается явно при раскатке в Инкременте 3."""
+    return (get("autopilot_shadow_mode") or "1").strip() == "1"
 
 
 def web_port() -> int:
