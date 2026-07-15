@@ -411,25 +411,26 @@ def list_clients() -> list[sqlite3.Row]:
 
 
 def find_related_inquiries(
-    display_name: Optional[str],
+    buyer_email: Optional[str],
     exclude_thread_id: Optional[str] = None,
     limit: int = 10,
 ) -> list[sqlite3.Row]:
-    """Найти ДРУГИЕ треды от того же клиента (по buyer_display_name).
+    """Найти ДРУГИЕ треды того же клиента — по email (buyer_name).
 
-    Если у нескольких inquiries (даже на разные объявления / в разные аккаунты)
-    одинаковое display_name — почти всегда тот же человек.
+    Раньше матчили по buyer_display_name, из-за чего однофамильцы
+    («Hans», «Peter») склеивались в одного человека (Bug 8). Email
+    relay-адреса — надёжный идентификатор конкретного покупателя.
 
-    Возвращает по одной row на gmail_thread_id (последний incoming в треде).
-    Сортировка — DESC по последнему событию.
+    Возвращает по одной row на gmail_thread_id (последний incoming в треде),
+    отсортировано DESC по времени последнего события.
     """
-    if not display_name or not display_name.strip():
+    if not buyer_email or not buyer_email.strip():
         return []
     sql = """
     WITH last_in AS (
         SELECT m.* FROM messages m
         WHERE m.direction = 'in'
-          AND m.buyer_display_name = ?
+          AND m.buyer_name = ?
           AND m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
           AND m.id = (
               SELECT MAX(m2.id) FROM messages m2
@@ -440,7 +441,7 @@ def find_related_inquiries(
     SELECT * FROM last_in
     WHERE 1=1
     """
-    params: list[Any] = [display_name.strip()]
+    params: list[Any] = [buyer_email.strip()]
     if exclude_thread_id:
         sql += " AND gmail_thread_id != ?"
         params.append(exclude_thread_id)

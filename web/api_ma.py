@@ -148,9 +148,10 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
         "is_autopilot": is_autopilot,
     }
     events = [_event_to_api(e) for e in db.thread_events(thread_id)]
+    _buyer_email = last_in["buyer_name"] if "buyer_name" in last_in.keys() else None
     related_matches = db.find_related_inquiries(
-        last_in["buyer_display_name"], exclude_thread_id=thread_id, limit=10,
-    ) if last_in["buyer_display_name"] else []
+        _buyer_email, exclude_thread_id=thread_id, limit=10,
+    ) if _buyer_email else []
     related = {
         "buyer_display_name": last_in["buyer_display_name"],
         "matches": [_related_match(r) for r in related_matches],
@@ -336,9 +337,10 @@ def _message_review_dict(msg_id: int) -> "dict[str, Any]":
     autopilot_row = db.get_thread_autopilot(thread_id) if thread_id else None
     lock_state = operator_lock.state(msg_id)
     lock_holder = lock_state[0] if lock_state else None
+    _buyer_email = row["buyer_name"] if "buyer_name" in row.keys() else None
     related_matches = db.find_related_inquiries(
-        row["buyer_display_name"], exclude_thread_id=thread_id, limit=10,
-    ) if row["buyer_display_name"] else []
+        _buyer_email, exclude_thread_id=thread_id, limit=10,
+    ) if _buyer_email else []
     return {
         "msg_id": row["id"],
         "thread_id": thread_id,
