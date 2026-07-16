@@ -1,4 +1,4 @@
-import { initData, close } from "./tg.js?v=20260716-173218";
+import { initData, close } from "./tg.js?v=20260716-193615";
 
 // Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
 // Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.
@@ -6,7 +6,7 @@ import { initData, close } from "./tg.js?v=20260716-173218";
 // NB: backend (FastAPI на :8080) должен отдавать Access-Control-Allow-Origin для
 // github.io origin'а — CORSMiddleware уже сконфигурирован в Phase 1.
 // X-Telegram-Init-Data — non-simple header, всегда триггерит preflight.
-export const API_BASE = "https://amounts-recommend-guided-action.trycloudflare.com";
+export const API_BASE = "https://neither-cycling-broad-contribute.trycloudflare.com";
 
 export async function api(path, { method = "GET", body = null, headers = {} } = {}) {
   const url = `${API_BASE}${path}`;

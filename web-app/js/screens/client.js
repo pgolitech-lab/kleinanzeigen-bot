@@ -1,7 +1,7 @@
 // 👤 Профиль клиента — CRM карточка: шапка, теги, заметка, треды с deal_brief.
-import { api } from "../api.js?v=20260716-173218";
-import { el, berlinTime, setLoading, setError, chip } from "../utils.js?v=20260716-173218";
-import { setTitle } from "../components/backbar.js?v=20260716-173218";
+import { api } from "../api.js?v=20260716-193615";
+import { el, berlinTime, setLoading, setError, chip } from "../utils.js?v=20260716-193615";
+import { setTitle } from "../components/backbar.js?v=20260716-193615";
 
 const ALLOWED_TAGS = ["Серьёзный", "Торгуется", "Тянет время", "Мошенник"];
 
