@@ -620,6 +620,12 @@ def start_callback_poller() -> None:
                             })
                     except Exception:
                         logger.exception("callback handler fail data=%r", data)
+            except (TimeoutError, urllib.error.URLError) as e:
+                # Долгий long-poll getUpdates (timeout=25) периодически упирается
+                # в сокет-таймаут/сетевой блип — это НОРМА, не ошибка. Логируем тихо,
+                # чтобы не засорять hourly error-monitor ложными алармами.
+                logger.debug("callback poll transient network hiccup: %r", e)
+                time.sleep(1)
             except Exception:
                 logger.exception("callback_query poll cycle fail")
                 time.sleep(5)
