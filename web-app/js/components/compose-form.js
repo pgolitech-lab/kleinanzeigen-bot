@@ -3,9 +3,9 @@
 // оператор видит (и может поправить) в окне предпросмотра — это буквально то, что
 // уйдёт клиенту. compose больше не переводит повторно при отправке (см. modules/outgoing.py,
 // инцидент 2026-07-02: ответ на немецком без предпросмотра ушёл клиенту переведённым на русский).
-import { api } from "../api.js?v=20260716-150240";
-import { el } from "../utils.js?v=20260716-150240";
-import { tg, confirm as tgConfirm } from "../tg.js?v=20260716-150240";
+import { api } from "../api.js?v=20260716-162502";
+import { el } from "../utils.js?v=20260716-162502";
+import { tg, confirm as tgConfirm } from "../tg.js?v=20260716-162502";
 
 export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
   const form = el(`
