@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # bot_autofix.sh — LLM-слой мониторинга. Запускается из bot-autofix.timer каждые 30 мин.
 # Дешёвый grep ищет реальные ошибки в логах за последние ~35 мин. ТОЛЬКО если нашёл —
-# зовёт claude headless (Opus) чинить в рамках AGENTS.md. Чистые логи → LLM не зовётся → $0.
+# зовёт claude headless (Opus) чинить. Чистые логи → LLM не зовётся → $0.
 # Дедуп: одна и та же сигнатура ошибки не запускает claude чаще раза в COOLDOWN.
+#
+# Режим: SCOPED-автофикс. Система разрешений claude НЕ отключается — агенту выдан
+# явный allowlist (--allowedTools). Всё вне списка (git push, произвольный bash,
+# работа с БД, sqlite, curl, правка settings) автоматически запрещается движком.
 set -u
 
 REPO=/home/pg/kleinanzeigen-bot
@@ -44,55 +48,87 @@ if [ -f "$SIGFILE" ]; then
     exit 0
   fi
 fi
-printf '%s\n%s\n' "$SIG" "$now" > "$SIGFILE"
-
-log "найдены ошибки (sig=$SIG) — запускаю claude autofix"
+log "найдены ошибки (sig=$SIG) — запускаю claude autofix (scoped)"
 RUNLOG="$LOGDIR/$(date '+%Y%m%d-%H%M%S')-$SIG.log"
 
 # --- 3. Промпт с жёсткими рамками AGENTS.md ---
 PROMPT=$(cat <<'EOF'
 Ты автономный дежурный по проду kleinanzeigen-bot (/home/pg/kleinanzeigen-bot).
 В логах journalctl -u kleinanzeigen-bot за последние ~35 минут найдены ошибки.
-Задача: разобраться в первопричине и починить, СОБЛЮДАЯ рамки AGENTS.md.
+Задача: разобраться в первопричине и починить в рамках AGENTS.md.
 
 Шаги:
-1. Прочитай ошибки: journalctl -u kleinanzeigen-bot --since "40 min ago" --no-pager | grep -iE "error|traceback|exception|critical|fatal|failed" | grep -viE "monitor_errors_job|next run at|executed successfully"
+1. Прочитай ошибки:
+   journalctl -u kleinanzeigen-bot --since "40 min ago" --no-pager | grep -iE "error|traceback|exception|critical|fatal|failed" | grep -viE "monitor_errors_job|next run at|executed successfully"
 2. Найди первопричину в коде.
-3. Если это простой, безопасный, однозначный баг в коде — почини его. Затем:
-   - python3 -m pytest tests/ -q  (чинить только если тесты зелёные)
-   - GIT_DIR=/home/pg/kleinanzeigen-bot/.git GIT_WORK_TREE=/home/pg/kleinanzeigen-bot git add -A && commit (conventional prefix + русское описание, автор Claude)
-   - sudo systemctl restart kleinanzeigen-bot && проверь journalctl -u kleinanzeigen-bot -n 30 на чистый старт
-   - Уведоми оператора в Telegram что ПОЧИНИЛ (что за баг, что сделал):
-     python3 -c "from modules import telegram_bot; telegram_bot.notify('✅ автофикс: <текст>')"
+3. Если это простой, безопасный, ОДНОЗНАЧНЫЙ баг в коде — почини. Затем строго по порядку:
+   - python3 -m pytest tests/ -q        → коммитить ТОЛЬКО если тесты зелёные
+   - git add -A && git commit           → conventional prefix + русское описание
+   - sudo systemctl restart kleinanzeigen-bot
+   - sudo systemctl status kleinanzeigen-bot  → убедись что старт чистый
+   - Уведоми оператора что ПОЧИНИЛ (что за баг + что сделал):
+     scripts/notify.sh "✅ автофикс: <текст>"
+   Если pytest красный после твоей правки — откати правку (git checkout -- <файл>),
+   ничего не коммить, и эскалируй оператору через scripts/notify.sh.
 
 ЖЁСТКИЕ ЗАПРЕТЫ (нарушать нельзя ни при каких условиях):
 - НЕ менять send_mode, НЕ слать письма покупателям.
 - НЕ делать DELETE/DROP/схема-миграций в БД.
-- НЕ пушить в origin (только локальный коммит) — если не уверен, вообще не коммить.
+- НЕ пушить в origin (push тебе технически запрещён — даже не пытайся).
 - Если баг требует смены поведения отправки, миграции схемы, затрагивает деньги/клиентов,
-  или причина неоднозначна / у тебя нет уверенного безопасного фикса — НИЧЕГО НЕ МЕНЯЙ.
-  Вместо этого отправь оператору в Telegram описание проблемы + предлагаемое решение:
-  python3 -c "from modules import telegram_bot; telegram_bot.notify('⚠️ нужна твоя реакция: <текст>')"
+  или причина неоднозначна / нет уверенного безопасного фикса — НИЧЕГО НЕ МЕНЯЙ.
+  Вместо этого эскалируй оператору описание проблемы + предлагаемое решение:
+  scripts/notify.sh "⚠️ нужна твоя реакция: <текст>"
 
-Если ошибки транзиентные (сетевой блип IMAP/SMTP, разовый таймаут туннеля) и код чинить нечего —
-ничего не делай и молчи (не уведомляй). Работай кратко и по делу.
+Если ошибки транзиентные (сетевой блип IMAP/SMTP, разовый таймаут туннеля) и чинить в коде
+нечего — ничего не делай и молчи (не уведомляй). Работай кратко и по делу.
 EOF
 )
 
 cd "$REPO" || exit 1
+
+# --- 4. Scoped allowlist: ровно то, что нужно для починки, и ничего больше ---
 timeout 900 "$CLAUDE" -p "$PROMPT" \
-  --permission-mode bypassPermissions \
   --model claude-opus-4-8 \
   --output-format json \
+  --allowedTools \
+      "Read" "Grep" "Glob" "Edit" "Write" \
+      "Bash(journalctl:*)" \
+      "Bash(python3 -m pytest:*)" \
+      "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" \
+      "Bash(git add:*)" "Bash(git commit:*)" "Bash(git checkout --:*)" \
+      "Bash(sudo systemctl restart kleinanzeigen-bot)" \
+      "Bash(sudo systemctl status kleinanzeigen-bot)" \
+      "Bash(scripts/notify.sh:*)" \
+  --disallowedTools \
+      "Bash(git push:*)" "Bash(sqlite3:*)" "Bash(curl:*)" "Bash(rm:*)" \
+      "WebFetch" "WebSearch" \
   > "$RUNLOG" 2>&1
 rc=$?
-log "claude завершился rc=$rc, лог: $RUNLOG"
 
-# Если claude упал (не транзиент) — уведомить, чтобы не проглотить молча.
-if [ $rc -ne 0 ]; then
-  cd "$REPO"
-  python3 -c "import sys; from modules import telegram_bot; telegram_bot.notify(sys.argv[1])" \
-    "🟥 <b>autofix</b>: claude-прогон завершился с кодом $rc (лог на сервере: $RUNLOG). Ошибки в логах остались — нужна ручная проверка." \
+# --- 5. Детект неудачи ---
+# ВАЖНО (инцидент 2026-07-17): claude CLI отдаёт rc=0 даже когда прогон провалился
+# (`"is_error":true`, например "Unable to connect to API (ENOTFOUND)"). Проверка только
+# по rc проглатывала это молча — слой автофикса был мёртв 13 часов и никто не узнал.
+# Поэтому смотрим И код возврата, И поле is_error в JSON-результате.
+FAILED=0
+[ $rc -ne 0 ] && FAILED=1
+grep -q '"is_error":true' "$RUNLOG" 2>/dev/null && FAILED=1
+
+if [ "$FAILED" = "1" ]; then
+  REASON=$(grep -oE '"result":"[^"]{0,200}' "$RUNLOG" 2>/dev/null | head -1 | cut -c11-)
+  [ -z "$REASON" ] && REASON="rc=$rc"
+  log "ПРОГОН ПРОВАЛИЛСЯ: $REASON (лог: $RUNLOG)"
+  # Сигнатуру НЕ фиксируем: анализа не было, пусть следующий тик попробует снова,
+  # иначе неудачный прогон блокировал бы повтор на все 6ч cooldown-а.
+  rm -f "$SIGFILE"
+  "$REPO/scripts/notify.sh" \
+    "🟥 <b>autofix</b>: прогон провалился — ${REASON}. Ошибки в логах бота остались без разбора, нужна ручная проверка. Лог: $RUNLOG" \
     >/dev/null 2>&1 || true
+  exit 0
 fi
+
+# Успех — фиксируем сигнатуру, чтобы не долбить тем же багом каждые 30 мин.
+printf '%s\n%s\n' "$SIG" "$now" > "$SIGFILE"
+log "claude отработал успешно, лог: $RUNLOG"
 exit 0
