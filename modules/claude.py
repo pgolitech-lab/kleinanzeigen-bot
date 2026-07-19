@@ -1021,6 +1021,7 @@ _LANG_DETECT_SCHEMA: dict[str, Any] = {
         },
     },
     "required": ["lang"],
+    "additionalProperties": False,
 }
 
 
