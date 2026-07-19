@@ -2,13 +2,13 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api } from "../api.js?v=20260719-1";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260719-1";
-import { setTitle } from "../components/backbar.js?v=20260719-1";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260719-1";
-import { buildEditForm } from "../components/edit-form.js?v=20260719-1";
-import { buildComposeForm } from "../components/compose-form.js?v=20260719-1";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260719-1";
+import { api } from "../api.js?v=20260719-2";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260719-2";
+import { setTitle } from "../components/backbar.js?v=20260719-2";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260719-2";
+import { buildEditForm } from "../components/edit-form.js?v=20260719-2";
+import { buildComposeForm } from "../components/compose-form.js?v=20260719-2";
+import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260719-2";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -362,18 +362,34 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     return cyr / letters.length > 0.3;
   }
 
+  // Синхронизация draft-карточки и локального state после серверных мутаций
+  // (translate-draft / instruction / edit-de / suggest-reply).
+  function syncDraft(fresh) {
+    review.draft = fresh.draft;
+    const de = fresh.draft?.de_answer ?? "";
+    const ru = fresh.draft?.ru_answer ?? "";
+    draft.querySelector(".de-input").value = de;
+    draft.querySelector(".ru-input").value = ru;
+    draft.querySelector(".back-text").textContent = fresh.draft?.ru_translation ?? "(нет перевода)";
+    lastDe = de;
+    lastRu = ru;
+  }
+
+  function curText() {
+    return (review?.draft?.de_answer ?? "").trim();
+  }
+
   async function sendHandler(sendBtn) {
     const ruNow = draft.querySelector(".ru-input").value.trim();
     const deNow = draft.querySelector(".de-input").value.trim();
     if (!deNow) {
-      draftError("DE текст не может быть пустым (это что уйдёт клиенту)");
+      draftError("Текст клиенту не может быть пустым");
       return;
     }
     sendBtn.disabled = true;
     sendBtn.textContent = "⏳ Готовлю…";
-    let finalText = deNow;
     try {
-      // Правки применяем ДО подтверждения: превью в шите должно показывать
+      // Правки из textarea применяем ДО флоу: превью в шитах должно показывать
       // ровно то, что уйдёт клиенту (edit-ru перегенерирует DE из RU-идеи).
       let fresh = null;
       if (ruNow !== lastRu && ruNow) {
@@ -388,15 +404,8 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
         });
         lastDe = deNow;
       }
-      if (fresh) {
-        review.draft = fresh.draft;
-        finalText = fresh.draft?.de_answer ?? deNow;
-        draft.querySelector(".de-input").value = finalText;
-        draft.querySelector(".ru-input").value = fresh.draft?.ru_answer ?? ruNow;
-        draft.querySelector(".back-text").textContent = fresh.draft?.ru_translation ?? "(нет перевода)";
-        lastDe = finalText;
-        lastRu = fresh.draft?.ru_answer ?? lastRu;
-      }
+      if (fresh) syncDraft(fresh);
+      else if (review?.draft) review.draft.de_answer = deNow;
     } catch (e) {
       draftError(e.message ?? String(e));
       sendBtn.disabled = false;
@@ -405,66 +414,260 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     }
     sendBtn.disabled = false;
     sendBtn.textContent = "📨 Отправить";
-    openSendConfirmSheet(finalText);
+    openSendChoiceSheet();
   }
 
-  // Подтверждение перед отправкой: превью финального текста + язык клиента +
-  // [Отправить как есть] [Перевести на язык клиента и отправить] [Отменить].
-  function openSendConfirmSheet(finalText) {
+  // ───── Send-флоу (2026-07-19): выбор → подготовка → финальный текст ─────
+  // Инвариант: клиенту НИКОГДА не уходит текст на чужом языке без явного
+  // разрешения оператора (галочка на финальном шаге + force для серверного guard).
+
+  function flowPreviewBlock(text) {
+    const p = el(`<div class="p-2 rounded mb-2"
+      style="white-space:pre-wrap; font-size:.92em; max-height:35vh; overflow-y:auto; background:rgba(128,128,128,.14)"></div>`);
+    p.textContent = text;
+    return p;
+  }
+
+  function showFlowErr(box, e) {
+    const errEl = box.querySelector(".flow-err");
+    errEl.textContent = e.message ?? String(e);
+    errEl.classList.remove("d-none");
+  }
+
+  // Универсальный текстовый под-шаг (правка текста / инструкции для ЛЛМ).
+  function openTextSheet({title, initial, placeholder, submitLabel, busyLabel, onSubmit, onBack}) {
+    const box = el(`
+      <div>
+        <textarea class="form-control txt" rows="6"></textarea>
+        <div class="flow-err text-danger small my-2 d-none"></div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn back-btn" style="flex:1">↩ Назад</button>
+          <button class="btn btn-primary ok-btn" style="flex:1"></button>
+        </div>
+      </div>
+    `);
+    const txt = box.querySelector(".txt");
+    txt.value = initial ?? "";
+    if (placeholder) txt.placeholder = placeholder;
+    const okBtn = box.querySelector(".ok-btn");
+    const backBtn = box.querySelector(".back-btn");
+    okBtn.textContent = submitLabel;
+    backBtn.addEventListener("click", onBack);
+    okBtn.addEventListener("click", async () => {
+      const value = txt.value.trim();
+      if (!value) { txt.classList.add("is-invalid"); return; }
+      okBtn.disabled = true;
+      backBtn.disabled = true;
+      okBtn.textContent = busyLabel;
+      try {
+        await onSubmit(value);
+      } catch (e) {
+        showFlowErr(box, e);
+        okBtn.disabled = false;
+        backBtn.disabled = false;
+        okBtn.textContent = submitLabel;
+      }
+    });
+    openSheet(box, title);
+    txt.focus();
+  }
+
+  // Этап 1: выбор способа отправки.
+  function openSendChoiceSheet() {
     const clientLang = (review?.client_lang || "de").toLowerCase();
     const langUp = clientLang.toUpperCase();
-    const mismatch = wrongLangForClient(finalText, clientLang);
     const box = el(`
       <div>
         <div class="small text-muted mb-1">Язык клиента: <b class="lang"></b></div>
-        <div class="preview-text p-2 rounded mb-2"
-             style="white-space:pre-wrap; font-size:.92em; max-height:40vh; overflow-y:auto; background:rgba(128,128,128,.14)"></div>
-        <div class="mismatch alert alert-warning small py-2 d-none">
-          ⚠️ Текст, похоже, НЕ на языке клиента — обычно это ошибка.
-          Надёжнее «Перевести и отправить».
-        </div>
-        <div class="send-err text-danger small mb-2 d-none"></div>
+        <div class="preview-slot"></div>
+        <div class="flow-err text-danger small mb-2 d-none"></div>
         <div class="d-grid gap-2">
-          <button class="btn as-is-btn">📨 Отправить как есть</button>
-          <button class="btn translate-btn"></button>
+          <button class="btn btn-primary tr-btn"></button>
+          <button class="btn asis-btn">📨 Отправить как есть</button>
+          <button class="btn llm-btn">🤖 Предложить текст от ЛЛМ</button>
           <button class="btn cancel-btn">✕ Отменить</button>
         </div>
       </div>
     `);
     box.querySelector(".lang").textContent = langUp;
-    box.querySelector(".preview-text").textContent = finalText;
-    const asIsBtn = box.querySelector(".as-is-btn");
-    const trBtn = box.querySelector(".translate-btn");
+    box.querySelector(".preview-slot").appendChild(flowPreviewBlock(curText() || "(черновик пуст)"));
+    const trBtn = box.querySelector(".tr-btn");
+    const asisBtn = box.querySelector(".asis-btn");
+    const llmBtn = box.querySelector(".llm-btn");
     const cancelBtn = box.querySelector(".cancel-btn");
     trBtn.textContent = `🌐 Перевести на ${langUp} и отправить`;
-    // Акцент на безопасной кнопке: при mismatch — перевод, иначе — как есть
-    (mismatch ? trBtn : asIsBtn).classList.add("btn-primary");
-    if (mismatch) box.querySelector(".mismatch").classList.remove("d-none");
+    const allBtns = [trBtn, asisBtn, llmBtn, cancelBtn];
 
-    const errEl = box.querySelector(".send-err");
-    async function doSend(btn, busyLabel, body) {
-      const labels = [asIsBtn.textContent, trBtn.textContent];
-      [asIsBtn, trBtn, cancelBtn].forEach(b => b.disabled = true);
-      btn.textContent = busyLabel;
-      errEl.classList.add("d-none");
+    trBtn.addEventListener("click", async () => {
+      allBtns.forEach(b => b.disabled = true);
+      trBtn.textContent = "⏳ Перевожу…";
       try {
-        await api(`/api/ma/messages/${latestPendingMsgId}/send`, {method: "POST", body});
+        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/translate-draft`, {
+          method: "POST", body: {text: curText()},
+        });
+        syncDraft(fresh);
+        openPrepareSheet();
+      } catch (e) {
+        showFlowErr(box, e);
+        allBtns.forEach(b => b.disabled = false);
+        trBtn.textContent = `🌐 Перевести на ${langUp} и отправить`;
+      }
+    });
+    asisBtn.addEventListener("click", () => openPrepareSheet());
+    llmBtn.addEventListener("click", async () => {
+      allBtns.forEach(b => b.disabled = true);
+      llmBtn.textContent = "⏳ Генерирую…";
+      try {
+        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST"});
+        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}`);
+        syncDraft(fresh);
+        openPrepareSheet();
+      } catch (e) {
+        showFlowErr(box, e);
+        allBtns.forEach(b => b.disabled = false);
+        llmBtn.textContent = "🤖 Предложить текст от ЛЛМ";
+      }
+    });
+    cancelBtn.addEventListener("click", () => closeSheet());
+    openSheet(box, "Отправка — что делаем?");
+  }
+
+  // Этап 2: подготовка текста перед отправкой.
+  function openPrepareSheet() {
+    const box = el(`
+      <div>
+        <div class="preview-slot"></div>
+        <div class="ru-mirror small text-muted mb-2" style="white-space:pre-wrap"></div>
+        <div class="flow-err text-danger small mb-2 d-none"></div>
+        <div class="d-grid gap-2">
+          <button class="btn btn-primary next-btn">📨 Отправить</button>
+          <button class="btn edit-btn">✏️ Редактировать</button>
+          <button class="btn rewrite-btn">🤖 Переписать идею ЛЛМ…</button>
+          <button class="btn cancel-btn">✕ Отменить</button>
+        </div>
+      </div>
+    `);
+    box.querySelector(".preview-slot").appendChild(flowPreviewBlock(curText() || "(черновик пуст)"));
+    const mirror = review?.draft?.ru_translation;
+    const mirrorEl = box.querySelector(".ru-mirror");
+    if (mirror && mirror !== curText()) mirrorEl.textContent = `RU: ${mirror}`;
+    else mirrorEl.remove();
+
+    box.querySelector(".next-btn").addEventListener("click", () => {
+      if (!curText()) { showFlowErr(box, new Error("черновик пуст")); return; }
+      openFinalSheet();
+    });
+    box.querySelector(".edit-btn").addEventListener("click", () => openTextSheet({
+      title: "✏️ Редактировать текст",
+      initial: curText(),
+      submitLabel: "💾 Сохранить",
+      busyLabel: "⏳ Сохраняю…",
+      onSubmit: async (value) => {
+        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
+          method: "POST", body: {text: value},
+        });
+        syncDraft(fresh);
+        openPrepareSheet();
+      },
+      onBack: () => openPrepareSheet(),
+    }));
+    box.querySelector(".rewrite-btn").addEventListener("click", () => openTextSheet({
+      title: "🤖 Переписать идею ЛЛМ",
+      initial: "",
+      placeholder: "Инструкции: что изменить, какой тон, какая цена…",
+      submitLabel: "🤖 Переписать",
+      busyLabel: "⏳ Генерирую…",
+      onSubmit: async (value) => {
+        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/instruction`, {
+          method: "POST", body: {text: value},
+        });
+        syncDraft(fresh);
+        openPrepareSheet();
+      },
+      onBack: () => openPrepareSheet(),
+    }));
+    box.querySelector(".cancel-btn").addEventListener("click", () => closeSheet());
+    openSheet(box, "Подготовка к отправке");
+  }
+
+  // Этап 3: финальный текст к отправке. Языковой guard: если текст не на языке
+  // клиента — отправка ТОЛЬКО после явной галочки-разрешения (force для сервера).
+  function openFinalSheet() {
+    const clientLang = (review?.client_lang || "de").toLowerCase();
+    const langUp = clientLang.toUpperCase();
+    const text = curText();
+    const mismatch = wrongLangForClient(text, clientLang);
+    const box = el(`
+      <div>
+        <div class="small text-muted mb-1">Уйдёт клиенту (язык: <b class="lang"></b>):</div>
+        <div class="preview-slot"></div>
+        <div class="mismatch d-none">
+          <div class="alert alert-danger small py-2 mb-2">
+            ⚠️ Текст НЕ на языке клиента. Отправка заблокирована —
+            вернитесь и переведите, либо явно разрешите ниже.
+          </div>
+          <div class="form-check mb-2">
+            <input type="checkbox" class="form-check-input allow-lang" id="allow-lang-cb">
+            <label class="form-check-label small" for="allow-lang-cb">
+              Разрешаю отправить текст не на языке клиента
+            </label>
+          </div>
+        </div>
+        <div class="flow-err text-danger small mb-2 d-none"></div>
+        <div class="d-grid gap-2">
+          <button class="btn btn-primary send-btn">✅ Отправить</button>
+          <button class="btn edit-btn">✏️ Изменить текст вручную</button>
+          <button class="btn cancel-btn">✕ Отменить</button>
+        </div>
+      </div>
+    `);
+    box.querySelector(".lang").textContent = langUp;
+    box.querySelector(".preview-slot").appendChild(flowPreviewBlock(text));
+    const sendBtn = box.querySelector(".send-btn");
+    const editBtn = box.querySelector(".edit-btn");
+    const cancelBtn = box.querySelector(".cancel-btn");
+    let allowCb = null;
+    if (mismatch) {
+      box.querySelector(".mismatch").classList.remove("d-none");
+      allowCb = box.querySelector(".allow-lang");
+      sendBtn.disabled = true;
+      allowCb.addEventListener("change", () => { sendBtn.disabled = !allowCb.checked; });
+    }
+
+    sendBtn.addEventListener("click", async () => {
+      [sendBtn, editBtn, cancelBtn].forEach(b => b.disabled = true);
+      sendBtn.textContent = "⏳ Отправляю…";
+      try {
+        // force=true только при явной галочке-разрешении оператора
+        await api(`/api/ma/messages/${latestPendingMsgId}/send`, {
+          method: "POST",
+          body: {mode: "as_is", force: mismatch && allowCb?.checked === true},
+        });
         closeSheet();
         render(mount, params);
       } catch (e) {
-        errEl.textContent = e.message ?? String(e);
-        errEl.classList.remove("d-none");
-        [asIsBtn, trBtn, cancelBtn].forEach(b => b.disabled = false);
-        asIsBtn.textContent = labels[0];
-        trBtn.textContent = labels[1];
+        showFlowErr(box, e);
+        [editBtn, cancelBtn].forEach(b => b.disabled = false);
+        sendBtn.disabled = mismatch && !(allowCb?.checked);
+        sendBtn.textContent = "✅ Отправить";
       }
-    }
-    asIsBtn.addEventListener("click", () =>
-      doSend(asIsBtn, "⏳ Отправляю…", {mode: "as_is", force: true}));
-    trBtn.addEventListener("click", () =>
-      doSend(trBtn, "⏳ Перевожу и отправляю…", {mode: "translate", text: finalText}));
+    });
+    editBtn.addEventListener("click", () => openTextSheet({
+      title: "✏️ Изменить текст вручную",
+      initial: text,
+      submitLabel: "💾 Сохранить",
+      busyLabel: "⏳ Сохраняю…",
+      onSubmit: async (value) => {
+        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
+          method: "POST", body: {text: value},
+        });
+        syncDraft(fresh);
+        openFinalSheet();
+      },
+      onBack: () => openFinalSheet(),
+    }));
     cancelBtn.addEventListener("click", () => closeSheet());
-    openSheet(box, "Подтверждение отправки");
+    openSheet(box, "Финальный текст");
   }
 
   async function regenHandler(btn) {

@@ -538,6 +538,53 @@ async def ma_send(msg_id: int, body: "SendBody | None" = None,
     return {"ok": True, "status": fresh["status"] if fresh else "sent"}
 
 
+class TranslateDraftBody(BaseModel):
+    # Текст для перевода (обычно RU-идея оператора); если пуст — берётся de_answer из БД
+    text: "str | None" = Field(None, max_length=4000)
+
+
+@router.post("/messages/{msg_id}/translate-draft")
+async def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
+                             user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Перевести черновик на язык клиента БЕЗ отправки (шаг send-флоу «Перевести и отправить»).
+
+    Перевод сохраняется в de_answer, оператор видит финальный текст в превью
+    и отправляет уже обычным /send mode=as_is — языковой guard там сработает штатно.
+    """
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    actor = actor_from_user(user)
+    foreign = _check_actor_holds(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
+    _ensure_lock(msg_id, actor)
+
+    b = body or TranslateDraftBody()
+    client_lang = (row["client_lang"] if "client_lang" in row.keys() else None) or "de"
+    src_text = (b.text or "").strip() or ((row["de_answer"] if "de_answer" in row.keys() else "") or "").strip()
+    if not src_text:
+        raise HTTPException(400, "нечего переводить: текст пуст")
+
+    import asyncio
+    source_lang = "ru" if _mostly_cyrillic(src_text) else None
+    tr = await asyncio.to_thread(
+        claude.translate_only, src_text, target_lang=client_lang, source_lang=source_lang,
+    )
+    translated = (tr.get("translation", "") if isinstance(tr, dict) else str(tr)).strip()
+    if not translated:
+        raise HTTPException(500, "перевод вернулся пустым")
+
+    fields: "dict[str, Any]" = {"de_answer": translated, "status": "edited"}
+    if source_lang == "ru":
+        # RU-исходник оператора сохраняем как зеркало для верификации
+        fields["ru_answer"] = src_text
+        fields["ru_translation"] = src_text
+    db.update_message(msg_id, **fields)
+    telegram_bot.broadcast_after_external_action(msg_id)
+    return _message_review_dict(msg_id)
+
+
 @router.post("/messages/{msg_id}/skip")
 async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:

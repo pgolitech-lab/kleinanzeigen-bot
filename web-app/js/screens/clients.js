@@ -1,7 +1,7 @@
 // 👥 Клиенты — база обращений (CRM). Список покупателей с агрегатами + поиск.
 // Клик → история клиента (#/client/<email> → все его переписки).
-import { api } from "../api.js?v=20260719-1";
-import { el, berlinTime, setLoading, setError } from "../utils.js?v=20260719-1";
+import { api } from "../api.js?v=20260719-2";
+import { el, berlinTime, setLoading, setError } from "../utils.js?v=20260719-2";
 
 function clientRow(c) {
   const row = el(`

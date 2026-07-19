@@ -185,6 +185,87 @@ def test_send_500_on_smtp_failure(client):
     mtb._release_lock.assert_not_called()
 
 
+def test_translate_draft_cyrillic_source(client):
+    """RU-текст → перевод на язык клиента, сохранение в de_answer + RU-зеркало. Отправки НЕТ."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "Guten Tag, noch verfügbar"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/translate-draft",
+                 json={"text": "Здравствуйте, ещё доступно"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    mclaude.translate_only.assert_called_once_with(
+        "Здравствуйте, ещё доступно", target_lang="de", source_lang="ru")
+    mdb.update_message.assert_called_once_with(
+        123, de_answer="Guten Tag, noch verfügbar",
+        status="edited",
+        ru_answer="Здравствуйте, ещё доступно",
+        ru_translation="Здравствуйте, ещё доступно")
+    msched.send_one.assert_not_called()
+
+
+def test_translate_draft_non_cyrillic_source(client):
+    """Не-кириллический исходник: source_lang не форсится, RU-зеркало не перезаписывается."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "Guten Tag"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/translate-draft",
+                 json={"text": "Hello, is it available?"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    mclaude.translate_only.assert_called_once_with(
+        "Hello, is it available?", target_lang="de", source_lang=None)
+    mdb.update_message.assert_called_once_with(
+        123, de_answer="Guten Tag", status="edited")
+
+
+def test_translate_draft_defaults_to_db_draft(client):
+    """Без text в body переводится de_answer из БД."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "Antwort-DE"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/translate-draft",
+                 json={},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    mclaude.translate_only.assert_called_once_with(
+        "Antwort", target_lang="de", source_lang=None)
+
+
+def test_translate_draft_empty_400(client):
+    """Пустой текст и пустой de_answer в БД → 400."""
+    c, mdb, mtb, msched, mclaude = client
+    mdb.get_message.return_value = _full_msg_row(de_answer="")
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/translate-draft",
+                 json={"text": "  "},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 400
+    mclaude.translate_only.assert_not_called()
+
+
+def test_translate_draft_empty_translation_500(client):
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": ""}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/translate-draft",
+                 json={"text": "Привет"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 500
+    mdb.update_message.assert_not_called()
+
+
+def test_translate_draft_409_when_locked(client):
+    c, mdb, mtb, msched, mclaude = client
+    mtb._check_lock.return_value = "@other#222"
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/translate-draft",
+                 json={"text": "Привет"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 409
+    mclaude.translate_only.assert_not_called()
+
+
 def test_skip_success(client):
     c, mdb, mtb, msched, mclaude = client
     init = make_init_data(TEST_USER)
