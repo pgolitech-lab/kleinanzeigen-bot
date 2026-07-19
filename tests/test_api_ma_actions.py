@@ -81,6 +81,87 @@ def test_send_success(client):
     mtb._release_lock.assert_called_once_with(123)
 
 
+def test_send_blocks_cyrillic_to_german_client(client):
+    """Кириллический текст немецкому клиенту без force → 409, ничего не отправлено."""
+    c, mdb, mtb, msched, mclaude = client
+    mdb.get_message.return_value = _full_msg_row(
+        de_answer="Здравствуйте, товар ещё в продаже")
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 409
+    assert "языке клиента" in res.json()["detail"]
+    msched.send_one.assert_not_called()
+
+
+def test_send_force_bypasses_lang_guard(client):
+    """Оператор явно подтвердил «отправить как есть» → уходит несмотря на кириллицу."""
+    c, mdb, mtb, msched, mclaude = client
+    mdb.get_message.return_value = _full_msg_row(
+        de_answer="Здравствуйте, товар ещё в продаже")
+    msched.send_one.return_value = {"kind": "ok", "message": "sent"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "as_is", "force": True},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    msched.send_one.assert_called_once_with(123)
+
+
+def test_send_cyrillic_ok_for_ru_client(client):
+    """Клиент пишет по-русски (client_lang=ru) → кириллица легитимна, guard молчит."""
+    c, mdb, mtb, msched, mclaude = client
+    mdb.get_message.return_value = _full_msg_row(
+        client_lang="ru", de_answer="Здравствуйте, ещё продаётся")
+    msched.send_one.return_value = {"kind": "ok", "message": "sent"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    msched.send_one.assert_called_once_with(123)
+
+
+def test_send_translate_mode(client):
+    """mode=translate: текст переводится на язык клиента, пишется в БД, потом send."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "Guten Tag, noch verfügbar"}
+    msched.send_one.return_value = {"kind": "ok", "message": "sent"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "translate", "text": "Здравствуйте, ещё доступно"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    mclaude.translate_only.assert_called_once_with(
+        "Здравствуйте, ещё доступно", target_lang="de", source_lang="ru")
+    mdb.update_message.assert_called_once_with(
+        123, de_answer="Guten Tag, noch verfügbar",
+        ru_answer="Здравствуйте, ещё доступно",
+        ru_translation="Здравствуйте, ещё доступно", status="edited")
+    msched.send_one.assert_called_once_with(123)
+
+
+def test_send_translate_mode_empty_translation_aborts(client):
+    """Перевод вернулся пустым → 500, отправки нет."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "  "}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "translate", "text": "Привет"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 500
+    msched.send_one.assert_not_called()
+
+
+def test_send_rejects_unknown_mode(client):
+    c, mdb, mtb, msched, mclaude = client
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "yolo"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 422
+    msched.send_one.assert_not_called()
+
+
 def test_send_409_when_locked_by_other(client):
     c, mdb, mtb, msched, mclaude = client
     mtb._check_lock.return_value = "@other#222"

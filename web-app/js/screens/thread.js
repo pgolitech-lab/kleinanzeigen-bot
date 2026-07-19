@@ -2,13 +2,13 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api } from "../api.js?v=20260717-132503";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260717-132503";
-import { setTitle } from "../components/backbar.js?v=20260717-132503";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260717-132503";
-import { buildEditForm } from "../components/edit-form.js?v=20260717-132503";
-import { buildComposeForm } from "../components/compose-form.js?v=20260717-132503";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260717-132503";
+import { api } from "../api.js?v=20260719-1";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260719-1";
+import { setTitle } from "../components/backbar.js?v=20260719-1";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260719-1";
+import { buildEditForm } from "../components/edit-form.js?v=20260719-1";
+import { buildComposeForm } from "../components/compose-form.js?v=20260719-1";
+import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260719-1";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -346,9 +346,21 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   }
 
   // ---------- обработчики ----------
-  // Значения на момент загрузки — edit-ru/edit-de шлём только если менялось
-  const lastRu = review?.draft?.ru_answer ?? "";
-  const lastDe = review?.draft?.de_answer ?? "";
+  // Значения последнего sync с сервером — edit-ru/edit-de шлём только если менялось
+  let lastRu = review?.draft?.ru_answer ?? "";
+  let lastDe = review?.draft?.de_answer ?? "";
+
+  // Кириллица при не-кириллическом языке клиента = почти наверняка ошибка
+  // (оператор напечатал русский во вкладку «DE → клиенту»). Зеркало серверного guard'а.
+  const CYRILLIC_CLIENT_LANGS = new Set(["ru", "uk", "be", "bg", "sr", "mk"]);
+  function wrongLangForClient(text, clientLang) {
+    const lang = (clientLang || "de").toLowerCase();
+    if (CYRILLIC_CLIENT_LANGS.has(lang)) return false;
+    const letters = text.match(/\p{L}/gu) || [];
+    if (!letters.length) return false;
+    const cyr = letters.filter(ch => ch >= "Ѐ" && ch <= "ӿ").length;
+    return cyr / letters.length > 0.3;
+  }
 
   async function sendHandler(sendBtn) {
     const ruNow = draft.querySelector(".ru-input").value.trim();
@@ -358,28 +370,101 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       return;
     }
     sendBtn.disabled = true;
-    sendBtn.textContent = "⏳ Отправляю…";
+    sendBtn.textContent = "⏳ Готовлю…";
+    let finalText = deNow;
     try {
-      // 1. Apply RU edit if changed
+      // Правки применяем ДО подтверждения: превью в шите должно показывать
+      // ровно то, что уйдёт клиенту (edit-ru перегенерирует DE из RU-идеи).
+      let fresh = null;
       if (ruNow !== lastRu && ruNow) {
-        await api(`/api/ma/messages/${latestPendingMsgId}/edit-ru`, {
+        fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-ru`, {
           method: "POST", body: {text: ruNow},
         });
+        lastRu = ruNow;
       }
-      // 2. Apply DE edit if changed
       if (deNow !== lastDe) {
-        await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
+        fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
           method: "POST", body: {text: deNow},
         });
+        lastDe = deNow;
       }
-      // 3. Send
-      await api(`/api/ma/messages/${latestPendingMsgId}/send`, {method: "POST"});
-      render(mount, params);
+      if (fresh) {
+        review.draft = fresh.draft;
+        finalText = fresh.draft?.de_answer ?? deNow;
+        draft.querySelector(".de-input").value = finalText;
+        draft.querySelector(".ru-input").value = fresh.draft?.ru_answer ?? ruNow;
+        draft.querySelector(".back-text").textContent = fresh.draft?.ru_translation ?? "(нет перевода)";
+        lastDe = finalText;
+        lastRu = fresh.draft?.ru_answer ?? lastRu;
+      }
     } catch (e) {
       draftError(e.message ?? String(e));
       sendBtn.disabled = false;
       sendBtn.textContent = "📨 Отправить";
+      return;
     }
+    sendBtn.disabled = false;
+    sendBtn.textContent = "📨 Отправить";
+    openSendConfirmSheet(finalText);
+  }
+
+  // Подтверждение перед отправкой: превью финального текста + язык клиента +
+  // [Отправить как есть] [Перевести на язык клиента и отправить] [Отменить].
+  function openSendConfirmSheet(finalText) {
+    const clientLang = (review?.client_lang || "de").toLowerCase();
+    const langUp = clientLang.toUpperCase();
+    const mismatch = wrongLangForClient(finalText, clientLang);
+    const box = el(`
+      <div>
+        <div class="small text-muted mb-1">Язык клиента: <b class="lang"></b></div>
+        <div class="preview-text p-2 rounded mb-2"
+             style="white-space:pre-wrap; font-size:.92em; max-height:40vh; overflow-y:auto; background:rgba(128,128,128,.14)"></div>
+        <div class="mismatch alert alert-warning small py-2 d-none">
+          ⚠️ Текст, похоже, НЕ на языке клиента — обычно это ошибка.
+          Надёжнее «Перевести и отправить».
+        </div>
+        <div class="send-err text-danger small mb-2 d-none"></div>
+        <div class="d-grid gap-2">
+          <button class="btn as-is-btn">📨 Отправить как есть</button>
+          <button class="btn translate-btn"></button>
+          <button class="btn cancel-btn">✕ Отменить</button>
+        </div>
+      </div>
+    `);
+    box.querySelector(".lang").textContent = langUp;
+    box.querySelector(".preview-text").textContent = finalText;
+    const asIsBtn = box.querySelector(".as-is-btn");
+    const trBtn = box.querySelector(".translate-btn");
+    const cancelBtn = box.querySelector(".cancel-btn");
+    trBtn.textContent = `🌐 Перевести на ${langUp} и отправить`;
+    // Акцент на безопасной кнопке: при mismatch — перевод, иначе — как есть
+    (mismatch ? trBtn : asIsBtn).classList.add("btn-primary");
+    if (mismatch) box.querySelector(".mismatch").classList.remove("d-none");
+
+    const errEl = box.querySelector(".send-err");
+    async function doSend(btn, busyLabel, body) {
+      const labels = [asIsBtn.textContent, trBtn.textContent];
+      [asIsBtn, trBtn, cancelBtn].forEach(b => b.disabled = true);
+      btn.textContent = busyLabel;
+      errEl.classList.add("d-none");
+      try {
+        await api(`/api/ma/messages/${latestPendingMsgId}/send`, {method: "POST", body});
+        closeSheet();
+        render(mount, params);
+      } catch (e) {
+        errEl.textContent = e.message ?? String(e);
+        errEl.classList.remove("d-none");
+        [asIsBtn, trBtn, cancelBtn].forEach(b => b.disabled = false);
+        asIsBtn.textContent = labels[0];
+        trBtn.textContent = labels[1];
+      }
+    }
+    asIsBtn.addEventListener("click", () =>
+      doSend(asIsBtn, "⏳ Отправляю…", {mode: "as_is", force: true}));
+    trBtn.addEventListener("click", () =>
+      doSend(trBtn, "⏳ Перевожу и отправляю…", {mode: "translate", text: finalText}));
+    cancelBtn.addEventListener("click", () => closeSheet());
+    openSheet(box, "Подтверждение отправки");
   }
 
   async function regenHandler(btn) {

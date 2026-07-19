@@ -448,9 +448,50 @@ def _ensure_lock(msg_id: int, actor: str) -> None:
     telegram_bot._acquire_lock(msg_id, actor)
 
 
+# ── Языковой guard отправки ──────────────────────────────────────────────
+# Сообщение клиенту должно уходить ТОЛЬКО на языке клиента (как правило DE).
+# Типичная ошибка: оператор печатает русский текст во вкладку «DE → клиенту»
+# и жмёт отправить — клиент получает кириллицу. Кириллический текст при
+# не-кириллическом client_lang почти наверняка ошибка → блокируем без force.
+_CYRILLIC_CLIENT_LANGS = {"ru", "uk", "be", "bg", "sr", "mk"}
+
+
+def _mostly_cyrillic(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    cyr = sum(1 for ch in letters if "Ѐ" <= ch <= "ӿ")
+    return cyr / len(letters) > 0.3
+
+
+def _wrong_lang_for_client(text: str, client_lang: "str | None") -> bool:
+    lang = (client_lang or "de").lower()
+    if lang in _CYRILLIC_CLIENT_LANGS:
+        return False
+    return _mostly_cyrillic(text)
+
+
+class SendBody(BaseModel):
+    # 'as_is' — отправить текст как есть; 'translate' — перевести на язык клиента и отправить
+    mode: str = "as_is"
+    # для mode='translate': актуальный текст из формы (иначе берётся de_answer из БД)
+    text: "str | None" = Field(None, max_length=4000)
+    # явное подтверждение оператора «отправить как есть» несмотря на языковой mismatch
+    force: bool = False
+
+    @field_validator("mode")
+    @classmethod
+    def _check_mode(cls, v: str) -> str:
+        if v not in {"as_is", "translate"}:
+            raise ValueError("mode must be 'as_is' or 'translate'")
+        return v
+
+
 @router.post("/messages/{msg_id}/send")
-async def ma_send(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
-    if db.get_message(msg_id) is None:
+async def ma_send(msg_id: int, body: "SendBody | None" = None,
+                  user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    row = db.get_message(msg_id)
+    if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
     foreign = _check_actor_holds(msg_id, actor)
@@ -458,7 +499,33 @@ async def ma_send(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
+    b = body or SendBody()
+    client_lang = (row["client_lang"] if "client_lang" in row.keys() else None) or "de"
+
     import asyncio
+    if b.mode == "translate":
+        # Оператор явно попросил перевести на язык клиента перед отправкой.
+        src_text = (b.text or "").strip() or ((row["de_answer"] if "de_answer" in row.keys() else "") or "").strip()
+        if not src_text:
+            raise HTTPException(400, "нечего переводить: текст пуст")
+        tr = await asyncio.to_thread(
+            claude.translate_only, src_text, target_lang=client_lang, source_lang="ru",
+        )
+        translated = (tr.get("translation", "") if isinstance(tr, dict) else str(tr)).strip()
+        if not translated:
+            raise HTTPException(500, "перевод вернулся пустым — отправка отменена")
+        # Исходный текст оператора сохраняем как RU-зеркало для верификации
+        db.update_message(msg_id, de_answer=translated, ru_answer=src_text,
+                          ru_translation=src_text, status="edited")
+    else:
+        out_text = ((row["de_answer"] if "de_answer" in row.keys() else "") or "")
+        if not b.force and _wrong_lang_for_client(out_text, client_lang):
+            raise HTTPException(
+                409,
+                f"Текст, похоже, не на языке клиента ({client_lang.upper()}). "
+                "Подтвердите отправку «как есть» или выберите «Перевести и отправить».",
+            )
+
     result = await asyncio.to_thread(scheduler.send_one, msg_id)
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "send failed"))
