@@ -1012,6 +1012,60 @@ def classify_email_is_inquiry(
     }
 
 
+_LANG_DETECT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "lang": {
+            "type": "string",
+            "description": "ISO 639-1 код основного языка текста, или 'und' если текст языково-нейтрален",
+        },
+    },
+    "required": ["lang"],
+}
+
+
+def detect_text_lang(text: str) -> dict[str, Any]:
+    """Определить основной язык текста дешёвой моделью (Haiku).
+
+    Финальный языковой guard send-флоу MA: ловит не-кириллические несовпадения
+    (например, английский текст немецкому клиенту), которые эвристика по
+    кириллице пропускает. Возвращает {lang, tokens_in, tokens_out, cost_usd};
+    lang='und' для языково-нейтрального текста (числа, «Ok», emoji).
+    """
+    api_key = config.anthropic_api_key()
+    if not api_key:
+        raise RuntimeError("Не задан Anthropic API key")
+
+    client = anthropic.Anthropic(api_key=api_key)
+    detector_model = "claude-haiku-4-5"
+    response = client.messages.create(
+        model=detector_model,
+        max_tokens=100,
+        system="Ты определяешь язык текста. Отвечаешь строго по схеме.",
+        # Haiku не поддерживает effort/thinking — не передавать
+        output_config={
+            "format": {"type": "json_schema", "schema": _LANG_DETECT_SCHEMA},
+        },
+        messages=[{"role": "user", "content": (
+            "Определи ОСНОВНОЙ язык этого сообщения (ISO 639-1: de/en/ru/tr/fr/...).\n"
+            "Если текст языково-нейтрален (только числа, цены, имена, 'Ok', emoji) — верни 'und'.\n"
+            "Вежливая подпись на другом языке (MfG и т.п.) не меняет основной язык.\n\n"
+            f"Текст:\n{(text or '')[:2000]}"
+        )}],
+    )
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    if not raw:
+        raise RuntimeError("Пустой ответ детектора языка")
+    data = json.loads(raw)
+    in_t, out_t, cost = _calc_cost(detector_model, response.usage)
+    return {
+        "lang": (data.get("lang") or "und").strip().lower(),
+        "tokens_in": in_t,
+        "tokens_out": out_t,
+        "cost_usd": cost,
+    }
+
+
 _AUTO_ACK_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

@@ -585,6 +585,43 @@ async def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = No
     return _message_review_dict(msg_id)
 
 
+class LangCheckBody(BaseModel):
+    # Текст для проверки; если пуст — берётся de_answer из БД
+    text: "str | None" = Field(None, max_length=4000)
+
+
+@router.post("/messages/{msg_id}/lang-check")
+async def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
+                        user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """LLM-проверка (Haiku) языка финального текста перед отправкой.
+
+    Ловит несовпадения, которые кириллическая эвристика не видит (например,
+    английский текст немецкому клиенту). Read-only: ничего не пишет и не шлёт.
+    match=true также при lang='und' (языково-нейтральный текст — не блокируем).
+    """
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+
+    b = body or LangCheckBody()
+    text = (b.text or "").strip() or ((row["de_answer"] if "de_answer" in row.keys() else "") or "").strip()
+    if not text:
+        raise HTTPException(400, "нечего проверять: текст пуст")
+    client_lang = ((row["client_lang"] if "client_lang" in row.keys() else None) or "de").lower()
+
+    import asyncio
+    try:
+        res = await asyncio.to_thread(claude.detect_text_lang, text)
+    except Exception as e:
+        # 502 — фронт покажет «проверка недоступна», но НЕ разблокирует чужой язык:
+        # кириллическая эвристика и серверный guard в /send остаются
+        raise HTTPException(502, f"проверка языка недоступна: {e}")
+
+    detected = (res.get("lang") or "und").lower()
+    match = detected == "und" or detected == client_lang
+    return {"detected_lang": detected, "client_lang": client_lang, "match": match}
+
+
 @router.post("/messages/{msg_id}/skip")
 async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:

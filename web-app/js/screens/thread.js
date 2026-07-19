@@ -2,13 +2,13 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api } from "../api.js?v=20260719-2";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260719-2";
-import { setTitle } from "../components/backbar.js?v=20260719-2";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260719-2";
-import { buildEditForm } from "../components/edit-form.js?v=20260719-2";
-import { buildComposeForm } from "../components/compose-form.js?v=20260719-2";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260719-2";
+import { api } from "../api.js?v=20260719-3";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260719-3";
+import { setTitle } from "../components/backbar.js?v=20260719-3";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260719-3";
+import { buildEditForm } from "../components/edit-form.js?v=20260719-3";
+import { buildComposeForm } from "../components/compose-form.js?v=20260719-3";
+import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260719-3";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -590,22 +590,20 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     openSheet(box, "Подготовка к отправке");
   }
 
-  // Этап 3: финальный текст к отправке. Языковой guard: если текст не на языке
-  // клиента — отправка ТОЛЬКО после явной галочки-разрешения (force для сервера).
+  // Этап 3: финальный текст к отправке. Двухслойный языковой guard:
+  // мгновенная кириллическая эвристика + LLM-проверка (Haiku) через /lang-check.
+  // Чужой язык — отправка ТОЛЬКО после явной галочки-разрешения (force для сервера).
   function openFinalSheet() {
     const clientLang = (review?.client_lang || "de").toLowerCase();
     const langUp = clientLang.toUpperCase();
     const text = curText();
-    const mismatch = wrongLangForClient(text, clientLang);
     const box = el(`
       <div>
         <div class="small text-muted mb-1">Уйдёт клиенту (язык: <b class="lang"></b>):</div>
         <div class="preview-slot"></div>
+        <div class="lang-status small text-muted mb-2"></div>
         <div class="mismatch d-none">
-          <div class="alert alert-danger small py-2 mb-2">
-            ⚠️ Текст НЕ на языке клиента. Отправка заблокирована —
-            вернитесь и переведите, либо явно разрешите ниже.
-          </div>
+          <div class="alert alert-danger small py-2 mb-2 mm-text"></div>
           <div class="form-check mb-2">
             <input type="checkbox" class="form-check-input allow-lang" id="allow-lang-cb">
             <label class="form-check-label small" for="allow-lang-cb">
@@ -626,29 +624,69 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     const sendBtn = box.querySelector(".send-btn");
     const editBtn = box.querySelector(".edit-btn");
     const cancelBtn = box.querySelector(".cancel-btn");
-    let allowCb = null;
-    if (mismatch) {
+    const allowCb = box.querySelector(".allow-lang");
+    const statusEl = box.querySelector(".lang-status");
+
+    let blocked = false;   // язык не совпал (эвристика или Haiku)
+    let checking = false;  // Haiku-проверка в полёте — send выключен
+    let sending = false;
+    function syncSendState() {
+      sendBtn.disabled = sending || checking || (blocked && !allowCb.checked);
+    }
+    function blockLang(msgText) {
+      blocked = true;
+      box.querySelector(".mm-text").textContent = msgText;
       box.querySelector(".mismatch").classList.remove("d-none");
-      allowCb = box.querySelector(".allow-lang");
-      sendBtn.disabled = true;
-      allowCb.addEventListener("change", () => { sendBtn.disabled = !allowCb.checked; });
+      syncSendState();
+    }
+    allowCb.addEventListener("change", syncSendState);
+
+    if (wrongLangForClient(text, clientLang)) {
+      // Кириллица чужому клиенту — блок сразу, Haiku не нужен
+      blockLang("⚠️ Текст НЕ на языке клиента. Отправка заблокирована — " +
+                "вернитесь и переведите, либо явно разрешите ниже.");
+    } else {
+      // Haiku-проверка: до вердикта отправка выключена
+      checking = true;
+      statusEl.textContent = "⏳ Проверяю язык (Haiku)…";
+      syncSendState();
+      api(`/api/ma/messages/${latestPendingMsgId}/lang-check`, {
+        method: "POST", body: {text},
+      }).then(r => {
+        checking = false;
+        if (r.match) {
+          statusEl.textContent = `✓ Язык совпадает (${(r.detected_lang || "?").toUpperCase()})`;
+        } else {
+          statusEl.textContent = "";
+          blockLang(`⚠️ Haiku определил язык текста: ${(r.detected_lang || "?").toUpperCase()}, ` +
+                    `а язык клиента — ${langUp}. Отправка заблокирована — ` +
+                    "вернитесь и переведите, либо явно разрешите ниже.");
+        }
+        syncSendState();
+      }).catch(() => {
+        checking = false;
+        statusEl.textContent = "⚠️ LLM-проверка языка недоступна — сработала только быстрая эвристика";
+        syncSendState();
+      });
     }
 
     sendBtn.addEventListener("click", async () => {
+      sending = true;
       [sendBtn, editBtn, cancelBtn].forEach(b => b.disabled = true);
       sendBtn.textContent = "⏳ Отправляю…";
       try {
         // force=true только при явной галочке-разрешении оператора
         await api(`/api/ma/messages/${latestPendingMsgId}/send`, {
           method: "POST",
-          body: {mode: "as_is", force: mismatch && allowCb?.checked === true},
+          body: {mode: "as_is", force: blocked && allowCb.checked === true},
         });
         closeSheet();
         render(mount, params);
       } catch (e) {
         showFlowErr(box, e);
+        sending = false;
         [editBtn, cancelBtn].forEach(b => b.disabled = false);
-        sendBtn.disabled = mismatch && !(allowCb?.checked);
+        syncSendState();
         sendBtn.textContent = "✅ Отправить";
       }
     });

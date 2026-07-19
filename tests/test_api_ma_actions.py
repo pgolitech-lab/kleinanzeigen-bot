@@ -266,6 +266,78 @@ def test_translate_draft_409_when_locked(client):
     mclaude.translate_only.assert_not_called()
 
 
+def test_lang_check_match(client):
+    """Haiku подтвердил язык клиента → match=true."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.detect_text_lang.return_value = {"lang": "de"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/lang-check",
+                 json={"text": "Guten Tag, noch verfügbar"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    assert res.json() == {"detected_lang": "de", "client_lang": "de", "match": True}
+    mclaude.detect_text_lang.assert_called_once_with("Guten Tag, noch verfügbar")
+
+
+def test_lang_check_mismatch(client):
+    """Английский текст немецкому клиенту → match=false (эвристика такое не ловит)."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.detect_text_lang.return_value = {"lang": "en"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/lang-check",
+                 json={"text": "Hello, still available"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    assert res.json()["match"] is False
+    assert res.json()["detected_lang"] == "en"
+
+
+def test_lang_check_neutral_und_matches(client):
+    """Языково-нейтральный текст (lang='und') не блокирует отправку."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.detect_text_lang.return_value = {"lang": "und"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/lang-check",
+                 json={"text": "Ok, 100€"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    assert res.json()["match"] is True
+
+
+def test_lang_check_defaults_to_db_draft(client):
+    """Без text в body проверяется de_answer из БД."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.detect_text_lang.return_value = {"lang": "de"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/lang-check",
+                 json={},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    mclaude.detect_text_lang.assert_called_once_with("Antwort")
+
+
+def test_lang_check_empty_400(client):
+    c, mdb, mtb, msched, mclaude = client
+    mdb.get_message.return_value = _full_msg_row(de_answer="")
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/lang-check",
+                 json={"text": " "},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 400
+    mclaude.detect_text_lang.assert_not_called()
+
+
+def test_lang_check_502_on_llm_failure(client):
+    """Haiku недоступен → 502; фронт не разблокирует, эвристика и /send-guard остаются."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.detect_text_lang.side_effect = RuntimeError("API down")
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/lang-check",
+                 json={"text": "Guten Tag"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 502
+
+
 def test_skip_success(client):
     c, mdb, mtb, msched, mclaude = client
     init = make_init_data(TEST_USER)
