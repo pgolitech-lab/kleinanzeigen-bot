@@ -2,13 +2,13 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api } from "../api.js?v=20260719-3";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260719-3";
-import { setTitle } from "../components/backbar.js?v=20260719-3";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260719-3";
-import { buildEditForm } from "../components/edit-form.js?v=20260719-3";
-import { buildComposeForm } from "../components/compose-form.js?v=20260719-3";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260719-3";
+import { api } from "../api.js?v=20260720-1";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260720-1";
+import { setTitle } from "../components/backbar.js?v=20260720-1";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260720-1";
+import { buildEditForm } from "../components/edit-form.js?v=20260720-1";
+import { buildComposeForm } from "../components/compose-form.js?v=20260720-1";
+import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260720-1";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -247,7 +247,7 @@ async function tryReleaseLock(msgId) {
   }
 }
 
-export async function render(mount, params) {
+export async function render(mount, params, opts = {}) {
   // Cleanup: release предыдущий lock (если был на другом thread)
   if (_heldMsgId !== null) {
     await tryReleaseLock(_heldMsgId);
@@ -258,7 +258,7 @@ export async function render(mount, params) {
   try {
     const data = await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}`);
     // If deep-linked via /thread/{id}/msg/{N} — focus on that msg_id, else find latest pending
-    const latestPendingMsgId = params.focus_msg_id ? Number(params.focus_msg_id) : findLatestPending(data.events);
+    let latestPendingMsgId = params.focus_msg_id ? Number(params.focus_msg_id) : findLatestPending(data.events);
 
     let review = null;
     let acquired = false;
@@ -271,7 +271,25 @@ export async function render(mount, params) {
       } catch (e) {
         console.warn("[thread] review fetch failed:", e);
       }
+      // Deep-link форсирует msg_id независимо от статуса: после отправки этот же
+      // черновик рисовался как «ждёт проверки» с активной кнопкой «Отправить» —
+      // оператор не видел, что письмо ушло, и жал ещё раз (спасал duplicate-guard).
+      // Не-pending draft показываем как историю: ищем другой pending в треде.
+      if (review && !PENDING_STATUSES.has(review.status)) {
+        review = null;
+        const fallback = findLatestPending(data.events);
+        latestPendingMsgId = fallback !== latestPendingMsgId ? fallback : null;
+        if (latestPendingMsgId !== null) {
+          try {
+            review = await api(`/api/ma/messages/${latestPendingMsgId}`);
+          } catch (e) {
+            console.warn("[thread] fallback review fetch failed:", e);
+          }
+        }
+      }
+    }
 
+    if (latestPendingMsgId !== null) {
       try {
         const lockRes = await api(`/api/ma/messages/${latestPendingMsgId}/lock/acquire`, {method: "POST"});
         acquired = true;
@@ -290,18 +308,22 @@ export async function render(mount, params) {
       }
     }
 
-    renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor);
+    renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor, opts);
 
   } catch (e) {
     setError(mount, e.message ?? String(e));
   }
 }
 
-function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor) {
+function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor, opts = {}) {
   const container = el(`<div></div>`);
   if (data.header?.ad_title) setTitle(data.header.ad_title);
 
   container.appendChild(threadHeader(data.header, review?.lock ?? null, ourActor));
+  if (opts.sentBanner) {
+    container.appendChild(el(
+      `<div class="alert alert-success small py-2">✅ Сообщение отправлено клиенту</div>`));
+  }
   const related = relatedBlock(data.related);
   if (related) container.appendChild(related);
 
@@ -681,7 +703,9 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
           body: {mode: "as_is", force: blocked && allowCb.checked === true},
         });
         closeSheet();
-        render(mount, params);
+        // focus_msg_id сбрасываем: иначе перерисовка вернёт только что отправленный
+        // черновик как «ждёт проверки» с активной отправкой
+        render(mount, {...params, focus_msg_id: null}, {sentBanner: true});
       } catch (e) {
         showFlowErr(box, e);
         sending = false;

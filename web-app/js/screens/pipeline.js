@@ -1,9 +1,9 @@
 // 📥 Входящие — единый инбокс всех аккаунтов (редизайн 2026-07-15).
 // Карточки с цветной полоской аккаунта, чипы состояний вместо эмодзи,
 // фильтры-чипы, тёмная bulk-панель. Логика API/поллинга без изменений.
-import { api } from "../api.js?v=20260719-3";
-import { el, berlinTime, setLoading, setError, accountColor, chip } from "../utils.js?v=20260719-3";
-import { confirmSheet } from "../components/sheet.js?v=20260719-3";
+import { api } from "../api.js?v=20260720-1";
+import { el, berlinTime, setLoading, setError, accountColor, chip } from "../utils.js?v=20260720-1";
+import { confirmSheet } from "../components/sheet.js?v=20260720-1";
 
 const state = { account: "", status: "all" };
 const sel = { active: false, ids: new Set() };
