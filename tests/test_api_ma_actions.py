@@ -63,6 +63,10 @@ def client():
         mtb.broadcast_after_external_action.return_value = None
         mol.state.return_value = ("@pgtest#999", 1700000000.0)
         mol.remaining_min.return_value = 5
+        # db.get_conn() — контекст-менеджер; по умолчанию устаревших черновиков нет
+        conn_cm = MagicMock()
+        conn_cm.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        mdb.get_conn.return_value = conn_cm
         from web.app import app
         yield TestClient(app), mdb, mtb, msched, mclaude
 
@@ -183,6 +187,56 @@ def test_send_500_on_smtp_failure(client):
     assert "SMTP timeout" in body["detail"]
     # Lock не освобождаем при ошибке — оператор может попробовать ещё
     mtb._release_lock.assert_not_called()
+
+
+def test_send_closes_stale_older_drafts(client):
+    """После отправки старые pending-черновики треда закрываются (status='skipped')."""
+    c, mdb, mtb, msched, mclaude = client
+    msched.send_one.return_value = {"kind": "ok", "message": "sent"}
+    conn_cm = MagicMock()
+    conn = conn_cm.__enter__.return_value
+    conn.execute.return_value.fetchall.return_value = [_row(id=2122), _row(id=2138)]
+    mdb.get_conn.return_value = conn_cm
+
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "as_is"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    assert set(res.json()["closed_drafts"]) == {2122, 2138}
+    # UPDATE ограничен тем же тредом и только более старыми id
+    update_sql, update_args = conn.execute.call_args_list[-1][0]
+    assert "UPDATE messages SET status='skipped'" in update_sql
+    assert "id < ?" in update_sql
+    assert update_args == ("abc", 123)
+    # мини-карточки закрытых черновиков обновляются
+    broadcast_ids = [c_.args[0] for c_ in mtb.broadcast_after_external_action.call_args_list]
+    assert 2122 in broadcast_ids and 2138 in broadcast_ids
+
+
+def test_send_without_stale_drafts_closes_nothing(client):
+    c, mdb, mtb, msched, mclaude = client
+    msched.send_one.return_value = {"kind": "ok", "message": "sent"}
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "as_is"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 200
+    assert res.json()["closed_drafts"] == []
+
+
+def test_send_failure_keeps_drafts_open(client):
+    """SMTP упал → ничего не закрываем."""
+    c, mdb, mtb, msched, mclaude = client
+    msched.send_one.return_value = {"kind": "error", "message": "SMTP timeout"}
+    conn_cm = MagicMock()
+    conn_cm.__enter__.return_value.execute.return_value.fetchall.return_value = [_row(id=2122)]
+    mdb.get_conn.return_value = conn_cm
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/send",
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 500
+    mdb.get_conn.assert_not_called()
 
 
 def test_translate_draft_cyrillic_source(client):

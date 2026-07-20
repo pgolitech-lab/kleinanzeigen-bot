@@ -530,12 +530,42 @@ async def ma_send(msg_id: int, body: "SendBody | None" = None,
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "send failed"))
 
+    # Ответ клиенту закрывает БОЛЕЕ СТАРЫЕ pending-черновики этого треда: они
+    # относятся к предыдущим письмам клиента и уже неактуальны. Иначе сразу после
+    # отправки экран показывает следующий устаревший черновик с активной кнопкой
+    # «Отправить», и оператор думает, что письмо не ушло (инцидент 2026-07-20).
+    # Более новые входящие (id > msg_id) не трогаем — это неотвеченные вопросы.
+    # Та же логика, что в /threads/{id}/compose.
+    thread_id = row["gmail_thread_id"] if "gmail_thread_id" in row.keys() else None
+    closed_drafts: list[int] = []
+    if thread_id:
+        with db.get_conn() as conn:
+            stale = conn.execute(
+                "SELECT id FROM messages WHERE gmail_thread_id=? AND direction='in' "
+                "AND id < ? AND status IN ('pending','new','edited','approved')",
+                (thread_id, msg_id),
+            ).fetchall()
+            closed_drafts = [r["id"] for r in stale]
+            if closed_drafts:
+                conn.execute(
+                    "UPDATE messages SET status='skipped' WHERE gmail_thread_id=? "
+                    "AND direction='in' AND id < ? "
+                    "AND status IN ('pending','new','edited','approved')",
+                    (thread_id, msg_id),
+                )
+
     telegram_bot.broadcast_after_external_action(msg_id)
+    for mid in closed_drafts:
+        try:
+            telegram_bot.broadcast_after_external_action(mid)
+        except Exception:
+            pass  # best-effort: устаревшая карточка могла быть удалена
     telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
 
     fresh = db.get_message(msg_id)
-    return {"ok": True, "status": fresh["status"] if fresh else "sent"}
+    return {"ok": True, "status": fresh["status"] if fresh else "sent",
+            "closed_drafts": closed_drafts}
 
 
 class TranslateDraftBody(BaseModel):
