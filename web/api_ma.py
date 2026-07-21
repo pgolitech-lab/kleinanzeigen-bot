@@ -1650,7 +1650,27 @@ def _scout_query_dict(q: Any) -> dict[str, Any]:
     }
 
 
-def _scout_listing_dict(r: Any) -> dict[str, Any]:
+def _scout_unseen_cutoff() -> str:
+    """ISO-порог «объявление считается снятым»: now - scout_stale_days."""
+    from datetime import datetime as _d, timedelta as _t
+    return (_d.utcnow() - _t(days=config.scout_stale_days())).isoformat()
+
+
+def _days_unseen(last_seen: "str | None") -> "int | None":
+    if not last_seen:
+        return None
+    from datetime import datetime as _d
+    try:
+        seen = _d.fromisoformat(str(last_seen).replace("Z", "").split("+")[0])
+    except ValueError:
+        return None
+    return max(0, (_d.utcnow() - seen).days)
+
+
+def _scout_listing_dict(r: Any, cutoff: "str | None" = None) -> dict[str, Any]:
+    last_seen = r["last_seen_at"] if "last_seen_at" in r.keys() else None
+    active = bool(r["active"]) if "active" in r.keys() else True
+    removed = (not active) or bool(cutoff and last_seen and str(last_seen) < cutoff)
     return {
         "ad_id": r["ad_id"], "kind": r["kind"], "title": r["title"], "url": r["url"],
         "price_eur": r["price_eur"], "negotiable": bool(r["negotiable"]),
@@ -1659,6 +1679,8 @@ def _scout_listing_dict(r: Any) -> dict[str, Any]:
         "gearbox": r["gearbox"], "model_family": r["model_family"],
         "part_type": r["part_type"], "condition": r["condition"],
         "posted_raw": r["posted_raw"],
+        "removed": removed,
+        "days_unseen": _days_unseen(last_seen),
     }
 
 
@@ -1675,7 +1697,7 @@ async def ma_scout_overview(user: dict = Depends(verify_init_data_dep)) -> dict[
     """Сводка разведки: счётчики, статус прогона, запросы, регионы."""
     st = scout_runner.status()
     return {
-        "counts": db.scout_counts(),
+        "counts": db.scout_counts(_scout_unseen_cutoff()),
         "auto_enabled": config.scout_auto_enabled(),
         "interval_hours": config.scout_interval_hours(),
         "running": st["running"],
@@ -1688,12 +1710,26 @@ async def ma_scout_overview(user: dict = Depends(verify_init_data_dep)) -> dict[
 
 
 @router.get("/scout/listings")
-async def ma_scout_listings(kind: str = "car",
+async def ma_scout_listings(kind: str = "car", include_removed: bool = False,
                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Активные объявления разведки одного вида (car|part). Фильтрация — на клиенте."""
+    """Объявления разведки одного вида (car|part). Фильтрация — на клиенте.
+
+    По умолчанию снятые (нет в выдаче дольше scout_stale_days) не отдаются.
+    include_removed=true — отдать вместе с ними, каждое с флагом removed.
+    """
     kind = "part" if kind == "part" else "car"
-    rows = db.list_scout_listings(kind=kind)
-    return {"kind": kind, "listings": [_scout_listing_dict(r) for r in rows]}
+    cutoff = _scout_unseen_cutoff()
+    rows = db.list_scout_listings(
+        kind=kind,
+        only_active=not include_removed,
+        unseen_cutoff=None if include_removed else cutoff,
+    )
+    listings = [_scout_listing_dict(r, cutoff) for r in rows]
+    return {
+        "kind": kind,
+        "listings": listings,
+        "removed_count": sum(1 for x in listings if x["removed"]),
+    }
 
 
 @router.get("/scout/status")
@@ -1701,7 +1737,7 @@ async def ma_scout_status(user: dict = Depends(verify_init_data_dep)) -> dict[st
     """Статус фонового прогона (для поллинга)."""
     st = scout_runner.status()
     return {"running": st["running"], "started_at": st["started_at"],
-            "summary": st["summary"], "counts": db.scout_counts()}
+            "summary": st["summary"], "counts": db.scout_counts(_scout_unseen_cutoff())}
 
 
 class ScoutRunBody(BaseModel):

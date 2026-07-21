@@ -149,14 +149,23 @@ def list_scout_listings(
     part_type: Optional[str] = None,
     condition: Optional[str] = None,
     city: Optional[str] = None,
+    unseen_cutoff: Optional[str] = None,
 ) -> list[sqlite3.Row]:
-    """Объявления разведки с фильтрами (по ЭФФЕКТИВНОМУ виду). Сортировка: земля, город, цена."""
+    """Объявления разведки с фильтрами (по ЭФФЕКТИВНОМУ виду). Сортировка: земля, город, цена.
+
+    unseen_cutoff — ISO-порог: объявления, которых нет в выдаче с этого момента,
+    считаются снятыми и не возвращаются. Флаг active обновляется только при
+    ПОЛНОМ прогоне, поэтому опираться на него одного нельзя: пока авто-прогон
+    был выключен, снятые месяц назад объявления оставались active=1 (2026-07-21).
+    """
     sql = "SELECT * FROM scout_listings WHERE 1=1"
     params: list[Any] = []
     if kind:
         sql += f" AND {_EFF_KIND} = ?"; params.append(kind)
     if only_active:
         sql += " AND active = 1"
+    if unseen_cutoff:
+        sql += " AND last_seen_at >= ?"; params.append(unseen_cutoff)
     if bundesland:
         sql += " AND bundesland = ?"; params.append(bundesland)
     if city:
@@ -213,18 +222,38 @@ def scout_city_summary(kind: str) -> list[sqlite3.Row]:
         return conn.execute(sql, (kind,)).fetchall()
 
 
-def scout_counts() -> dict[str, int]:
-    """Сводка по активным: машины, запчасти (effective kind), other, не проверено."""
+def scout_counts(unseen_cutoff: Optional[str] = None) -> dict[str, int]:
+    """Сводка по живым: машины, запчасти (effective kind), other, не проверено.
+
+    unseen_cutoff — снятые (нет в выдаче с этого момента) в счётчики не идут,
+    иначе оператор видит завышенные цифры по объявлениям, которых уже нет.
+    Отдельным ключом removed — сколько таких скрыто.
+    """
     with get_conn() as conn:
-        def c(where: str, *p: Any) -> int:
+        alive = "active=1"
+        base_params: list[Any] = []
+        if unseen_cutoff:
+            alive += " AND last_seen_at >= ?"
+            base_params.append(unseen_cutoff)
+
+        def c(where: str) -> int:
             return conn.execute(
-                f"SELECT COUNT(*) c FROM scout_listings WHERE active=1 AND {where}", p
+                f"SELECT COUNT(*) c FROM scout_listings WHERE {alive} AND {where}",
+                base_params,
+            ).fetchone()["c"]
+
+        removed = 0
+        if unseen_cutoff:
+            removed = conn.execute(
+                "SELECT COUNT(*) c FROM scout_listings "
+                "WHERE active=1 AND last_seen_at < ?", (unseen_cutoff,),
             ).fetchone()["c"]
         return {
             "cars": c(f"{_EFF_KIND}='car'"),
             "parts": c(f"{_EFF_KIND}='part'"),
             "other": c(f"{_EFF_KIND}='other'"),
             "unverified": c("verified_kind IS NULL"),
+            "removed": removed,
         }
 
 

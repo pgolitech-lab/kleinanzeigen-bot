@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260721-1";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260721-1";
-import { openLink } from "../tg.js?v=20260721-1";
+import { api } from "../api.js?v=20260721-2";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260721-2";
+import { openLink } from "../tg.js?v=20260721-2";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -24,6 +24,7 @@ const S = {
   land: { car: null, part: null },           // фильтр по земле (с карты/списка)
   cityQ: { car: "", part: "" },              // поиск по названию города
   citySort: { car: "count", part: "count" }, // count | price | name
+  showRemoved: false,       // показывать снятые (нет в выдаче > scout_stale_days)
 };
 
 function eur(v) {
@@ -50,6 +51,14 @@ function _cardShell(item, kind, rerender, specs) {
   card.querySelector(".loc").textContent =
     `📍 ${item.plz || ""} ${item.city || ""}${item.bundesland ? " (" + item.bundesland + ")" : ""}` +
     (item.posted_raw ? ` · ${item.posted_raw}` : "");
+  if (item.removed) {
+    card.classList.add("removed-item");
+    card.style.opacity = ".55";
+    const d = item.days_unseen;
+    const badge = el(`<span class="badge bg-secondary ms-1 rm-badge"></span>`);
+    badge.textContent = d != null ? `снято · ${d} дн не в выдаче` : "снято";
+    card.querySelector(".loc").appendChild(badge);
+  }
   const bar = corrBar(kind, item.ad_id, rerender);
   card.appendChild(bar);
   card.querySelector(".flag").addEventListener("click", () => {
@@ -230,7 +239,8 @@ async function renderListTab(container, kind) {
   if ((kind === "car" ? S.cars : S.parts) === null) {
     container.replaceChildren(el(`<p class="text-muted py-3">Загружаю…</p>`));
     try {
-      const data = await api(`/api/ma/scout/listings?kind=${kind}`);
+      const q = S.showRemoved ? `?kind=${kind}&include_removed=true` : `?kind=${kind}`;
+      const data = await api(`/api/ma/scout/listings${q}`);
       if (kind === "car") S.cars = data.listings; else S.parts = data.listings;
     } catch (e) { setError(container, e.message ?? String(e)); return; }
   }
@@ -240,10 +250,31 @@ async function renderListTab(container, kind) {
   else renderLandsView(container, kind);
 }
 
+// Галка «показывать снятые». Снятое = объявления нет в выдаче дольше
+// scout_stale_days: почти всегда продано/удалено. По умолчанию скрыты и не
+// учитываются в счётчиках — иначе рынок выглядит больше, чем есть.
+function removedToggle(container, kind) {
+  const wrap = el(`
+    <div class="form-check form-switch small mb-2">
+      <input class="form-check-input" type="checkbox" id="show-removed">
+      <label class="form-check-label text-muted" for="show-removed">🗑 Показывать снятые</label>
+    </div>`);
+  const cb = wrap.querySelector("input");
+  cb.checked = S.showRemoved;
+  cb.addEventListener("change", () => {
+    S.showRemoved = cb.checked;
+    S.cars = null; S.parts = null;          // перезапрос: набор объявлений другой
+    S.view[kind] = "lands"; S.land[kind] = null; S.city[kind] = null;
+    renderListTab(container, kind);
+  });
+  return wrap;
+}
+
 // Уровень 1: список ЗЕМЕЛЬ + кликабельная тепловая карта.
 function renderLandsView(container, kind) {
   const all = kind === "car" ? S.cars : S.parts;
   const root = el(`<div></div>`);
+  root.appendChild(removedToggle(container, kind));
   const open = (land) => { S.land[kind] = land; S.view[kind] = "cities"; S.cityQ[kind] = ""; renderCitiesView(container, kind); };
 
   const heatDet = el(`<details class="mb-2" open><summary class="small text-muted">🗺 Тепловая карта — нажми землю</summary></details>`);
