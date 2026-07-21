@@ -45,6 +45,22 @@ def _extract_folder_id(raw: str) -> str:
 
 # --- Авторизация ---
 
+def is_configured() -> bool:
+    """Настроен ли Drive-бекап: есть валидный ключ сервис-аккаунта.
+
+    Ненастроенный бекап — не ошибка, а выключенная фича: job не должен падать
+    и поднимать ERROR (иначе hourly-мониторинг шлёт алерт в Telegram каждый день).
+    """
+    creds_json = config.google_drive_credentials_json()
+    if not creds_json:
+        return False
+    try:
+        info = json.loads(creds_json)
+    except json.JSONDecodeError:
+        return False
+    return info.get("type") == "service_account" and bool(info.get("client_email"))
+
+
 def _get_drive_service() -> Any:
     """Создать клиент Drive API из credentials JSON в настройках."""
     creds_json = config.google_drive_credentials_json()

@@ -182,6 +182,12 @@ def check_reminders() -> str:
 
 def run_backup() -> str:
     """Job: бекап SQLite в Google Drive + ротация старых."""
+    # Ключ сервис-аккаунта не задан → бекап просто выключен. Раньше job падал с
+    # ERROR каждый день, и hourly-мониторинг слал алерт в Telegram (2026-07-21).
+    if not backup.is_configured():
+        logger.info("Бекап пропущен: Google Drive не настроен "
+                    "(settings → google_drive_credentials_json)")
+        return "backup: not configured, skipped"
     try:
         result = backup.backup_and_rotate(keep=14)
         msg = f"OK: {result['backup'].get('name')}, удалено старых: {result['deleted_old']}"
