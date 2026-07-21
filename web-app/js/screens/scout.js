@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260720-1";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260720-1";
-import { openLink } from "../tg.js?v=20260720-1";
+import { api } from "../api.js?v=20260721-1";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260721-1";
+import { openLink } from "../tg.js?v=20260721-1";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -560,7 +560,10 @@ function renderShell(mount) {
           <span class="badge bg-warning ms-1 uc" style="display:none"></span>
         </span>
       </div>
-      <div class="small text-muted mb-2 autostat"></div>
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <div class="small text-muted autostat flex-grow-1"></div>
+        <button class="btn btn-sm auto-toggle"></button>
+      </div>
       <ul class="nav nav-pills nav-fill mb-2 subnav">
         <li class="nav-item"><a class="nav-link py-1" data-tab="car" role="button">🚐 Машины</a></li>
         <li class="nav-item"><a class="nav-link py-1" data-tab="part" role="button">🪑 Запчасти</a></li>
@@ -576,6 +579,28 @@ function renderShell(mount) {
     (ov.auto_enabled ? `авто-прогон каждые ${ov.interval_hours}ч` : "авто-прогон выключен") +
     (ov.counts.other ? ` · 🚫 другое: ${ov.counts.other}` : "") +
     (ov.running ? " · ⏳ идёт прогон" : "");
+
+  // Тумблер авто-прогона. Без него настройка была недоступна из MA вообще:
+  // scout_job каждые N часов молча возвращал «auto disabled», база протухала.
+  const autoBtn = root.querySelector(".auto-toggle");
+  autoBtn.textContent = ov.auto_enabled ? "⏸ Выключить авто" : "▶️ Включить авто";
+  autoBtn.classList.add(ov.auto_enabled ? "btn-outline-secondary" : "btn-primary");
+  autoBtn.addEventListener("click", async () => {
+    const next = ov.auto_enabled ? "0" : "1";
+    autoBtn.disabled = true;
+    autoBtn.textContent = "⏳…";
+    try {
+      await api("/api/ma/settings", {
+        method: "POST", body: {key: "scout_auto_enabled", value: next},
+      });
+      S.overview = await api("/api/ma/scout/overview");
+      renderShell(mount);
+    } catch (e) {
+      alert(`Ошибка: ${e.message ?? e}`);
+      autoBtn.disabled = false;
+      autoBtn.textContent = ov.auto_enabled ? "⏸ Выключить авто" : "▶️ Включить авто";
+    }
+  });
 
   const body = root.querySelector(".tabbody");
   const links = root.querySelectorAll(".subnav .nav-link");

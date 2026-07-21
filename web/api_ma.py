@@ -1387,12 +1387,23 @@ ALLOWED_SETTING_KEYS = {
     "google_drive_credentials_json", "google_drive_folder_id", "backup_interval_hours",
     "web_port", "web_host",
     "autopilot_message_cap", "autopilot_shadow_mode",
+    # Разведка рынка: без них авто-прогон нельзя было включить из MA вообще —
+    # scout_job молча возвращал «auto disabled», данные протухали (2026-07-21)
+    "scout_auto_enabled", "scout_interval_hours",
+    "scout_page_delay_sec", "scout_stale_days",
 }
 
 SENSITIVE_KEYS = {
     "anthropic_api_key", "telegram_bot_token",
     "google_drive_credentials_json",
 }
+
+def _is_float_in(raw: str, lo: float, hi: float) -> bool:
+    try:
+        return lo <= float(raw.strip().replace(",", ".")) <= hi
+    except (ValueError, AttributeError):
+        return False
+
 
 VALIDATORS = {
     "send_mode": lambda v: v in {"disabled", "redirect", "production"},
@@ -1403,6 +1414,11 @@ VALIDATORS = {
     "max_discount_percent": lambda v: v.replace(".", "", 1).isdigit() and 0 <= float(v) <= 100,
     "autopilot_message_cap": lambda v: v.isdigit() and 0 <= int(v) <= 1000,
     "autopilot_shadow_mode": lambda v: v in {"0", "1"},
+    "scout_auto_enabled": lambda v: v in {"0", "1"},
+    # интервал применяется при старте сервиса (job регистрируется в build_scheduler)
+    "scout_interval_hours": lambda v: v.isdigit() and 1 <= int(v) <= 168,
+    "scout_page_delay_sec": lambda v: _is_float_in(v, 0.2, 10.0),
+    "scout_stale_days": lambda v: v.isdigit() and 1 <= int(v) <= 90,
 }
 
 
