@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=20260721-2";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260721-2";
+import { api } from "../api.js?v=20260722-1";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260722-1";
 
 const PERIODS = [
   {key: "all",   label: "Все время"},

@@ -39,7 +39,17 @@ export function confirm(message) {
 }
 
 // Открыть внешнюю ссылку (объявление Kleinanzeigen) в браузере.
+// Дебаунс: тап в Telegram WebView нередко порождает дублирующий click
+// (синтетический из touch + сам click, либо double-tap на медленном отклике),
+// и каждый вызов запускает внешний intent — приложение Kleinanzeigen
+// открывалось дважды. Один и тот же URL в пределах окна игнорируем.
+let _lastLink = { url: null, at: 0 };
+const _LINK_DEBOUNCE_MS = 1200;
+
 export function openLink(url) {
+  const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  if (url === _lastLink.url && now - _lastLink.at < _LINK_DEBOUNCE_MS) return;
+  _lastLink = { url, at: now };
   if (tg?.openLink) tg.openLink(url);
   else window.open(url, "_blank");
 }
