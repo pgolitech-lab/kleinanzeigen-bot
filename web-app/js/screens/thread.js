@@ -2,13 +2,13 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api } from "../api.js?v=20260722-2";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260722-2";
-import { setTitle } from "../components/backbar.js?v=20260722-2";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260722-2";
-import { buildEditForm } from "../components/edit-form.js?v=20260722-2";
-import { buildComposeForm } from "../components/compose-form.js?v=20260722-2";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260722-2";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260722-3";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260722-3";
+import { setTitle } from "../components/backbar.js?v=20260722-3";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260722-3";
+import { buildEditForm } from "../components/edit-form.js?v=20260722-3";
+import { buildComposeForm } from "../components/compose-form.js?v=20260722-3";
+import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260722-3";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -540,7 +540,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       allBtns.forEach(b => b.disabled = true);
       llmBtn.textContent = "⏳ Генерирую…";
       try {
-        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST"});
+        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST", timeoutMs: LLM_TIMEOUT_MS});
         const fresh = await api(`/api/ma/messages/${latestPendingMsgId}`);
         syncDraft(fresh);
         openPrepareSheet();
@@ -601,7 +601,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       busyLabel: "⏳ Генерирую…",
       onSubmit: async (value) => {
         const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/instruction`, {
-          method: "POST", body: {text: value},
+          method: "POST", body: {text: value}, timeoutMs: LLM_TIMEOUT_MS,
         });
         syncDraft(fresh);
         openPrepareSheet();
@@ -736,7 +736,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     btn.disabled = true;
     btn.textContent = "🔁 Генерирую…";
     try {
-      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST"});
+      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST", timeoutMs: LLM_TIMEOUT_MS});
       // Fetch fresh review payload — новый вариант в textareas
       const fresh = await api(`/api/ma/messages/${latestPendingMsgId}`);
       review.draft = fresh.draft;
@@ -754,7 +754,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   function suggestHandler(btn) {
     // Нет pending-черновика: suggest СОЗДАЁТ pending, затем re-render
     if (btn) { btn.disabled = true; btn.textContent = "🤖 Генерирую…"; }
-    api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST"})
+    api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST", timeoutMs: LLM_TIMEOUT_MS})
       .then(() => render(mount, params))
       .catch(e => {
         alert(`Ошибка: ${e.message ?? String(e)}`);

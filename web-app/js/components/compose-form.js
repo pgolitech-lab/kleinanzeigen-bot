@@ -3,9 +3,9 @@
 // оператор видит (и может поправить) в окне предпросмотра — это буквально то, что
 // уйдёт клиенту. compose больше не переводит повторно при отправке (см. modules/outgoing.py,
 // инцидент 2026-07-02: ответ на немецком без предпросмотра ушёл клиенту переведённым на русский).
-import { api } from "../api.js?v=20260722-2";
-import { el } from "../utils.js?v=20260722-2";
-import { tg, confirm as tgConfirm } from "../tg.js?v=20260722-2";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260722-3";
+import { el } from "../utils.js?v=20260722-3";
+import { tg, confirm as tgConfirm } from "../tg.js?v=20260722-3";
 
 export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
   const form = el(`
@@ -67,6 +67,7 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
     translateBtn.textContent = "⏳ перевожу…";
     try {
       const r = await api(`/api/ma/threads/${encodeURIComponent(threadId)}/compose-preview`, {
+        timeoutMs: LLM_TIMEOUT_MS,
         method: "POST", body: { text },
       });
       dePrev.value = r.translated ?? "";
@@ -101,6 +102,7 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
     confirmSendBtn.disabled = true; cancelBtn.disabled = true; translateBtn.disabled = true;
     try {
       const res = await api(`/api/ma/threads/${encodeURIComponent(threadId)}/compose`, {
+        timeoutMs: LLM_TIMEOUT_MS,
         method: "POST",
         body: { text: lastPreview.ru_text, final_text: finalText, target_lang: lastPreview.target_lang },
       });

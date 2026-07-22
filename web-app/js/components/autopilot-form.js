@@ -1,7 +1,7 @@
 // Autopilot start form (floor + notify mode + preview) + status block с действием.
 
-import { api } from "../api.js?v=20260722-2";
-import { el } from "../utils.js?v=20260722-2";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260722-3";
+import { el } from "../utils.js?v=20260722-3";
 
 
 export function buildAutopilotForm({threadId, onSubmitComplete, onCancel}) {
@@ -111,6 +111,7 @@ export function buildAutopilotForm({threadId, onSubmitComplete, onCancel}) {
     previewBtn.textContent = "👁 Генерирую…";
     try {
       const res = await api(`/api/ma/threads/${encodeURIComponent(threadId)}/autopilot/preview`, {
+        timeoutMs: LLM_TIMEOUT_MS,
         method: "POST",
         body: {floor_eur: floor, notify_mode: mode},
       });

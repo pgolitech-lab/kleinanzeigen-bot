@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api } from "../api.js?v=20260722-2";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260722-2";
-import { openLink } from "../tg.js?v=20260722-2";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260722-3";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260722-3";
+import { openLink } from "../tg.js?v=20260722-3";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -469,7 +469,7 @@ async function renderQueriesTab(container) {
   actions.querySelector(".gen").addEventListener("click", async (e) => {
     const btn = e.target; btn.disabled = true; btn.textContent = "🤖 генерирую…";
     try {
-      const r = await api("/api/ma/scout/generate", { method: "POST", body: { extra: "" } });
+      const r = await api("/api/ma/scout/generate", { method: "POST", body: { extra: "" }, timeoutMs: LLM_TIMEOUT_MS });
       statusEl.textContent = `LLM добавил ${r.added} запросов ($${(r.cost_usd || 0).toFixed(4)})`;
       S.overview = await api("/api/ma/scout/overview");
       renderQueriesTab(container);

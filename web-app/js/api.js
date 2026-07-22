@@ -1,4 +1,4 @@
-import { initData } from "./tg.js?v=20260722-2";
+import { initData } from "./tg.js?v=20260722-3";
 
 // Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
 // Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.
@@ -14,7 +14,16 @@ const SESSION_LOST_MSG =
   "Сессия Telegram потеряна. Закройте мини-приложение и откройте заново " +
   "через кнопку меню в боте.";
 
-export async function api(path, { method = "GET", body = null, headers = {} } = {}) {
+// Таймаут по умолчанию. Покрывает и загрузку экранов (GET, <1с при живой сети),
+// и LLM-вызовы (Haiku/Sonnet, обычно <25с). Без него запрос, не дошедший до
+// сервера (сеть клиента моргнула / старый кэш стучится в никуда), висел вечно —
+// экран залипал на «Загрузка…»/«Открываю карточку…».
+const DEFAULT_TIMEOUT_MS = 30000;
+// Для LLM-вызовов (генерация ответа Sonnet, автопилот-превью с веб-поиском) —
+// они легитимно идут дольше 30с. Передаётся явно в такие call-sites.
+export const LLM_TIMEOUT_MS = 120000;
+
+export async function api(path, { method = "GET", body = null, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const url = `${API_BASE}${path}`;
   const id = initData();
   // initData пустой — Telegram потерял контекст WebApp (обычно при смене сети
@@ -35,7 +44,26 @@ export async function api(path, { method = "GET", body = null, headers = {} } = 
   const opts = { method, headers: reqHeaders };
   if (body !== null) opts.body = JSON.stringify(body);
 
-  const res = await fetch(url, opts);
+  // Таймаут: без него мёртвый/недоступный запрос висит бесконечно.
+  const ctrl = new AbortController();
+  opts.signal = ctrl.signal;
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error(
+        "Сервер не ответил вовремя. Проверьте связь и переоткройте " +
+        "мини-приложение через кнопку меню в боте.");
+    }
+    // Сетевая ошибка (CORS, offline, мёртвый тоннель) — fetch реджектит TypeError
+    throw new Error(
+      "Не удалось связаться с сервером. Проверьте интернет и переоткройте " +
+      "мини-приложение через кнопку меню в боте.");
+  } finally {
+    clearTimeout(timer);
+  }
   // 401 — initData истекла/плохой hash; 422 — заголовок не дошёл (пустой →
   // срезан прокси). Оба = проблема сессии: показываем инструкцию, а НЕ
   // закрываем МА резко (иначе на гонке при старте окно мигает и закрывается).
