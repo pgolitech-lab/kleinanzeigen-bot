@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260722-3";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260722-3";
-import { openLink } from "../tg.js?v=20260722-3";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260724-044812";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260724-044812";
+import { openLink } from "../tg.js?v=20260724-044812";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
