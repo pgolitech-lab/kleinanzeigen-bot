@@ -626,6 +626,23 @@ def start_callback_poller() -> None:
                 # чтобы не засорять hourly error-monitor ложными алармами.
                 logger.debug("callback poll transient network hiccup: %r", e)
                 time.sleep(1)
+            except RuntimeError as e:
+                # 5xx от Telegram (Bad Gateway / Service Unavailable / Gateway
+                # Timeout) на long-poll getUpdates — тот же транзиентный upstream-
+                # блип, что и сетевой таймаут выше. _http_post_single конвертирует
+                # HTTPError в RuntimeError, поэтому распознаём по тексту и логируем
+                # тихо, чтобы не засорять hourly error-monitor ложными ERROR.
+                msg = str(e)
+                transient = any(s in msg for s in (
+                    "Bad Gateway", "Service Unavailable", "Gateway Timeout",
+                    "HTTP 502", "HTTP 503", "HTTP 504",
+                ))
+                if transient:
+                    logger.debug("callback poll transient upstream 5xx: %r", e)
+                    time.sleep(2)
+                else:
+                    logger.exception("callback_query poll cycle fail")
+                    time.sleep(5)
             except Exception:
                 logger.exception("callback_query poll cycle fail")
                 time.sleep(5)
