@@ -30,11 +30,19 @@ IMAP_RETRY_DELAY = 3  # секунд между попытками при Timeou
 
 
 def _imap_retry(fn: Callable[..., _T], *args: Any, retries: int = 1, **kwargs: Any) -> _T:
-    """Вызвать fn, повторив до `retries` раз при IMAP-таймауте (TimeoutError/OSError)."""
+    """Вызвать fn, повторив до `retries` раз при транзиентной IMAP-ошибке.
+
+    Ловим TimeoutError/OSError (сетевой таймаут, разрыв сокета) и
+    imaplib.IMAP4.abort (сервер уронил соединение посреди команды — «socket
+    error: EOF»). abort НЕ является подклассом OSError, поэтому его нужно
+    перечислять явно — иначе EOF-разрыв Gmail пролетал мимо retry и всплывал
+    как ложный ERROR (напр. orphan-recovery). Каждый повтор fn открывает новое
+    IMAP4_SSL-соединение, так что реконнект после abort корректен.
+    """
     for attempt in range(retries + 1):
         try:
             return fn(*args, **kwargs)
-        except (TimeoutError, OSError) as exc:
+        except (TimeoutError, OSError, imaplib.IMAP4.abort) as exc:
             if attempt >= retries:
                 raise
             _log.warning("IMAP %s таймаут (попытка %d/%d), повтор через %ds: %s",
