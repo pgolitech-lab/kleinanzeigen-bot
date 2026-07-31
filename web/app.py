@@ -407,8 +407,20 @@ def post_debug_monitor_now():
 # ============================================================
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    """Liveness + лёгкая диагностика данных.
+
+    status всегда "ok" пока процесс жив и БД читается (watchdog bot_health.sh
+    смотрит только HTTP 200). Доп. поля — сигналы для мониторинга:
+    - polluted_incoming: сколько входящих писем всё ещё содержат служебный
+      web-relay шаблон Kleinanzeigen. 0 при штатной работе; >0 стабильно =
+      регресс parser._strip_relay_template (self-heal job не справляется).
+    """
+    from modules.incoming import count_polluted_incoming
+    return {
+        "status": "ok",
+        "polluted_incoming": count_polluted_incoming(),
+    }
 
 
 # ============================================================

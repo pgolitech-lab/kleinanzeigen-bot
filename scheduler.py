@@ -23,7 +23,7 @@ from modules.incoming import (  # noqa: F401
     AUTO_ACK_EXCUSES, _clean_display_name,
     _row_get, _skip_email, _ack_already_sent_for_thread,
     _send_auto_ack, _autopilot_dispatch, _process_incoming,
-    process_incoming,
+    process_incoming, reclean_incoming_bodies, count_polluted_incoming,
 )
 
 from modules.drafts import (  # noqa: F401
@@ -311,6 +311,19 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
+    # Self-heal: перечистка входящих, где остался служебный web-relay шаблон
+    # Kleinanzeigen (см. incoming.reclean_incoming_bodies). При штатной работе
+    # находит 0 строк. Раз в 30 минут — редкий кейс, торопиться некуда.
+    sched.add_job(
+        reclean_incoming_bodies,
+        trigger="interval",
+        minutes=30,
+        id="reclean_bodies",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     return sched
 
 
@@ -334,6 +347,12 @@ def start() -> BackgroundScheduler:
             logger.info("Startup: подняли %d deferred-карточек", drained)
     except Exception:
         logger.exception("Startup drain_all_deferred fail")
+    # Разово чистим backlog писем со служебным relay-шаблоном (письма до фикса
+    # парсера или после изменения формата). Дальше это делает периодический job.
+    try:
+        logger.info("Startup reclean: %s", reclean_incoming_bodies())
+    except Exception:
+        logger.exception("Startup reclean_incoming_bodies fail")
     return sched
 
 

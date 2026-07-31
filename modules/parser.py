@@ -81,6 +81,63 @@ _NOISE_FOOTER_PATTERNS: list[re.Pattern] = [
 ]
 
 
+# ── Web-relay шаблон Kleinanzeigen ──
+# Когда клиент отвечает НЕ по email, а через сайт/приложение Kleinanzeigen,
+# приходит письмо-уведомление, где реальный текст клиента завёрнут в служебный
+# шаблон: шапка «…Anzeigennummer: N) gesendet/erhalten. Nachricht/Antwort von <имя>»
+# + сам текст + футер «Beantworte diese Nachricht einfach…» и дисклеймеры про
+# безопасность. Часто это HTML-only письмо, которое `gmail._strip_html`
+# схлопывает в ОДНУ строку (нет \n между секциями), поэтому построчные паттерны
+# _NOISE_* его не берут. Здесь вырезаем текст между шапкой и футером.
+
+# Начало служебного футера — всё от него до конца письма это boilerplate.
+_RELAY_FOOTER_RE = re.compile(
+    r'(?:Beantworte\s+diese\s+Nachricht'
+    r'|Schütze\s+dich\s+vor\s+Betrug'
+    r'|Zum\s+Schutz\s+unserer\s+Nutzer'
+    r'|Dein\s+Team\s+von\s+Kleinanzeigen).*\Z',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Конец служебной шапки — реальный текст клиента идёт СРАЗУ после
+# «… gesendet./erhalten. Nachricht/Antwort von ». Часть про gesendet/erhalten
+# опциональна (страховка от мелких изменений формата), но футер обязателен —
+# это подтверждает, что письмо действительно relay-шаблон.
+_RELAY_HEADER_RE = re.compile(
+    r'\A.*?\b(?:(?:gesendet|erhalten)\s*[.:]?\s*)?(?:Nachricht|Antwort)\s+von\s+',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_relay_template(text: str, sender_name: Optional[str] = None) -> Optional[str]:
+    """Вырезать текст клиента из web-relay уведомления Kleinanzeigen.
+
+    Возвращает очищенный текст, либо None если это НЕ relay-шаблон (тогда
+    вызывающий применяет обычную построчную логику clean_email_body).
+
+    sender_name — display-имя отправителя (buyer_display_name). Если задано и
+    шаблон оставил его перед текстом («Mayo Vielen Dank» → «Vielen Dank») —
+    срезаем.
+    """
+    if not text:
+        return None
+    has_footer = _RELAY_FOOTER_RE.search(text)
+    has_header = _RELAY_HEADER_RE.search(text)
+    if not (has_footer and has_header):
+        return None
+    body = _RELAY_HEADER_RE.sub('', text, count=1)
+    body = _RELAY_FOOTER_RE.sub('', body)
+    if sender_name:
+        name = sender_name.strip()
+        if name:
+            # Имя + возможная пунктуация/пробелы после него (запятая, тире, двоеточие).
+            body = re.sub(
+                r'\A' + re.escape(name) + r'\b[\s,:.;–—-]*',
+                '', body, count=1,
+            )
+    return body.strip()
+
+
 # Шаблоны Subject для системных писем Kleinanzeigen, которые НЕ являются inquiries
 # и должны игнорироваться (saved-search alerts, истечение объявления, отзывы и т.п.).
 JUNK_SUBJECT_PATTERNS: list[re.Pattern] = [
@@ -164,22 +221,33 @@ def is_system_message_body(body: str) -> bool:
     return any(p.search(body) for p in SYSTEM_BODY_PATTERNS)
 
 
-def clean_email_body(text: str) -> str:
+def clean_email_body(text: str, sender_name: Optional[str] = None) -> str:
     """Срезать шаблонные заголовки/футеры Kleinanzeigen + лишние отступы и пустые строки.
 
     Идемпотентна: повторный вызов на уже-очищенном тексте даёт тот же результат.
     Если паттерны не сработали — возвращает исходный текст trimmed.
+
+    sender_name — display-имя отправителя (buyer_display_name); используется для
+    точного среза имени в web-relay уведомлениях («Antwort von Mayo …»).
     """
     if not text:
         return ""
-    cleaned = text
-    for p in _NOISE_HEADER_PATTERNS:
-        new = p.sub('', cleaned, count=1)
-        if new != cleaned:
-            cleaned = new
-            break
-    for p in _NOISE_FOOTER_PATTERNS:
-        cleaned = p.sub('', cleaned)
+
+    # Приоритет: web-relay уведомление (ответ клиента через сайт/приложение KZ,
+    # обычно HTML-only схлопнутый в одну строку). Если это оно — извлекаем текст
+    # клиента и дальше только нормализуем отступы.
+    relay = _strip_relay_template(text, sender_name)
+    if relay is not None:
+        cleaned = relay
+    else:
+        cleaned = text
+        for p in _NOISE_HEADER_PATTERNS:
+            new = p.sub('', cleaned, count=1)
+            if new != cleaned:
+                cleaned = new
+                break
+        for p in _NOISE_FOOTER_PATTERNS:
+            cleaned = p.sub('', cleaned)
 
     # Удаляем общий лидирующий отступ непустых строк (Kleinanzeigen часто
     # вставляет «    Hallo...» с 4 пробелами).

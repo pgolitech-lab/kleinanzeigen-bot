@@ -260,6 +260,97 @@ def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) 
         logger.warning("autopilot SMTP fail msg=%s — autopilot остаётся active", msg_id)
 
 
+# Маркеры служебного web-relay футера Kleinanzeigen — по ним дёшево (SQL LIKE)
+# находим письма, где в de_client остался служебный шаблон (регресс парсера или
+# письма, сохранённые до фикса parser._strip_relay_template 2026-07-31).
+_RELAY_MARKERS_SQL = (
+    "de_client LIKE '%Beantworte diese Nachricht%' "
+    "OR de_client LIKE '%Dein Team von Kleinanzeigen%' "
+    "OR de_client LIKE '%Schütze dich vor Betrug%' "
+    "OR de_client LIKE '%Zum Schutz unserer Nutzer%'"
+)
+
+
+def count_polluted_incoming() -> int:
+    """Сколько входящих писем всё ещё содержат служебный шаблон Kleinanzeigen.
+
+    Дёшево (один SQL COUNT по LIKE-маркерам футера). 0 при штатной работе.
+    Используется в health-проверке приложения (`web/api_ma.py:/health`).
+    """
+    try:
+        with db.get_conn() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM messages "
+                f"WHERE direction='in' AND de_client IS NOT NULL AND de_client != '' "
+                f"AND ({_RELAY_MARKERS_SQL})"
+            ).fetchone()
+        return int(row["c"] or 0)
+    except Exception:
+        logger.exception("count_polluted_incoming failed")
+        return 0
+
+
+def reclean_incoming_bodies(scan_limit: int = 500, translate_cap: int = 25) -> str:
+    """Self-heal: перечистить входящие письма, где остался web-relay шаблон.
+
+    Находит письма по служебным маркерам футера, прогоняет `clean_email_body`
+    (с точным именем отправителя) и, если текст реально меняется, обновляет
+    de_client + пере-переводит ru_client (best-effort Haiku, с потолком за прогон).
+
+    Идемпотентна: после очистки следующий прогон не находит ничего (0 строк).
+    Если у письма маркеры есть, но очистка НЕ помогла — это `stuck` (возможный
+    регресс `parser._strip_relay_template`), логируем ERROR → ловит
+    monitor_errors_job и алертит оператора.
+
+    Возвращает короткий summary для JOB_STATUS / логов.
+    """
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT id, de_client, buyer_display_name, client_lang FROM messages "
+            f"WHERE direction='in' AND de_client IS NOT NULL AND de_client != '' "
+            f"AND ({_RELAY_MARKERS_SQL}) ORDER BY id DESC LIMIT ?",
+            (scan_limit,),
+        ).fetchall()
+
+    fixed = stuck = translated = 0
+    for r in rows:
+        cleaned = parser.clean_email_body(
+            r["de_client"], sender_name=r["buyer_display_name"]
+        )
+        if cleaned == r["de_client"] or not cleaned.strip():
+            stuck += 1
+            continue
+        kw: dict[str, Any] = {"de_client": cleaned}
+        # Пере-перевод для операторского превью (ru_client), с потолком за прогон.
+        if translated < translate_cap:
+            try:
+                tr = claude.detect_and_translate_to_ru(cleaned)
+                ru = tr.get("translation_ru") or ""
+                if ru:
+                    kw["ru_client"] = ru
+                    kw["client_lang"] = tr.get("lang") or r["client_lang"] or "de"
+                translated += 1
+            except Exception:
+                logger.warning("reclean: перевод не удался для msg=%s", r["id"])
+        db.update_message(r["id"], **kw)
+        fixed += 1
+        logger.info("reclean: msg=%s очищен от relay-шаблона Kleinanzeigen", r["id"])
+
+    if stuck:
+        # ERROR — чтобы monitor_errors_job поднял алерт: маркеры есть, а парсер
+        # не справляется (формат письма изменился → нужно обновить парсер).
+        logger.error(
+            "reclean: %d писем с маркерами KZ-шаблона НЕ очистились — "
+            "возможен регресс parser._strip_relay_template", stuck,
+        )
+    if fixed or stuck:
+        logger.info(
+            "reclean: fixed=%d, stuck=%d, translated=%d, scanned=%d",
+            fixed, stuck, translated, len(rows),
+        )
+    return f"reclean: fixed={fixed}, stuck={stuck}, translated={translated}, scanned={len(rows)}"
+
+
 def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) -> None:
     """Обработать одно входящее письмо: создать запись, спарсить, сгенерить ответ, послать оператору.
 
@@ -275,8 +366,12 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 
     raw_body = email.get("body") or ""
     body_html = email.get("body_html") or ""
-    # Срезаем шаблонные заголовки Kleinanzeigen — оставляем только текст клиента
-    body = parser.clean_email_body(raw_body)
+    # Display-имя отправителя (для точного среза «Antwort von <имя>» в relay-шаблоне)
+    buyer_display = _clean_display_name(email.get("from_name") or "") or None
+    # Срезаем шаблонные заголовки/футеры Kleinanzeigen (в т.ч. web-relay
+    # уведомления, где текст клиента завёрнут в служебный шаблон) — оставляем
+    # только текст клиента.
+    body = parser.clean_email_body(raw_body, sender_name=buyer_display)
     subject = (email.get("subject") or "").strip()
 
     # Skip всё что от noreply@... — это всегда системные письма Kleinanzeigen
@@ -463,7 +558,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # Сохраняем входящее СРАЗУ, до медленного Playwright-парсинга. Это:
     #  1) гарантирует что письмо не потеряется даже если parse упадёт
     #  2) даёт auto-ack возможность уйти за секунды (Playwright потом, ~10-30с)
-    buyer_display = _clean_display_name(email.get("from_name") or "") or None
+    # buyer_display вычислен выше (нужен и для среза relay-шаблона).
     # Реальная дата отправки письма (Date-header). При live-fetch ≈ now,
     # при backfill/recovery — позволяет сохранить хронологический порядок в карточке.
     real_created_at: Optional[str] = None
