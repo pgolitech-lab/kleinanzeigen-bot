@@ -117,3 +117,29 @@ def test_lock_endpoints_require_auth(client):
     assert res.status_code == 422
     res = c.post("/api/ma/messages/123/lock/release")
     assert res.status_code == 422
+
+
+def test_beacon_release_valid_initdata_in_body(client):
+    """pagehide-beacon: initData в теле (не в заголовке) валидируется и снимает лок."""
+    c, mtb, mol, mdb = client
+    init = make_init_data(TEST_USER_PG)
+    res = c.post("/api/ma/messages/123/lock/release-beacon",
+                 content=init, headers={"Content-Type": "text/plain"})
+    assert res.status_code == 204
+    mtb._release_lock.assert_called_once_with(123)
+
+
+def test_beacon_release_rejects_garbage_body(client):
+    """Битая/пустая initData в теле → 401, лок не трогаем (endpoint остаётся авторизован)."""
+    c, mtb, mol, mdb = client
+    res = c.post("/api/ma/messages/123/lock/release-beacon",
+                 content="not-valid-init-data", headers={"Content-Type": "text/plain"})
+    assert res.status_code == 401
+    mtb._release_lock.assert_not_called()
+
+
+def test_beacon_release_rejects_empty_body(client):
+    c, mtb, mol, mdb = client
+    res = c.post("/api/ma/messages/123/lock/release-beacon")
+    assert res.status_code == 401
+    mtb._release_lock.assert_not_called()

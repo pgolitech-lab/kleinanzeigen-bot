@@ -9,6 +9,7 @@ import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sh
 import { buildEditForm } from "../components/edit-form.js?v=20260803-175022";
 import { buildComposeForm } from "../components/compose-form.js?v=20260803-175022";
 import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260803-175022";
+import { initData } from "../tg.js?v=20260803-175022";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -173,17 +174,31 @@ function draftCard(review) {
   return card;
 }
 
-function lockedByOtherBanner(lock, onRetry) {
+function lockedByOtherBanner(lock, onRetry, msgId) {
   const block = el(`
     <div class="alert alert-warning">
       <div class="mb-1"><strong>⚠️ Карточка занята оператором <span class="holder"></span></strong>
         <span class="small text-muted">(~<span class="mins"></span> мин)</span></div>
-      <button class="btn btn-sm retry-btn">↻ Проверить снова</button>
+      <div class="small text-muted mb-2">Если оператор уже закрыл MA — заберите карточку, чтобы ответить клиенту.</div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm retry-btn">↻ Проверить снова</button>
+        <button class="btn btn-sm btn-warning takeover-btn">🔓 Забрать карточку</button>
+      </div>
     </div>
   `);
   block.querySelector(".holder").textContent = lock.holder ?? "?";
   block.querySelector(".mins").textContent = String(lock.remaining_min ?? 0);
   block.querySelector(".retry-btn").addEventListener("click", onRetry);
+  // Снимаем чужой лок (release permissive) и сразу переоткрываем тред —
+  // render() заберёт лок на текущего оператора. Для случая «narcissk закрыл
+  // MA, но лок висит»: не ждём 5-минутный auto-expire.
+  block.querySelector(".takeover-btn").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "⏳ Забираю…";
+    if (msgId != null) await tryReleaseLock(msgId);
+    onRetry();
+  });
   return block;
 }
 
@@ -349,7 +364,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     draft = draftCard(review);
     container.appendChild(draft);
     if (acquireError === "locked" && review.lock) {
-      container.appendChild(lockedByOtherBanner(review.lock, () => render(mount, params)));
+      container.appendChild(lockedByOtherBanner(review.lock, () => render(mount, params), latestPendingMsgId));
     } else if (acquireError === "network") {
       const warn = el(`<p class="text-warning small mt-2">⚠️ Не удалось взять lock — отправка может не пройти. <a href="#" class="reload-link">Перезагрузить</a></p>`);
       warn.querySelector(".reload-link").addEventListener("click", (e) => {
@@ -886,10 +901,14 @@ window.addEventListener("hashchange", () => {
   }
 });
 
-// Lock release on TG WebApp close / page hide (best-effort via sendBeacon)
+// Lock release on TG WebApp close / page hide.
+// sendBeacon не умеет ставить X-Telegram-Init-Data → шлём initData в теле
+// (text/plain, без preflight); backend валидирует её тем же HMAC. Раньше
+// beacon бил в /lock/release без заголовка, ловил 422 и лок висел до
+// auto-expire 5 мин — блокировал других операторов после закрытия MA.
 window.addEventListener("pagehide", () => {
   if (_heldMsgId !== null && navigator.sendBeacon) {
-    // sendBeacon без auth header — backup; primary защита auto-expire 5 мин
-    navigator.sendBeacon(`/api/ma/messages/${_heldMsgId}/lock/release`);
+    const blob = new Blob([initData()], {type: "text/plain"});
+    navigator.sendBeacon(`/api/ma/messages/${_heldMsgId}/lock/release-beacon`, blob);
   }
 });

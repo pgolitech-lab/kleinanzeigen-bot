@@ -8,7 +8,7 @@ existing scheduler.* helpers — никакой бизнес-логики.
 from __future__ import annotations
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field, field_validator
 
 import json
@@ -21,7 +21,7 @@ import scheduler
 from modules import claude
 from modules import claude_scout
 from modules import scout_runner
-from modules.tg_init_data import verify_init_data_dep
+from modules.tg_init_data import verify_init_data_dep, verify_init_data
 
 
 router = APIRouter(prefix="/api/ma", tags=["Mini App"])
@@ -436,6 +436,23 @@ async def ma_lock_release(msg_id: int, user: dict = Depends(verify_init_data_dep
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    telegram_bot._release_lock(msg_id)
+    return None
+
+
+@router.post("/messages/{msg_id}/lock/release-beacon", status_code=204)
+async def ma_lock_release_beacon(msg_id: int, request: Request) -> None:
+    """Release lock через navigator.sendBeacon на pagehide (закрытие MA).
+
+    sendBeacon не умеет ставить заголовки, поэтому initData приходит в теле
+    запроса (text/plain), а не в X-Telegram-Init-Data. Валидируем ту же
+    строку тем же HMAC-путём — endpoint остаётся авторизованным (иначе любой
+    мог бы снимать чужие локи на публичном тоннеле). Оператор снимает СВОЙ
+    лок при закрытии — раньше beacon бил в /lock/release без заголовка и
+    ловил 422, лок висел до auto-expire (5 мин), блокируя других операторов.
+    """
+    raw = (await request.body()).decode("utf-8", "replace").strip()
+    verify_init_data(raw)  # 401/403 если протух/чужой — ответ beacon клиент игнорит
     telegram_bot._release_lock(msg_id)
     return None
 
