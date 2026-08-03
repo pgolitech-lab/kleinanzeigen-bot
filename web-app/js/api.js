@@ -1,4 +1,4 @@
-import { initData } from "./tg.js?v=20260724-044812";
+import { initData } from "./tg.js?v=20260803-175022";
 
 // Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
 // Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.
@@ -6,7 +6,7 @@ import { initData } from "./tg.js?v=20260724-044812";
 // NB: backend (FastAPI на :8080) должен отдавать Access-Control-Allow-Origin для
 // github.io origin'а — CORSMiddleware уже сконфигурирован в Phase 1.
 // X-Telegram-Init-Data — non-simple header, всегда триггерит preflight.
-export const API_BASE = "https://friend-contain-occurring-eddie.trycloudflare.com";
+export const API_BASE = "https://conscious-continuing-climb-agents.trycloudflare.com";
 
 // Понятная инструкция вместо технической ошибки/вечной загрузки, когда
 // Telegram не передал сессию (initData пустой) или сервер её отверг.
