@@ -1,8 +1,8 @@
 // 📊 Обзор (редизайн 2026-07-15): KPI-плитки с моно-цифрами + живой инбокс
 // (красная/зелёная секции, карточки из pipeline). Клик по плитке → раздел.
-import { api } from "../api.js?v=20260803-175022";
-import { el, setLoading, setError } from "../utils.js?v=20260803-175022";
-import { threadCard } from "./pipeline.js?v=20260803-175022";
+import { api } from "../api.js?v=20260805-052102";
+import { el, setLoading, setError } from "../utils.js?v=20260805-052102";
+import { threadCard } from "./pipeline.js?v=20260805-052102";
 
 function kpi(value, label, colorCls, href) {
   const tag = href ? "a" : "div";
