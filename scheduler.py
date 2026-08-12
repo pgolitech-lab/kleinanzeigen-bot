@@ -478,8 +478,18 @@ def daily_summary() -> Optional[str]:
             (yesterday,),
         ).fetchone()
 
+    scout_stats = db.scout_daily_stats(yesterday)
+    scout_new = scout_stats["new"]
+    scout_removed = scout_stats["removed"]
+    scout_new_cars = scout_new.get("car", 0)
+    scout_new_parts = scout_new.get("part", 0)
+    scout_sold_cars = scout_removed.get("car", 0)
+    scout_sold_parts = scout_removed.get("part", 0)
+    has_scout_activity = any(
+        (scout_new_cars, scout_new_parts, scout_sold_cars, scout_sold_parts))
+
     total_in = stats["total_in"] or 0
-    if total_in == 0 and (lessons_yday["c"] or 0) == 0:
+    if total_in == 0 and (lessons_yday["c"] or 0) == 0 and not has_scout_activity:
         # Не было движений — молчим. Отметим дату чтобы повторно не пытаться.
         config.set("last_daily_summary_date", today_date)
         return "no activity yesterday"
@@ -500,6 +510,11 @@ def daily_summary() -> Optional[str]:
     )
     if lessons_count:
         text += f"🎓 уроков: +{lessons_count} (бот учится)\n"
+    if has_scout_activity:
+        text += (
+            f"🔎 <b>Рынок</b>: +{scout_new_cars} машин, +{scout_new_parts} запчастей"
+            f" · продано/снято: {scout_sold_cars} машин, {scout_sold_parts} запчастей\n"
+        )
 
     try:
         telegram_bot._http_post("sendMessage", {

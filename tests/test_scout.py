@@ -244,6 +244,34 @@ def test_scout_corrections(tmp_path, monkeypatch):
     assert kinds == {"part", "remove"}
 
 
+def test_scout_daily_stats(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    import database as db
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "s.db")
+    db.init_db()
+    db.upsert_scout_listing(_mk_listing("20", "car", "Berlin", "Berlin", 10000))
+    db.upsert_scout_listing(_mk_listing("21", "part", "Berlin", "Berlin", 100))
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    yesterday = "2020-01-01"
+    with db.get_conn() as conn:
+        conn.execute(
+            "UPDATE scout_listings SET first_seen_at = ? WHERE ad_id = '21'",
+            (yesterday + "T09:00:00",),
+        )
+
+    # #20 найдена сегодня, #21 — «вчера»
+    assert db.scout_daily_stats(today)["new"] == {"car": 1}
+    assert db.scout_daily_stats(yesterday)["new"] == {"part": 1}
+    assert db.scout_daily_stats(today)["removed"] == {}
+
+    # деактивация проставляет deactivated_at=now → попадает в сегодняшнюю статистику
+    n = db.deactivate_stale_scout_listings(
+        "car", (datetime.utcnow() + timedelta(days=1)).isoformat())
+    assert n == 1
+    assert db.scout_daily_stats(today)["removed"] == {"car": 1}
+
+
 @pytest.mark.parametrize("plz,land", [
     ("90449", "Bayern"),
     ("10707", "Berlin"),
