@@ -198,6 +198,19 @@ def run_backup() -> str:
         raise  # пусть слушатель event-а зафиксирует error
 
 
+SCOUT_NOTIFY_MAX_LISTINGS = 15
+
+
+def _fmt_scout_listing(item: dict) -> str:
+    icon = "🚐" if item["kind"] == "car" else "🔧"
+    title = telegram_bot._html(item.get("title") or "(без названия)")
+    price = item.get("price_raw") or (
+        f"{item['price_eur']:.0f} €" if item.get("price_eur") is not None else "цена?")
+    url = item.get("url")
+    label = f'<a href="{telegram_bot._html(url)}">{title}</a>' if url else title
+    return f"{icon} {label} — {price}"
+
+
 def scout_job() -> str:
     """Job: авто-прогон разведки рынка (если включён в настройках)."""
     if not config.scout_auto_enabled():
@@ -212,12 +225,19 @@ def scout_job() -> str:
         msg += f", ошибок {len(summary['errors'])}"
     logger.info(msg)
     if summary["cars_new"] or summary["parts_new"]:
-        telegram_bot.notify(
+        new_listings = summary.get("new_listings") or []
+        cards = [_fmt_scout_listing(it) for it in new_listings[:SCOUT_NOTIFY_MAX_LISTINGS]]
+        extra = len(new_listings) - len(cards)
+        text = (
             f"🔎 <b>Рынок обновился</b>\n"
             f"🚐 новых машин: {summary['cars_new']}\n"
-            f"🔧 новых запчастей: {summary['parts_new']}",
-            "scout", label="🔎 Открыть Рынок",
+            f"🔧 новых запчастей: {summary['parts_new']}\n"
         )
+        if cards:
+            text += "\n" + "\n".join(cards)
+        if extra > 0:
+            text += f"\n… и ещё {extra}"
+        telegram_bot.notify(text, "scout", label="🔎 Открыть Рынок")
     return msg
 
 

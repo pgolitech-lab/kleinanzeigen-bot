@@ -400,7 +400,7 @@ def run_scout(
     summary: dict[str, Any] = {
         "ran": 0, "cars_new": 0, "parts_new": 0, "total_seen": 0,
         "errors": [], "by_query": [], "kinds": set(), "seen_by_kind": {},
-        "deactivated": 0, "verify": None,
+        "deactivated": 0, "verify": None, "new_listings": [],
     }
     if not queries:
         return summary
@@ -437,6 +437,11 @@ def run_scout(
                             summary["cars_new"] += 1
                         else:
                             summary["parts_new"] += 1
+                        summary["new_listings"].append({
+                            "kind": row["kind"], "title": row["title"],
+                            "price_raw": row["price_raw"], "price_eur": row["price_eur"],
+                            "url": row["url"],
+                        })
                 summary["total_seen"] += len(rows)
                 summary["ran"] += 1
                 summary["kinds"].add(q["kind"])
