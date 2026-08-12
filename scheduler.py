@@ -211,6 +211,13 @@ def scout_job() -> str:
     if summary["errors"]:
         msg += f", ошибок {len(summary['errors'])}"
     logger.info(msg)
+    if summary["cars_new"] or summary["parts_new"]:
+        telegram_bot.notify(
+            f"🔎 <b>Рынок обновился</b>\n"
+            f"🚐 новых машин: {summary['cars_new']}\n"
+            f"🔧 новых запчастей: {summary['parts_new']}",
+            "scout", label="🔎 Открыть Рынок",
+        )
     return msg
 
 
