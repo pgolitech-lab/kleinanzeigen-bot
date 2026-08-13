@@ -78,7 +78,13 @@ for attempt in 1 2 3; do
     log "remote уже на актуальном URL ($NEW_URL) — синхронизирован параллельным прогоном"
     push_ok=1; break
   fi
-  if ! git -C "$REPO" rebase -q origin/main; then
+  # --autostash: посторонние незакоммиченные правки в репо (например, недоделанная
+  # фича из другой сессии) НЕ должны блокировать синк tunnel-URL — git сам спрячет
+  # их на время rebase и вернёт обратно. Инцидент 2026-08-13: ребут после потери
+  # питания сменил tunnel URL, а рабочее дерево было грязным от предыдущей сессии —
+  # rebase упал с "У вас есть непроиндексированные изменения", MA осталась недоступна
+  # до ручного вмешательства.
+  if ! git -C "$REPO" rebase -q --autostash origin/main; then
     git -C "$REPO" rebase --abort 2>/dev/null
     log "ERROR: rebase-конфликт при синхронизации с remote"
     exit 1

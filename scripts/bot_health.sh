@@ -5,6 +5,8 @@
 #   1. kleinanzeigen-bot должен быть active → иначе reset-failed + restart + алерт.
 #   2. Локальный API 127.0.0.1:8080/health должен отвечать 200 → иначе (если сервис
 #      active, но завис) restart + алерт.
+#   4. МА (GitHub Pages) должна смотреть на актуальный cloudflared quick-tunnel URL —
+#      иначе self-heal через update_tunnel_url.sh, алерт только если не помогло.
 # Алерты дедуплицируются: одна и та же проблема не спамит чаще раза в час.
 set -u
 
@@ -105,6 +107,53 @@ if [ "${IMAP_ERR:-0}" -ge 20 ]; then
   exit 0
 fi
 clear_alert imap
+
+# --- 4. МА синхронизирована с живым tunnel URL? ---
+# Мотивация (инцидент 2026-08-13): ребут сервера после потери питания сменил
+# cloudflared quick-tunnel URL; tunnel-url-sync.service должен был сам обновить
+# GitHub Pages, но упал (грязное рабочее дерево от другой сессии блокировало
+# git rebase — теперь чинится --autostash'ем, см. update_tunnel_url.sh). МА
+# осталась недоступна несколько часов, пока оператор не заметил и не попросил
+# починить руками. Этот блок ловит такое САМ, в течение нескольких минут, а не
+# только через дневной LLM-автофикс — тот сканирует ТОЛЬКО journalctl -u
+# kleinanzeigen-bot и в принципе не видит ошибок отдельного tunnel-url-sync.service.
+MA_URL_STATE="$STATE/ma_url_mismatch_since"
+GRACE_SELFHEAL=150   # сек — дать шанс обычному CDN-пропагейшну GitHub Pages (~60-90с)
+GRACE_ALERT=420       # сек — если после self-heal всё ещё разъехалось, эскалируем
+
+LIVE_URL=$(
+  start=$(systemctl show -p ActiveEnterTimestamp --value cloudflared 2>/dev/null)
+  if [ -n "$start" ]; then
+    journalctl -u cloudflared --since "$start" --no-pager 2>/dev/null \
+      | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' \
+      | grep -v 'https://api\.trycloudflare\.com' | tail -1
+  fi
+)
+DEPLOYED_URL=$(curl -s -m 10 "https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/js/api.js" 2>/dev/null \
+  | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1)
+
+if [ -z "$LIVE_URL" ] || [ -z "$DEPLOYED_URL" ]; then
+  log "MA URL check пропущен (live='$LIVE_URL' deployed='$DEPLOYED_URL') — сеть/GitHub Pages моргнули"
+elif [ "$LIVE_URL" = "$DEPLOYED_URL" ]; then
+  rm -f "$MA_URL_STATE"
+  clear_alert ma_url
+else
+  now=$(date +%s)
+  if [ ! -f "$MA_URL_STATE" ]; then
+    echo "$now" > "$MA_URL_STATE"
+    log "MA API_BASE устарел (deployed=$DEPLOYED_URL live=$LIVE_URL) — наблюдаю (может быть обычная CDN-задержка)"
+  else
+    since=$(cat "$MA_URL_STATE" 2>/dev/null || echo "$now")
+    elapsed=$((now - since))
+    if [ "$elapsed" -ge "$GRACE_SELFHEAL" ]; then
+      log "MA URL расхождение держится ${elapsed}с — self-heal: запускаю update_tunnel_url.sh"
+      "$REPO/scripts/update_tunnel_url.sh" >"$STATE/last_tunnel_sync.log" 2>&1
+    fi
+    if [ "$elapsed" -ge "$GRACE_ALERT" ] && should_alert ma_url "mismatch-$LIVE_URL"; then
+      notify "🟥 <b>watchdog</b>: МА (GitHub Pages) смотрит на устаревший backend URL уже $((elapsed/60)) мин. Deployed: $DEPLOYED_URL, актуальный: $LIVE_URL. Self-heal пытался синхронизировать автоматически — если МА всё ещё недоступна, проверь вручную: systemctl status tunnel-url-sync, git status в репо (грязное дерево блокирует push)."
+    fi
+  fi
+fi
 
 log "ok (service active, health 200, IMAP-ошибок за 10 мин: ${IMAP_ERR:-0})"
 exit 0
