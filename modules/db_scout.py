@@ -132,9 +132,9 @@ def deactivate_stale_scout_listings(kind: str, before_iso: str) -> int:
     """
     with get_conn() as conn:
         cur = conn.execute(
-            f"UPDATE scout_listings SET active = 0 "
+            f"UPDATE scout_listings SET active = 0, deactivated_at = ? "
             f"WHERE {_EFF_KIND} = ? AND active = 1 AND last_seen_at < ?",
-            (kind, before_iso),
+            (datetime.utcnow().isoformat(), kind, before_iso),
         )
         return cur.rowcount
 
@@ -255,6 +255,31 @@ def scout_counts(unseen_cutoff: Optional[str] = None) -> dict[str, int]:
             "unverified": c("verified_kind IS NULL"),
             "removed": removed,
         }
+
+
+def scout_daily_stats(date_str: str) -> dict[str, dict[str, int]]:
+    """Новые находки и снятые/проданные объявления scout за конкретный день (YYYY-MM-DD).
+
+    'Снято' = active flip 1→0 в deactivate_stale_scout_listings (не виден в выдаче
+    дольше scout_stale_days) — не строго подтверждённая продажа, но лучший доступный
+    сигнал без похода на страницу объявления. Возвращает {"new": {kind: cnt}, "removed": {kind: cnt}}
+    по ЭФФЕКТИВНОМУ виду (car/part/other).
+    """
+    with get_conn() as conn:
+        new_rows = conn.execute(
+            f"SELECT {_EFF_KIND} AS k, COUNT(*) AS c FROM scout_listings "
+            f"WHERE substr(first_seen_at, 1, 10) = ? GROUP BY k",
+            (date_str,),
+        ).fetchall()
+        removed_rows = conn.execute(
+            f"SELECT {_EFF_KIND} AS k, COUNT(*) AS c FROM scout_listings "
+            f"WHERE substr(deactivated_at, 1, 10) = ? GROUP BY k",
+            (date_str,),
+        ).fetchall()
+    return {
+        "new": {r["k"]: r["c"] for r in new_rows},
+        "removed": {r["k"]: r["c"] for r in removed_rows},
+    }
 
 
 # --- MARKET SCOUT: Haiku-проверка типа ---

@@ -357,6 +357,10 @@ def init_db() -> None:
         # rejected=1 — оператор пометил объявление неверным и удалил. Скрыто везде +
         # НЕ реактивируется при повторном скрапе (upsert не трогает rejected-строки).
         _add_column_if_missing(conn, "scout_listings", "rejected", "INTEGER NOT NULL DEFAULT 0")
+        # deactivated_at — когда active flip'нулся 1→0 в deactivate_stale_scout_listings
+        # (объявление пропало из выдачи дольше scout_stale_days — считаем продано/снято).
+        # Нужно для дневной сводки («что продалось из находок»).
+        _add_column_if_missing(conn, "scout_listings", "deactivated_at", "TEXT")
         # scout_corrections — операторские правки классификации для in-context обучения
         # Haiku. correct_kind: 'car'|'part'|'other'|'remove'.
         conn.execute("""
@@ -731,6 +735,7 @@ from modules.db_scout import (  # noqa: F401
     scout_region_summary,
     scout_city_summary,
     scout_counts,
+    scout_daily_stats,
     list_unverified_scout_listings,
     set_scout_verified_kind,
     reset_scout_verification,

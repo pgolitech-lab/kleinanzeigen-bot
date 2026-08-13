@@ -400,7 +400,7 @@ def run_scout(
     summary: dict[str, Any] = {
         "ran": 0, "cars_new": 0, "parts_new": 0, "total_seen": 0,
         "errors": [], "by_query": [], "kinds": set(), "seen_by_kind": {},
-        "deactivated": 0, "verify": None,
+        "deactivated": 0, "verify": None, "new_listings": [],
     }
     if not queries:
         return summary
@@ -408,18 +408,26 @@ def run_scout(
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            ctx = browser.new_context(
-                user_agent=_UA, locale="de-DE",
-                viewport={"width": 1366, "height": 1000},
-            )
-            page = ctx.new_page()
             for q in queries:
+                # Свежий context на КАЖДЫЙ запрос: Kleinanzeigen отдаёт cookie-wall
+                # без карточек (0 результатов) начиная со 2-й навигации в одной и той
+                # же browser-сессии — похоже на анти-бот эвристику по паттерну
+                # навигации, не на rate-limit по времени (не спасает и больший delay).
+                # Новый context = "чистая" сессия для сайта на каждый поисковый запрос.
+                ctx = browser.new_context(
+                    user_agent=_UA, locale="de-DE",
+                    viewport={"width": 1366, "height": 1000},
+                )
                 try:
-                    rows = scrape_query(page, q, page_delay_sec=page_delay_sec)
-                except Exception as e:
-                    logger.exception("scout: query %s failed", q["id"])
-                    summary["errors"].append(f"q{q['id']} ({q['keywords']}): {e}")
-                    continue
+                    page = ctx.new_page()
+                    try:
+                        rows = scrape_query(page, q, page_delay_sec=page_delay_sec)
+                    except Exception as e:
+                        logger.exception("scout: query %s failed", q["id"])
+                        summary["errors"].append(f"q{q['id']} ({q['keywords']}): {e}")
+                        continue
+                finally:
+                    ctx.close()
                 new_count = 0
                 for row in rows:
                     is_new = db.upsert_scout_listing(row)
@@ -429,6 +437,11 @@ def run_scout(
                             summary["cars_new"] += 1
                         else:
                             summary["parts_new"] += 1
+                        summary["new_listings"].append({
+                            "kind": row["kind"], "title": row["title"],
+                            "price_raw": row["price_raw"], "price_eur": row["price_eur"],
+                            "url": row["url"],
+                        })
                 summary["total_seen"] += len(rows)
                 summary["ran"] += 1
                 summary["kinds"].add(q["kind"])

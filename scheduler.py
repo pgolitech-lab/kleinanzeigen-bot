@@ -198,6 +198,19 @@ def run_backup() -> str:
         raise  # пусть слушатель event-а зафиксирует error
 
 
+SCOUT_NOTIFY_MAX_LISTINGS = 15
+
+
+def _fmt_scout_listing(item: dict) -> str:
+    icon = "🚐" if item["kind"] == "car" else "🔧"
+    title = telegram_bot._html(item.get("title") or "(без названия)")
+    price = item.get("price_raw") or (
+        f"{item['price_eur']:.0f} €" if item.get("price_eur") is not None else "цена?")
+    url = item.get("url")
+    label = f'<a href="{telegram_bot._html(url)}">{title}</a>' if url else title
+    return f"{icon} {label} — {price}"
+
+
 def scout_job() -> str:
     """Job: авто-прогон разведки рынка (если включён в настройках)."""
     if not config.scout_auto_enabled():
@@ -211,6 +224,20 @@ def scout_job() -> str:
     if summary["errors"]:
         msg += f", ошибок {len(summary['errors'])}"
     logger.info(msg)
+    if summary["cars_new"] or summary["parts_new"]:
+        new_listings = summary.get("new_listings") or []
+        cards = [_fmt_scout_listing(it) for it in new_listings[:SCOUT_NOTIFY_MAX_LISTINGS]]
+        extra = len(new_listings) - len(cards)
+        text = (
+            f"🔎 <b>Рынок обновился</b>\n"
+            f"🚐 новых машин: {summary['cars_new']}\n"
+            f"🔧 новых запчастей: {summary['parts_new']}\n"
+        )
+        if cards:
+            text += "\n" + "\n".join(cards)
+        if extra > 0:
+            text += f"\n… и ещё {extra}"
+        telegram_bot.notify(text, "scout", label="🔎 Открыть Рынок")
     return msg
 
 
@@ -471,8 +498,18 @@ def daily_summary() -> Optional[str]:
             (yesterday,),
         ).fetchone()
 
+    scout_stats = db.scout_daily_stats(yesterday)
+    scout_new = scout_stats["new"]
+    scout_removed = scout_stats["removed"]
+    scout_new_cars = scout_new.get("car", 0)
+    scout_new_parts = scout_new.get("part", 0)
+    scout_sold_cars = scout_removed.get("car", 0)
+    scout_sold_parts = scout_removed.get("part", 0)
+    has_scout_activity = any(
+        (scout_new_cars, scout_new_parts, scout_sold_cars, scout_sold_parts))
+
     total_in = stats["total_in"] or 0
-    if total_in == 0 and (lessons_yday["c"] or 0) == 0:
+    if total_in == 0 and (lessons_yday["c"] or 0) == 0 and not has_scout_activity:
         # Не было движений — молчим. Отметим дату чтобы повторно не пытаться.
         config.set("last_daily_summary_date", today_date)
         return "no activity yesterday"
@@ -493,6 +530,11 @@ def daily_summary() -> Optional[str]:
     )
     if lessons_count:
         text += f"🎓 уроков: +{lessons_count} (бот учится)\n"
+    if has_scout_activity:
+        text += (
+            f"🔎 <b>Рынок</b>: +{scout_new_cars} машин, +{scout_new_parts} запчастей"
+            f" · продано/снято: {scout_sold_cars} машин, {scout_sold_parts} запчастей\n"
+        )
 
     try:
         telegram_bot._http_post("sendMessage", {
