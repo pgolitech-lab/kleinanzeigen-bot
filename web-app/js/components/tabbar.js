@@ -1,5 +1,5 @@
 // Нижний таб-бар: иконка + подпись, активная вкладка подсвечена акцентом.
-import { el } from "../utils.js?v=20260812-203525";
+import { el } from "../utils.js?v=20260815-050941";
 
 const TABS = [
   { icon: "📥", label: "Входящие", hash: "#/pipeline", match: /^#\/(pipeline|thread|review)/ },
