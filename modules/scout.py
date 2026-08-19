@@ -438,7 +438,7 @@ def run_scout(
                         else:
                             summary["parts_new"] += 1
                         summary["new_listings"].append({
-                            "kind": row["kind"], "title": row["title"],
+                            "ad_id": row["ad_id"], "kind": row["kind"], "title": row["title"],
                             "price_raw": row["price_raw"], "price_eur": row["price_eur"],
                             "url": row["url"],
                         })
@@ -485,6 +485,32 @@ def run_scout(
         except Exception as e:  # noqa: BLE001
             logger.exception("scout: verify_listings fail")
             summary["errors"].append(f"verify: {e}")
+
+        # Пересчитать cars_new/parts_new/new_listings по РЕЗУЛЬТАТУ проверки, а не
+        # по сырому kind поискового запроса — иначе ложные совпадения (напр. Citroën
+        # C4 Picasso/Spacetourer под запрос 'citroen spacetourer', которые Haiku
+        # верно отбраковывает в 'other') всё равно лезут в дайджест как «новая машина».
+        try:
+            eff = db.get_scout_effective_kinds(
+                [it["ad_id"] for it in summary["new_listings"]]
+            )
+            filtered = []
+            cars_new = parts_new = 0
+            for it in summary["new_listings"]:
+                k = eff.get(it["ad_id"], it["kind"])
+                if k not in ("car", "part"):
+                    continue
+                it["kind"] = k
+                filtered.append(it)
+                if k == "car":
+                    cars_new += 1
+                else:
+                    parts_new += 1
+            summary["new_listings"] = filtered
+            summary["cars_new"] = cars_new
+            summary["parts_new"] = parts_new
+        except Exception:
+            logger.exception("scout: post-verify digest filter fail")
 
     summary["kinds"] = sorted(summary["kinds"])
     return summary

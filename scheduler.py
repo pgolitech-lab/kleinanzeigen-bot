@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 import config
 import database as db
@@ -198,7 +199,7 @@ def run_backup() -> str:
         raise  # пусть слушатель event-а зафиксирует error
 
 
-SCOUT_NOTIFY_MAX_LISTINGS = 15
+SCOUT_NOTIFY_MAX_PER_KIND = 8  # кап на кажд. секцию — чтобы машины не вытесняли запчасти (сиденья)
 
 
 def _fmt_scout_listing(item: dict) -> str:
@@ -226,17 +227,23 @@ def scout_job() -> str:
     logger.info(msg)
     if summary["cars_new"] or summary["parts_new"]:
         new_listings = summary.get("new_listings") or []
-        cards = [_fmt_scout_listing(it) for it in new_listings[:SCOUT_NOTIFY_MAX_LISTINGS]]
-        extra = len(new_listings) - len(cards)
+        # Отдельные секции и отдельный кап на машины и запчасти (сиденья/скамейки/рельсы) —
+        # иначе при наплыве новых машин запчасти просто не попадают в общий топ-N карточек.
+        cars = [it for it in new_listings if it["kind"] == "car"]
+        parts = [it for it in new_listings if it["kind"] != "car"]
         text = (
             f"🔎 <b>Рынок обновился</b>\n"
             f"🚐 новых машин: {summary['cars_new']}\n"
             f"🔧 новых запчастей: {summary['parts_new']}\n"
         )
-        if cards:
-            text += "\n" + "\n".join(cards)
-        if extra > 0:
-            text += f"\n… и ещё {extra}"
+        for label_, items in (("🚐 Машины", cars), ("🔧 Запчасти", parts)):
+            if not items:
+                continue
+            shown = items[:SCOUT_NOTIFY_MAX_PER_KIND]
+            extra = len(items) - len(shown)
+            text += f"\n<b>{label_}</b>\n" + "\n".join(_fmt_scout_listing(it) for it in shown)
+            if extra > 0:
+                text += f"\n… и ещё {extra}"
         telegram_bot.notify(text, "scout", label="🔎 Открыть Рынок")
     return msg
 
@@ -316,10 +323,21 @@ def build_scheduler() -> BackgroundScheduler:
     )
 
     # Разведка рынка — авто-прогон по интервалу (само no-op если выключено в настройках).
+    # Якорим старт на 08:59 по Берлину (за минуту до daily_summary в 9:00) — иначе
+    # интервал-триггер без явного start_date считает от момента рестарта сервиса,
+    # и время прогона "плывёт" на любой удобный процессу час (напр. 5 утра после
+    # ночного рестарта).
+    berlin_tz = zoneinfo.ZoneInfo("Europe/Berlin")
+    scout_anchor = datetime.now(berlin_tz).replace(hour=8, minute=59, second=0, microsecond=0)
+    if scout_anchor <= datetime.now(berlin_tz):
+        scout_anchor += timedelta(days=1)
     sched.add_job(
         scout_job,
-        trigger="interval",
-        hours=max(1, config.scout_interval_hours()),
+        trigger=IntervalTrigger(
+            hours=max(1, config.scout_interval_hours()),
+            start_date=scout_anchor,
+            timezone=berlin_tz,
+        ),
         id="market_scout",
         replace_existing=True,
         max_instances=1,

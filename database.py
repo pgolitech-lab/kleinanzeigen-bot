@@ -737,6 +737,7 @@ from modules.db_scout import (  # noqa: F401
     scout_counts,
     scout_daily_stats,
     list_unverified_scout_listings,
+    get_scout_effective_kinds,
     set_scout_verified_kind,
     reset_scout_verification,
     apply_scout_correction,
