@@ -1696,6 +1696,9 @@ def _scout_listing_dict(r: Any, cutoff: "str | None" = None) -> dict[str, Any]:
         "gearbox": r["gearbox"], "model_family": r["model_family"],
         "part_type": r["part_type"], "condition": r["condition"],
         "posted_raw": r["posted_raw"],
+        "price_raw": r["price_raw"] if "price_raw" in r.keys() else None,
+        "shipping": bool(r["shipping"]) if "shipping" in r.keys() else False,
+        "first_seen_at": r["first_seen_at"] if "first_seen_at" in r.keys() else None,
         "removed": removed,
         "days_unseen": _days_unseen(last_seen),
     }

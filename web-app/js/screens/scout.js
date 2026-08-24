@@ -1,8 +1,10 @@
 // 🔎 Разведка рынка — Mini App экран.
-// Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260815-050941";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260815-050941";
-import { openLink } from "../tg.js?v=20260815-050941";
+// Подвкладки: Новое / Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
+// «Новое» — плоская лента самых свежих находок (запчасти первой секцией,
+// приоритет оператора), сортировка везде по умолчанию — новизна (first_seen_at).
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260824-01";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260824-01";
+import { openLink } from "../tg.js?v=20260824-01";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -12,12 +14,12 @@ const COND_RU = { neu: "новое", gebraucht: "б/у" };
 
 // модуль-стейт (живёт между перерисовками подвкладок)
 const S = {
-  tab: "car",            // car | part | queries
+  tab: "new",             // new | car | part | queries — «Новое» первым по умолчанию
   overview: null,
   cars: null,            // массив или null (не загружено)
   parts: null,
   filters: { car: {}, part: {} },
-  sort: { car: "price_asc", part: "price_asc" },
+  sort: { car: "new_desc", part: "new_desc" },  // по умолчанию — сначала свежие
   // город-первая навигация
   view: { car: "cities", part: "cities" },   // cities | listings
   city: { car: null, part: null },           // выбранный город (drill-down)
@@ -32,25 +34,63 @@ function eur(v) {
   return Math.round(v).toLocaleString("de-DE") + " €";
 }
 
+// первое появление в разведке (first_seen_at, UTC без 'Z') → Date | null
+function _parseIso(iso) {
+  if (!iso) return null;
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function isFresh(iso, hours = 48) {
+  const d = _parseIso(iso);
+  return d ? (Date.now() - d.getTime()) < hours * 3600 * 1000 : false;
+}
+
+// «5 мин назад» / «3 ч назад» / «вчера» / «12.06» — насколько давно МЫ впервые
+// увидели объявление (first_seen_at). Отличается от posted_raw (дата публикации
+// на самом Kleinanzeigen, показывается отдельно) — это то, что даёт надёжную
+// сортировку «по новизне», т.к. posted_raw — нечисловой текст сайта.
+function foundAgo(iso) {
+  const d = _parseIso(iso);
+  if (!d) return "";
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return "только что";
+  if (mins < 60) return `${mins} мин назад`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} ч назад`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return "вчера";
+  if (days < 7) return `${days} дн назад`;
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(d);
+}
+
 // --- карточки объявлений ---
 function _cardShell(item, kind, rerender, specs) {
   const card = el(`
     <div class="list-group-item py-2">
       <div class="d-flex align-items-start">
-        <a class="title fw-semibold text-truncate flex-grow-1 me-2" role="button"></a>
+        <a class="title fw-semibold flex-grow-1 me-2" role="button" style="white-space:normal"></a>
         <button class="btn btn-sm btn-link p-0 flag" title="пометить неверным">🚩</button>
       </div>
       <div class="small mt-1"><span class="price fw-bold"></span><span class="specs text-muted"></span></div>
       <div class="small text-muted mt-1 loc"></div>
+      <div class="small text-muted found"></div>
     </div>`);
   const t = card.querySelector(".title");
-  t.textContent = item.title || "(без названия)";
+  t.textContent = (isFresh(item.first_seen_at) ? "🆕 " : "") + (item.title || "(без названия)");
   t.addEventListener("click", () => item.url && openLink(item.url));
-  card.querySelector(".price").textContent = eur(item.price_eur) + (item.negotiable ? " VB " : " ");
-  card.querySelector(".specs").textContent = "· " + specs.join(" · ");
+  // Точная цена как на сайте (уже включает 'VB' если торг уместен) — надёжнее
+  // округлённого числа: покрывает 'Zu verschenken', диапазоны и т.п.
+  card.querySelector(".price").textContent =
+    (item.price_raw || eur(item.price_eur)) + (item.negotiable && !/\bVB\b/.test(item.price_raw || "") ? " VB" : "");
+  card.querySelector(".specs").textContent = specs.length ? "· " + specs.join(" · ") : "";
   card.querySelector(".loc").textContent =
     `📍 ${item.plz || ""} ${item.city || ""}${item.bundesland ? " (" + item.bundesland + ")" : ""}` +
-    (item.posted_raw ? ` · ${item.posted_raw}` : "");
+    (item.posted_raw ? ` · 📅 ${item.posted_raw}` : "") +
+    (item.shipping ? " · 📦 доставка" : "");
+  const found = card.querySelector(".found");
+  const ago = foundAgo(item.first_seen_at);
+  found.textContent = ago ? `обнаружено разведкой: ${ago}` : "";
   if (item.removed) {
     card.classList.add("removed-item");
     card.style.opacity = ".55";
@@ -234,6 +274,62 @@ function buildLandGroups(all) {
   })).sort((a, b) => b.count - a.count);
 }
 
+const NEW_TAB_LIMIT = 40;  // на каждый вид — дальше геонавигация в «Машины»/«Запчасти»
+
+function sortByNew(arr) {
+  return [...arr].sort((a, b) => (b.first_seen_at || "").localeCompare(a.first_seen_at || ""));
+}
+
+// --- подвкладка «Новое»: плоская лента самых свежих находок, БЕЗ гео-навигации.
+// Запчасти (сиденья/скамейки/рельсы) — секция первая (приоритет оператора),
+// машины — вторая. Сортировка внутри каждой секции — по first_seen_at DESC.
+async function renderNewTab(container) {
+  if (S.cars === null || S.parts === null) {
+    container.replaceChildren(el(`<p class="text-muted py-3">Загружаю…</p>`));
+    try {
+      const q = S.showRemoved ? "&include_removed=true" : "";
+      const [carsData, partsData] = await Promise.all([
+        S.cars === null ? api(`/api/ma/scout/listings?kind=car${q}`) : Promise.resolve({ listings: S.cars }),
+        S.parts === null ? api(`/api/ma/scout/listings?kind=part${q}`) : Promise.resolve({ listings: S.parts }),
+      ]);
+      S.cars = carsData.listings; S.parts = partsData.listings;
+    } catch (e) { setError(container, e.message ?? String(e)); return; }
+  }
+
+  function draw() {
+    const root = el(`<div></div>`);
+    root.appendChild(removedToggle(() => renderNewTab(container)));
+    const info = el(`<div class="small text-muted mb-2"></div>`);
+    info.textContent = `сначала свежие · 🪑 запчастей: ${S.parts.length} · 🚐 машин: ${S.cars.length}`;
+    root.appendChild(info);
+
+    const sections = [
+      ["🪑 Запчасти", sortByNew(S.parts), partCard, "part"],
+      ["🚐 Машины", sortByNew(S.cars), carCard, "car"],
+    ];
+    for (const [label_, arr, cardFn, kind] of sections) {
+      const h = el(`<h6 class="mt-3 mb-1"></h6>`);
+      h.textContent = label_;
+      root.appendChild(h);
+      if (!arr.length) {
+        root.appendChild(el(`<div class="text-muted small fst-italic py-2">нет данных</div>`));
+        continue;
+      }
+      const shown = arr.slice(0, NEW_TAB_LIMIT);
+      const group = el(`<div class="list-group list-group-flush"></div>`);
+      shown.forEach(r => group.appendChild(cardFn(r, draw)));
+      root.appendChild(group);
+      if (arr.length > shown.length) {
+        const more = el(`<div class="small text-muted text-center py-1"></div>`);
+        more.textContent = `… и ещё ${arr.length - shown.length} — полный список во вкладке «${kind === "part" ? "🪑 Запчасти" : "🚐 Машины"}»`;
+        root.appendChild(more);
+      }
+    }
+    container.replaceChildren(root);
+  }
+  draw();
+}
+
 // --- подвкладка списка (car|part): земля → города → объявления ---
 async function renderListTab(container, kind) {
   if ((kind === "car" ? S.cars : S.parts) === null) {
@@ -253,7 +349,8 @@ async function renderListTab(container, kind) {
 // Галка «показывать снятые». Снятое = объявления нет в выдаче дольше
 // scout_stale_days: почти всегда продано/удалено. По умолчанию скрыты и не
 // учитываются в счётчиках — иначе рынок выглядит больше, чем есть.
-function removedToggle(container, kind) {
+// onToggle зовётся ПОСЛЕ сброса кэша — сам решает, что перерисовать.
+function removedToggle(onToggle) {
   const wrap = el(`
     <div class="form-check form-switch small mb-2">
       <input class="form-check-input" type="checkbox" id="show-removed">
@@ -264,8 +361,7 @@ function removedToggle(container, kind) {
   cb.addEventListener("change", () => {
     S.showRemoved = cb.checked;
     S.cars = null; S.parts = null;          // перезапрос: набор объявлений другой
-    S.view[kind] = "lands"; S.land[kind] = null; S.city[kind] = null;
-    renderListTab(container, kind);
+    onToggle();
   });
   return wrap;
 }
@@ -274,7 +370,10 @@ function removedToggle(container, kind) {
 function renderLandsView(container, kind) {
   const all = kind === "car" ? S.cars : S.parts;
   const root = el(`<div></div>`);
-  root.appendChild(removedToggle(container, kind));
+  root.appendChild(removedToggle(() => {
+    S.view[kind] = "lands"; S.land[kind] = null; S.city[kind] = null;
+    renderListTab(container, kind);
+  }));
   const open = (land) => { S.land[kind] = land; S.view[kind] = "cities"; S.cityQ[kind] = ""; renderCitiesView(container, kind); };
 
   const heatDet = el(`<details class="mb-2" open><summary class="small text-muted">🗺 Тепловая карта — нажми землю</summary></details>`);
@@ -403,9 +502,10 @@ function renderCityDrill(container, kind) {
   const f = S.filters[kind];
   // в drill используем те же фильтры, но город фиксирован
   const sortSel = selectFilter("сортировка", [
+    { value: "new_desc", text: "🆕 новизна" },
     { value: "price_asc", text: "цена ↑" }, { value: "price_desc", text: "цена ↓" },
     { value: "year_desc", text: "год ↓" }, { value: "year_asc", text: "год ↑" },
-  ], S.sort[kind], v => { S.sort[kind] = v || "price_asc"; draw(); });
+  ], S.sort[kind], v => { S.sort[kind] = v || "new_desc"; draw(); });
   sortSel.options[0].textContent = "сортировка";
   ctrl.appendChild(sortSel);
   if (kind === "car") {
@@ -427,6 +527,7 @@ function renderCityDrill(container, kind) {
     rows.sort((a, b) => sort === "price_desc" ? numD(b.price_eur) - numD(a.price_eur)
       : sort === "year_desc" ? numD(b.year) - numD(a.year)
       : sort === "year_asc" ? num(a.year) - num(b.year)
+      : sort === "new_desc" ? (b.first_seen_at || "").localeCompare(a.first_seen_at || "")
       : num(a.price_eur) - num(b.price_eur));
     listEl.replaceChildren();
     const cnt = el(`<div class="text-muted small px-1 mb-1"></div>`);
@@ -596,6 +697,7 @@ function renderShell(mount) {
         <button class="btn btn-sm auto-toggle"></button>
       </div>
       <ul class="nav nav-pills nav-fill mb-2 subnav">
+        <li class="nav-item"><a class="nav-link py-1" data-tab="new" role="button">🆕 Новое</a></li>
         <li class="nav-item"><a class="nav-link py-1" data-tab="car" role="button">🚐 Машины</a></li>
         <li class="nav-item"><a class="nav-link py-1" data-tab="part" role="button">🪑 Запчасти</a></li>
         <li class="nav-item"><a class="nav-link py-1" data-tab="queries" role="button">⚙️ Запросы</a></li>
@@ -641,6 +743,7 @@ function renderShell(mount) {
   function openTab(tab) {
     S.tab = tab; paint();
     if (tab === "queries") renderQueriesTab(body);
+    else if (tab === "new") renderNewTab(body);
     else renderListTab(body, tab);
   }
   links.forEach(a => a.addEventListener("click", () => openTab(a.dataset.tab)));

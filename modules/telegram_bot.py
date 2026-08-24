@@ -198,6 +198,51 @@ def notify(text: str, start_param: Optional[str] = None,
     return _http_post("sendMessage", payload)
 
 
+def split_lines_to_chunks(lines: list[str], limit: int = 3500) -> list[str]:
+    """Собрать строки в чанки ≤limit символов, не разрывая ни одну строку.
+
+    Нужен для «исчерпывающих» дайджестов (напр. полный список новых объявлений
+    рынка), где урезание одним `_truncate_html_safe` до 4096 обрезало бы список
+    и/или могло разорвать HTML-тег внутри строки. Одиночная строка длиннее limit
+    режется безопасно через `_truncate_html_safe`.
+    """
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for line in lines:
+        if len(line) > limit:
+            line = _truncate_html_safe(line, limit)
+        add_len = len(line) + (1 if cur else 0)
+        if cur and cur_len + add_len > limit:
+            chunks.append("\n".join(cur))
+            cur = [line]
+            cur_len = len(line)
+        else:
+            cur.append(line)
+            cur_len += add_len
+    if cur:
+        chunks.append("\n".join(cur))
+    return chunks
+
+
+def notify_chunks(chunks: list[str], start_param: Optional[str] = None,
+                   label: str = "📋 Открыть в MA") -> None:
+    """Отправить несколько сообщений подряд (см. split_lines_to_chunks).
+
+    Кнопка «Открыть» — только на последнем чанке (как в thread-detail chunking).
+    """
+    for i, chunk in enumerate(chunks):
+        payload: dict[str, Any] = {
+            "chat_id": config.telegram_chat_id(),
+            "text": chunk,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if start_param and i == len(chunks) - 1:
+            payload["reply_markup"] = _open_kb(start_param, label)
+        _http_post("sendMessage", payload)
+
+
 def set_menu_button() -> None:
     """Нативная Menu Button у поля ввода → открывает MA-дашборд. Ставится 1 раз при старте."""
     dm_ids = config.telegram_operator_dm_ids() or [config.telegram_chat_id()]

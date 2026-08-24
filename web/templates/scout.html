@@ -229,15 +229,48 @@
     </div>
 </div>
 
+{# ===== Запчасти (приоритет оператора — секция первая) ===== #}
+<h2 class="mb-2">🪑 Запчасти ({{ parts|length }})</h2>
+<div class="card mb-4"><div class="card-body p-2">
+    <div class="table-responsive">
+    <table id="parts-table" class="table table-hover">
+        <thead><tr>
+            <th>Земля</th><th>Город</th><th>PLZ</th><th>Тип</th>
+            <th>Сост.</th><th>Год</th><th>Цена</th>
+            <th data-sortable="false">Объявление</th><th data-default-sort="desc">Дата</th><th data-sortable="false"></th>
+        </tr></thead>
+        <tbody>
+        {% for p in parts %}
+            <tr>
+                <td>{{ p.bundesland or '—' }}</td>
+                <td>{{ p.city or '—' }}</td>
+                <td>{{ p.plz or '—' }}</td>
+                <td>{% if p.part_type=='seat' %}сиденье{% elif p.part_type=='bench' %}скамейка{% elif p.part_type=='rail' %}рельсы{% else %}другое{% endif %}</td>
+                <td>{% if p.condition=='neu' %}новое{% elif p.condition=='gebraucht' %}б/у{% else %}—{% endif %}</td>
+                <td data-sort="{{ p.year or 0 }}">{{ p.year or '—' }}</td>
+                <td data-sort="{{ p.price_eur or 0 }}">{{ eur(p.price_eur) }}{% if p.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
+                <td><a class="row-link" href="{{ p.url }}" target="_blank" rel="noopener" title="{{ p.title or '' }}">{{ p.title or '' }}</a></td>
+                <td class="text-muted-sm" data-sort="{{ p.first_seen_at or '' }}" title="обнаружено разведкой: {{ p.first_seen_at|berlin('%d.%m %H:%M') if p.first_seen_at else '' }}">{{ p.posted_raw or '' }}</td>
+                <td class="text-nowrap">
+                    <button class="btn btn-sm btn-outline-warning corr" data-ad="{{ p.ad_id }}" data-k="car" title="это машина">🚐</button>
+                    <button class="btn btn-sm btn-outline-danger corr" data-ad="{{ p.ad_id }}" data-k="remove" title="удалить (неверно)">🗑</button>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div></div>
+
 {# ===== Машины ===== #}
 <h2 class="mb-2">🚐 Машины ({{ cars|length }})</h2>
 <div class="card mb-4"><div class="card-body p-2">
     <div class="table-responsive">
     <table id="cars-table" class="table table-hover">
         <thead><tr>
-            <th data-default-sort="asc">Земля</th><th>Город</th><th>PLZ</th><th>Модель</th>
+            <th>Земля</th><th>Город</th><th>PLZ</th><th>Модель</th>
             <th>Год</th><th>Двиг.</th><th>КПП</th><th>Пробег</th><th>Цена</th>
-            <th data-sortable="false">Объявление</th><th>Дата</th><th data-sortable="false"></th>
+            <th data-sortable="false">Объявление</th><th data-default-sort="desc">Дата</th><th data-sortable="false"></th>
         </tr></thead>
         <tbody>
         {% for c in cars %}
@@ -251,44 +284,11 @@
                 <td>{% if c.gearbox=='automatik' %}авто{% elif c.gearbox=='manuell' %}мех{% else %}—{% endif %}</td>
                 <td data-sort="{{ c.mileage_km or 0 }}">{% if c.mileage_km %}{{ "{:,.0f}".format(c.mileage_km).replace(",", ".") }} км{% else %}—{% endif %}</td>
                 <td data-sort="{{ c.price_eur or 0 }}">{{ eur(c.price_eur) }}{% if c.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
-                <td><a class="row-link" href="{{ c.url }}" target="_blank" rel="noopener">{{ (c.title or '')[:70] }}</a></td>
-                <td class="text-muted-sm">{{ c.posted_raw or '' }}</td>
+                <td><a class="row-link" href="{{ c.url }}" target="_blank" rel="noopener" title="{{ c.title or '' }}">{{ c.title or '' }}</a></td>
+                <td class="text-muted-sm" data-sort="{{ c.first_seen_at or '' }}" title="обнаружено разведкой: {{ c.first_seen_at|berlin('%d.%m %H:%M') if c.first_seen_at else '' }}">{{ c.posted_raw or '' }}</td>
                 <td class="text-nowrap">
                     <button class="btn btn-sm btn-outline-warning corr" data-ad="{{ c.ad_id }}" data-k="part" title="это запчасть">🪑</button>
                     <button class="btn btn-sm btn-outline-danger corr" data-ad="{{ c.ad_id }}" data-k="remove" title="удалить (неверно)">🗑</button>
-                </td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-</div></div>
-
-{# ===== Запчасти ===== #}
-<h2 class="mb-2">🪑 Запчасти ({{ parts|length }})</h2>
-<div class="card mb-4"><div class="card-body p-2">
-    <div class="table-responsive">
-    <table id="parts-table" class="table table-hover">
-        <thead><tr>
-            <th data-default-sort="asc">Земля</th><th>Город</th><th>PLZ</th><th>Тип</th>
-            <th>Сост.</th><th>Год</th><th>Цена</th>
-            <th data-sortable="false">Объявление</th><th>Дата</th><th data-sortable="false"></th>
-        </tr></thead>
-        <tbody>
-        {% for p in parts %}
-            <tr>
-                <td>{{ p.bundesland or '—' }}</td>
-                <td>{{ p.city or '—' }}</td>
-                <td>{{ p.plz or '—' }}</td>
-                <td>{% if p.part_type=='seat' %}сиденье{% elif p.part_type=='bench' %}скамейка{% elif p.part_type=='rail' %}рельсы{% else %}другое{% endif %}</td>
-                <td>{% if p.condition=='neu' %}новое{% elif p.condition=='gebraucht' %}б/у{% else %}—{% endif %}</td>
-                <td data-sort="{{ p.year or 0 }}">{{ p.year or '—' }}</td>
-                <td data-sort="{{ p.price_eur or 0 }}">{{ eur(p.price_eur) }}{% if p.negotiable %} <span class="text-muted-sm">VB</span>{% endif %}</td>
-                <td><a class="row-link" href="{{ p.url }}" target="_blank" rel="noopener">{{ (p.title or '')[:70] }}</a></td>
-                <td class="text-muted-sm">{{ p.posted_raw or '' }}</td>
-                <td class="text-nowrap">
-                    <button class="btn btn-sm btn-outline-warning corr" data-ad="{{ p.ad_id }}" data-k="car" title="это машина">🚐</button>
-                    <button class="btn btn-sm btn-outline-danger corr" data-ad="{{ p.ad_id }}" data-k="remove" title="удалить (неверно)">🗑</button>
                 </td>
             </tr>
         {% endfor %}

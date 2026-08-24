@@ -294,6 +294,26 @@ def list_unverified_scout_listings(limit: int = 500) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def get_scout_effective_kinds(ad_ids: list[str]) -> dict[str, str]:
+    """Эффективный вид (COALESCE(verified_kind, kind)) для набора ad_id.
+
+    Нужен чтобы уведомление о прогоне отражало результат Haiku-проверки,
+    а не сырой kind поискового запроса (иначе ложные совпадения вроде
+    Citroën C4 Picasso/Spacetourer под запрос 'citroen spacetourer' лезут
+    в дайджест как «новая машина» несмотря на то что verify их отбраковал).
+    """
+    ids = [str(a) for a in ad_ids if a]
+    if not ids:
+        return {}
+    with get_conn() as conn:
+        placeholders = ",".join("?" * len(ids))
+        rows = conn.execute(
+            f"SELECT ad_id, {_EFF_KIND} AS k FROM scout_listings WHERE ad_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+    return {r["ad_id"]: r["k"] for r in rows}
+
+
 def set_scout_verified_kind(ad_id: str, verified_kind: str) -> None:
     """Записать результат Haiku-проверки ('car'|'part'|'other')."""
     if not ad_id:

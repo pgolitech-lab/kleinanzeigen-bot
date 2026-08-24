@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 import config
 import database as db
@@ -198,17 +199,56 @@ def run_backup() -> str:
         raise  # пусть слушатель event-а зафиксирует error
 
 
-SCOUT_NOTIFY_MAX_LISTINGS = 15
+_SCOUT_PART_TYPE_RU = {"seat": "сиденье", "bench": "скамейка", "rail": "рельсы", "other": "деталь"}
+_SCOUT_COND_RU = {"neu": "новое", "gebraucht": "б/у"}
+_SCOUT_FUEL_RU = {"electric": "эл", "diesel": "дизель", "petrol": "бензин", "hybrid": "гибрид"}
+_SCOUT_GB_RU = {"automatik": "АКПП", "manuell": "МКПП"}
 
 
 def _fmt_scout_listing(item: dict) -> str:
+    """Одна строка дайджеста: заголовок-ссылка, цена, локация/дата, специфика.
+
+    Исчерпывающая инфа (требование оператора) — не только «цена + ссылка»,
+    но и локация, дата публикации и ключевые атрибуты (год/пробег/тип детали/сост.).
+    """
     icon = "🚐" if item["kind"] == "car" else "🔧"
     title = telegram_bot._html(item.get("title") or "(без названия)")
     price = item.get("price_raw") or (
         f"{item['price_eur']:.0f} €" if item.get("price_eur") is not None else "цена?")
     url = item.get("url")
     label = f'<a href="{telegram_bot._html(url)}">{title}</a>' if url else title
-    return f"{icon} {label} — {price}"
+
+    bits: list[str] = []
+    loc = " ".join(x for x in (item.get("plz"), item.get("city")) if x)
+    if loc:
+        bits.append(f"📍{loc}")
+    if item.get("posted_raw"):
+        bits.append(f"🕓{item['posted_raw']}")
+    specs: list[str] = []
+    if item["kind"] == "car":
+        if item.get("year"):
+            specs.append(str(item["year"]))
+        if item.get("mileage_km"):
+            specs.append(f"{int(item['mileage_km']):,}".replace(",", ".") + " км")
+        if item.get("fuel"):
+            specs.append(_SCOUT_FUEL_RU.get(item["fuel"], item["fuel"]))
+        if item.get("gearbox"):
+            specs.append(_SCOUT_GB_RU.get(item["gearbox"], item["gearbox"]))
+        if item.get("model_family"):
+            specs.append(item["model_family"])
+    else:
+        if item.get("part_type"):
+            specs.append(_SCOUT_PART_TYPE_RU.get(item["part_type"], item["part_type"]))
+        if item.get("condition"):
+            specs.append(_SCOUT_COND_RU.get(item["condition"], item["condition"]))
+        if item.get("year"):
+            specs.append(str(item["year"]))
+    if specs:
+        bits.append(" · ".join(specs))
+    if item.get("shipping"):
+        bits.append("📦")
+    meta = ("\n   " + " · ".join(bits)) if bits else ""
+    return f"{icon} {label} — {price}{meta}"
 
 
 def scout_job() -> str:
@@ -226,18 +266,24 @@ def scout_job() -> str:
     logger.info(msg)
     if summary["cars_new"] or summary["parts_new"]:
         new_listings = summary.get("new_listings") or []
-        cards = [_fmt_scout_listing(it) for it in new_listings[:SCOUT_NOTIFY_MAX_LISTINGS]]
-        extra = len(new_listings) - len(cards)
-        text = (
+        # Запчасти (сиденья/скамейки/рельсы) — приоритет оператора, секция идёт
+        # первой; машины — тоже важны, второй секцией. Полный список БЕЗ урезания
+        # (требование: «исчерпывающая информация» по каждому новому объявлению) —
+        # длинный дайджест чанкуется под лимит Telegram, а не обрезается.
+        cars = [it for it in new_listings if it["kind"] == "car"]
+        parts = [it for it in new_listings if it["kind"] != "car"]
+        lines = [
             f"🔎 <b>Рынок обновился</b>\n"
-            f"🚐 новых машин: {summary['cars_new']}\n"
             f"🔧 новых запчастей: {summary['parts_new']}\n"
-        )
-        if cards:
-            text += "\n" + "\n".join(cards)
-        if extra > 0:
-            text += f"\n… и ещё {extra}"
-        telegram_bot.notify(text, "scout", label="🔎 Открыть Рынок")
+            f"🚐 новых машин: {summary['cars_new']}"
+        ]
+        for label_, items in (("🔧 Запчасти", parts), ("🚐 Машины", cars)):
+            if not items:
+                continue
+            lines.append(f"\n<b>{label_}</b>")
+            lines.extend(_fmt_scout_listing(it) for it in items)
+        chunks = telegram_bot.split_lines_to_chunks(lines)
+        telegram_bot.notify_chunks(chunks, "scout", label="🔎 Открыть Рынок")
     return msg
 
 
@@ -316,10 +362,21 @@ def build_scheduler() -> BackgroundScheduler:
     )
 
     # Разведка рынка — авто-прогон по интервалу (само no-op если выключено в настройках).
+    # Якорим старт на 08:59 по Берлину (за минуту до daily_summary в 9:00) — иначе
+    # интервал-триггер без явного start_date считает от момента рестарта сервиса,
+    # и время прогона "плывёт" на любой удобный процессу час (напр. 5 утра после
+    # ночного рестарта).
+    berlin_tz = zoneinfo.ZoneInfo("Europe/Berlin")
+    scout_anchor = datetime.now(berlin_tz).replace(hour=8, minute=59, second=0, microsecond=0)
+    if scout_anchor <= datetime.now(berlin_tz):
+        scout_anchor += timedelta(days=1)
     sched.add_job(
         scout_job,
-        trigger="interval",
-        hours=max(1, config.scout_interval_hours()),
+        trigger=IntervalTrigger(
+            hours=max(1, config.scout_interval_hours()),
+            start_date=scout_anchor,
+            timezone=berlin_tz,
+        ),
         id="market_scout",
         replace_existing=True,
         max_instances=1,
