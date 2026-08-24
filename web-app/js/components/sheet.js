@@ -1,7 +1,7 @@
 // Bottom-sheet — единый паттерн для меню действий, форм и подтверждений
 // (вместо трёх разных: inline-морф кнопки / tg.showConfirm / window.confirm).
 
-import { el } from "../utils.js?v=20260824-01";
+import { el } from "../utils.js?v=20260824-02";
 
 let _ov = null, _sh = null;
 

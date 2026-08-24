@@ -2,9 +2,9 @@
 // Подвкладки: Новое / Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
 // «Новое» — плоская лента самых свежих находок (запчасти первой секцией,
 // приоритет оператора), сортировка везде по умолчанию — новизна (first_seen_at).
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260824-01";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260824-01";
-import { openLink } from "../tg.js?v=20260824-01";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260824-02";
+import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20260824-02";
+import { openLink } from "../tg.js?v=20260824-02";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -275,14 +275,63 @@ function buildLandGroups(all) {
 }
 
 const NEW_TAB_LIMIT = 40;  // на каждый вид — дальше геонавигация в «Машины»/«Запчасти»
+const _RU_MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня",
+                    "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
 function sortByNew(arr) {
   return [...arr].sort((a, b) => (b.first_seen_at || "").localeCompare(a.first_seen_at || ""));
 }
 
-// --- подвкладка «Новое»: плоская лента самых свежих находок, БЕЗ гео-навигации.
+// YYYY-MM-DD объявления в TZ Европа/Берлин (та же зона, что berlinTime) — ключ группы.
+function _berlinDayKey(d) {
+  if (!d) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(d);
+  const get = t => parts.find(p => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function _dayLabel(key) {
+  if (!key) return "дата неизвестна";
+  const today = _berlinDayKey(new Date());
+  const yesterday = _berlinDayKey(new Date(Date.now() - 86400000));
+  if (key === today) return "Сегодня";
+  if (key === yesterday) return "Вчера";
+  const [, m, d] = key.split("-").map(Number);
+  return `${d} ${_RU_MONTHS[m - 1]}`;
+}
+
+// Группировка по дню обнаружения (first_seen_at, DESC — свежие дни выше), внутри
+// дня — по наименованию (А-Я/A-Z), при совпадении имени — по цене (по возрастанию).
+// Оператор просил именно так: «сгруппированы по дате, наименованию и цене».
+function groupByDayThenName(arr) {
+  const byDay = new Map();
+  for (const r of arr) {
+    const key = _berlinDayKey(_parseIso(r.first_seen_at));
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(r);
+  }
+  const keys = [...byDay.keys()].sort((a, b) => {
+    if (!a) return 1;    // без даты — в самый низ
+    if (!b) return -1;
+    return b.localeCompare(a);
+  });
+  return keys.map(key => {
+    const items = byDay.get(key).sort((a, b) => {
+      const byName = (a.title || "").localeCompare(b.title || "", "de", { sensitivity: "base" });
+      if (byName !== 0) return byName;
+      return (a.price_eur ?? Infinity) - (b.price_eur ?? Infinity);
+    });
+    return { key, label: _dayLabel(key), items };
+  });
+}
+
+// --- подвкладка «Новое»: лента свежих находок, сгруппированная по дате.
 // Запчасти (сиденья/скамейки/рельсы) — секция первая (приоритет оператора),
-// машины — вторая. Сортировка внутри каждой секции — по first_seen_at DESC.
+// машины — вторая. Внутри каждой секции — группы по дню обнаружения (свежие
+// дни сверху), внутри дня — по наименованию, потом по цене. Названия объявлений
+// разворачиваются полностью (без обрезки) — см. _cardShell.
 async function renderNewTab(container) {
   if (S.cars === null || S.parts === null) {
     container.replaceChildren(el(`<p class="text-muted py-3">Загружаю…</p>`));
@@ -300,7 +349,7 @@ async function renderNewTab(container) {
     const root = el(`<div></div>`);
     root.appendChild(removedToggle(() => renderNewTab(container)));
     const info = el(`<div class="small text-muted mb-2"></div>`);
-    info.textContent = `сначала свежие · 🪑 запчастей: ${S.parts.length} · 🚐 машин: ${S.cars.length}`;
+    info.textContent = `сгруппировано по дате · 🪑 запчастей: ${S.parts.length} · 🚐 машин: ${S.cars.length}`;
     root.appendChild(info);
 
     const sections = [
@@ -316,9 +365,14 @@ async function renderNewTab(container) {
         continue;
       }
       const shown = arr.slice(0, NEW_TAB_LIMIT);
-      const group = el(`<div class="list-group list-group-flush"></div>`);
-      shown.forEach(r => group.appendChild(cardFn(r, draw)));
-      root.appendChild(group);
+      for (const dayGroup of groupByDayThenName(shown)) {
+        const dh = el(`<div class="small text-uppercase text-muted fw-semibold mt-2 mb-1 day-hdr"></div>`);
+        dh.textContent = `📅 ${dayGroup.label} (${dayGroup.items.length})`;
+        root.appendChild(dh);
+        const group = el(`<div class="list-group list-group-flush"></div>`);
+        dayGroup.items.forEach(r => group.appendChild(cardFn(r, draw)));
+        root.appendChild(group);
+      }
       if (arr.length > shown.length) {
         const more = el(`<div class="small text-muted text-center py-1"></div>`);
         more.textContent = `… и ещё ${arr.length - shown.length} — полный список во вкладке «${kind === "part" ? "🪑 Запчасти" : "🚐 Машины"}»`;
