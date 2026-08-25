@@ -1,7 +1,7 @@
 // Autopilot start form (floor + notify mode + preview) + status block с действием.
 
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260815-050941";
-import { el } from "../utils.js?v=20260815-050941";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260825-045359";
+import { el } from "../utils.js?v=20260825-045359";
 
 
 export function buildAutopilotForm({threadId, onSubmitComplete, onCancel}) {
