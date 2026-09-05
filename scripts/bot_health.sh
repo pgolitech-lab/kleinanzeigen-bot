@@ -7,6 +7,8 @@
 #      active, но завис) restart + алерт.
 #   4. МА (GitHub Pages) должна смотреть на актуальный cloudflared quick-tunnel URL —
 #      иначе self-heal через update_tunnel_url.sh, алерт только если не помогло.
+#   5. OAuth-сессия claude CLI не должна истечь молча — предупредить за WARN_DAYS
+#      до истечения refresh-токена (нужен для дневного bot-autofix.timer).
 # Алерты дедуплицируются: одна и та же проблема не спамит чаще раза в час.
 set -u
 
@@ -153,6 +155,44 @@ else
       notify "🟥 <b>watchdog</b>: МА (GitHub Pages) смотрит на устаревший backend URL уже $((elapsed/60)) мин. Deployed: $DEPLOYED_URL, актуальный: $LIVE_URL. Self-heal пытался синхронизировать автоматически — если МА всё ещё недоступна, проверь вручную: systemctl status tunnel-url-sync, git status в репо (грязное дерево блокирует push)."
     fi
   fi
+fi
+
+# --- 5. OAuth-сессия claude CLI не близка к истечению? ---
+# Мотивация (инциденты 2026-08-08 и 2026-09-05): refreshToken живёт ровно ~28 дней от
+# /login, ежедневный авторефреш access-токена срок жизни refresh-токена НЕ продлевает.
+# Когда refresh-токен истекает, bot-autofix.timer в 5:00 падает с "OAuth session expired
+# and could not be refreshed" и молча ничего не чинит, пока оператор не сделает /login
+# руками. Предупреждаем заранее, а не постфактум по алерту о провале прогона.
+CREDS=/home/pg/.claude/.credentials.json
+OAUTH_STATE="$STATE/oauth_alert_ts"
+OAUTH_COOLDOWN=79200   # ~22ч — предупреждать не чаще раза в сутки (не раза в час, как остальные)
+WARN_DAYS=3
+
+REFRESH_LEFT=$(python3 -c "
+import json, time
+try:
+    d = json.load(open('$CREDS'))['claudeAiOauth']
+    print(int(d['refreshTokenExpiresAt'] / 1000 - time.time()))
+except Exception:
+    pass
+" 2>/dev/null)
+
+if [ -z "${REFRESH_LEFT:-}" ]; then
+  log "не удалось прочитать refreshTokenExpiresAt из $CREDS (claude CLI не залогинен?)"
+elif [ "$REFRESH_LEFT" -lt $((WARN_DAYS * 86400)) ]; then
+  now=$(date +%s)
+  last=$(cat "$OAUTH_STATE" 2>/dev/null || echo 0)
+  if [ $((now - last)) -ge $OAUTH_COOLDOWN ]; then
+    echo "$now" > "$OAUTH_STATE"
+    if [ "$REFRESH_LEFT" -lt 0 ]; then
+      notify "🟥 <b>watchdog</b>: OAuth-сессия claude CLI уже истекла — ближайший bot-autofix.timer (5:00) упадёт с «OAuth session expired». Сделай /login."
+    else
+      days_left=$((REFRESH_LEFT / 86400))
+      notify "🟡 <b>watchdog</b>: OAuth-сессия claude CLI (refresh-токен) истекает через ~${days_left}д. После истечения дневной bot-autofix упадёт молча до ручного /login — сделай его заранее."
+    fi
+  fi
+else
+  rm -f "$OAUTH_STATE"
 fi
 
 log "ok (service active, health 200, IMAP-ошибок за 10 мин: ${IMAP_ERR:-0})"
