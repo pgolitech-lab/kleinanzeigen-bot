@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bot_autofix.sh — LLM-слой мониторинга. Запускается из bot-autofix.timer каждые 30 мин.
-# Дешёвый grep ищет реальные ошибки в логах за последние ~35 мин. ТОЛЬКО если нашёл —
+# bot_autofix.sh — LLM-слой мониторинга. Запускается из bot-autofix.timer раз в сутки в 5:00.
+# Дешёвый grep ищет реальные ошибки в логах за последние ~25ч. ТОЛЬКО если нашёл —
 # зовёт claude headless (Opus) чинить. Чистые логи → LLM не зовётся → $0.
 # Дедуп: одна и та же сигнатура ошибки не запускает claude чаще раза в COOLDOWN.
 #
@@ -27,8 +27,8 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# --- 1. Дешёвый grep реальных ошибок за 35 мин ---
-ERR=$(journalctl -u kleinanzeigen-bot --since "35 min ago" --no-pager 2>/dev/null \
+# --- 1. Дешёвый grep реальных ошибок за 25ч (окно = период между суточными прогонами) ---
+ERR=$(journalctl -u kleinanzeigen-bot --since "25 hours ago" --no-pager 2>/dev/null \
   | grep -iE "error|traceback|exception|critical|fatal|failed|refused|timed? ?out" \
   | grep -viE "monitor_errors_job|next run at|executed successfully|0 error|no error|/health HTTP" )
 
@@ -54,12 +54,12 @@ RUNLOG="$LOGDIR/$(date '+%Y%m%d-%H%M%S')-$SIG.log"
 # --- 3. Промпт с жёсткими рамками AGENTS.md ---
 PROMPT=$(cat <<'EOF'
 Ты автономный дежурный по проду kleinanzeigen-bot (/home/pg/kleinanzeigen-bot).
-В логах journalctl -u kleinanzeigen-bot за последние ~35 минут найдены ошибки.
+В логах journalctl -u kleinanzeigen-bot за последние ~25 часов найдены ошибки.
 Задача: разобраться в первопричине и починить в рамках AGENTS.md.
 
 Шаги:
 1. Прочитай ошибки:
-   journalctl -u kleinanzeigen-bot --since "40 min ago" --no-pager | grep -iE "error|traceback|exception|critical|fatal|failed" | grep -viE "monitor_errors_job|next run at|executed successfully"
+   journalctl -u kleinanzeigen-bot --since "26 hours ago" --no-pager | grep -iE "error|traceback|exception|critical|fatal|failed" | grep -viE "monitor_errors_job|next run at|executed successfully"
 2. Найди первопричину в коде.
 3. Если это простой, безопасный, ОДНОЗНАЧНЫЙ баг в коде — почини. Затем строго по порядку:
    - python3 -m pytest tests/ -q        → коммитить ТОЛЬКО если тесты зелёные
@@ -128,7 +128,7 @@ if [ "$FAILED" = "1" ]; then
   exit 0
 fi
 
-# Успех — фиксируем сигнатуру, чтобы не долбить тем же багом каждые 30 мин.
+# Успех — фиксируем сигнатуру, чтобы не долбить тем же багом на каждом суточном прогоне.
 printf '%s\n%s\n' "$SIG" "$now" > "$SIGFILE"
 log "claude отработал успешно, лог: $RUNLOG"
 exit 0
