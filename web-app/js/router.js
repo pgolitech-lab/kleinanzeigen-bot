@@ -1,17 +1,17 @@
 // Hash-router. Listens to location.hash и вызывает соответствующий screen.render().
 
-import * as pipeline from "./screens/pipeline.js?v=20260918-050239";
-import * as thread from "./screens/thread.js?v=20260918-050239";
-import * as client from "./screens/client.js?v=20260918-050239";
-import * as settings from "./screens/settings.js?v=20260918-050239";
-import * as review from "./screens/review.js?v=20260918-050239";
-import * as sales from "./screens/sales.js?v=20260918-050239";
-import * as detected from "./screens/detected.js?v=20260918-050239";
-import * as dashboard from "./screens/dashboard.js?v=20260918-050239";
-import * as clients from "./screens/clients.js?v=20260918-050239";
-import * as scout from "./screens/scout.js?v=20260918-050239";
-import { setError } from "./utils.js?v=20260918-050239";
-import { hideBack, showBack, setTitle } from "./components/backbar.js?v=20260918-050239";
+import * as pipeline from "./screens/pipeline.js?v=20260930-045357";
+import * as thread from "./screens/thread.js?v=20260930-045357";
+import * as client from "./screens/client.js?v=20260930-045357";
+import * as settings from "./screens/settings.js?v=20260930-045357";
+import * as review from "./screens/review.js?v=20260930-045357";
+import * as sales from "./screens/sales.js?v=20260930-045357";
+import * as detected from "./screens/detected.js?v=20260930-045357";
+import * as dashboard from "./screens/dashboard.js?v=20260930-045357";
+import * as clients from "./screens/clients.js?v=20260930-045357";
+import * as scout from "./screens/scout.js?v=20260930-045357";
+import { setError } from "./utils.js?v=20260930-045357";
+import { hideBack, showBack, setTitle } from "./components/backbar.js?v=20260930-045357";
 
 const ROUTES = [
   { pattern: /^#?\/?$/,                   screen: pipeline, title: "Входящие", params: () => ({}) },
