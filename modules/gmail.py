@@ -28,6 +28,22 @@ SMTP_PORT = 465  # SSL
 IMAP_TIMEOUT = 30
 IMAP_RETRY_DELAY = 3  # секунд между попытками при TimeoutError
 
+# Транзиентные серверные ошибки Gmail приходят как базовый imaplib.IMAP4.error
+# (НЕ abort) с характерным текстом. Напр. «Lookup failed …» при login — бэкенд
+# Gmail временно не смог найти аккаунт (наблюдалось разово на orphan-recovery
+# 2026-10-01). Их ретраим. Auth-ошибки («Invalid credentials»,
+# «Application-specific password required») тоже IMAP4.error — но НЕ транзиент,
+# должны падать сразу без ретрая, иначе замаскируют реальную проблему конфига.
+_TRANSIENT_IMAP_ERROR_RE = re.compile(
+    r"lookup failed|system error|temporar|unavailable|try again|server busy",
+    re.I,
+)
+
+
+def _is_transient_imap_error(exc: BaseException) -> bool:
+    """True если base IMAP4.error — транзиентная серверная ошибка Gmail, не auth."""
+    return bool(_TRANSIENT_IMAP_ERROR_RE.search(str(exc)))
+
 
 def _imap_retry(fn: Callable[..., _T], *args: Any, retries: int = 1, **kwargs: Any) -> _T:
     """Вызвать fn, повторив до `retries` раз при транзиентной IMAP-ошибке.
@@ -36,14 +52,22 @@ def _imap_retry(fn: Callable[..., _T], *args: Any, retries: int = 1, **kwargs: A
     imaplib.IMAP4.abort (сервер уронил соединение посреди команды — «socket
     error: EOF»). abort НЕ является подклассом OSError, поэтому его нужно
     перечислять явно — иначе EOF-разрыв Gmail пролетал мимо retry и всплывал
-    как ложный ERROR (напр. orphan-recovery). Каждый повтор fn открывает новое
-    IMAP4_SSL-соединение, так что реконнект после abort корректен.
+    как ложный ERROR (напр. orphan-recovery). Базовый IMAP4.error ретраим
+    только при транзиентном тексте Gmail (`_is_transient_imap_error`) — auth-
+    ошибки падают сразу. Каждый повтор fn открывает новое IMAP4_SSL-соединение,
+    так что реконнект после abort корректен.
     """
     for attempt in range(retries + 1):
         try:
             return fn(*args, **kwargs)
-        except (TimeoutError, OSError, imaplib.IMAP4.abort) as exc:
-            if attempt >= retries:
+        except (TimeoutError, OSError, imaplib.IMAP4.error) as exc:
+            # abort — подкласс error, ловится здесь же; базовый error ретраим
+            # только если текст указывает на транзиент (а не auth-отказ).
+            transient = (
+                isinstance(exc, (TimeoutError, OSError, imaplib.IMAP4.abort))
+                or _is_transient_imap_error(exc)
+            )
+            if attempt >= retries or not transient:
                 raise
             _log.warning("IMAP %s таймаут (попытка %d/%d), повтор через %ds: %s",
                          fn.__name__, attempt + 1, retries + 1, IMAP_RETRY_DELAY, exc)
