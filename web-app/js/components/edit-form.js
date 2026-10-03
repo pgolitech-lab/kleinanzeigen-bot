@@ -1,7 +1,7 @@
 // Edit form component — textarea/input для edit-ru / edit-de / price / instruction.
 
-import { api } from "../api.js?v=20261003-194958";
-import { el } from "../utils.js?v=20261003-194958";
+import { api } from "../api.js?v=20261003-195512";
+import { el } from "../utils.js?v=20261003-195512";
 
 
 const FIELD_CONFIG = {
