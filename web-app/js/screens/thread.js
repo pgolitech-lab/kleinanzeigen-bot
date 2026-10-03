@@ -2,14 +2,14 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20260930-045357";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20260930-045357";
-import { setTitle } from "../components/backbar.js?v=20260930-045357";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20260930-045357";
-import { buildEditForm } from "../components/edit-form.js?v=20260930-045357";
-import { buildComposeForm } from "../components/compose-form.js?v=20260930-045357";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20260930-045357";
-import { initData } from "../tg.js?v=20260930-045357";
+import { api, LLM_TIMEOUT_MS } from "../api.js?v=20261003-194958";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20261003-194958";
+import { setTitle } from "../components/backbar.js?v=20261003-194958";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20261003-194958";
+import { buildEditForm } from "../components/edit-form.js?v=20261003-194958";
+import { buildComposeForm } from "../components/compose-form.js?v=20261003-194958";
+import { buildAutopilotForm } from "../components/autopilot-form.js?v=20261003-194958";
+import { initData } from "../tg.js?v=20261003-194958";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
