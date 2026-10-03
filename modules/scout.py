@@ -1,4 +1,4 @@
-# Разведка рынка Kleinanzeigen: скрапинг страниц поиска (Playwright sync API).
+# Разведка рынка Kleinanzeigen: скрапинг страниц поиска (httpx, fallback — Playwright).
 #
 # Ищет машины платформы Peugeot Traveller (EMP2/PSA: Traveller/Expert,
 # Citroën SpaceTourer/Jumpy, Opel Zafira Life/Vivaro, Toyota ProAce(Verso),
@@ -7,13 +7,20 @@
 # Поисковые запросы (scout_queries) генерит LLM (modules/claude.generate_scout_queries),
 # редактирует оператор в /scout. Результаты пишутся в scout_listings (дедуп по ad_id).
 #
-# Парсинг строится на разведанной DOM-структуре:
-#   article.aditem[data-adid][data-href]
-#     .aditem-main--middle--price-shipping--price  → цена ('10.900 € VB')
-#     .aditem-main--top--left                       → 'PLZ Город'
-#     .aditem-main--bottom .simpletag               → теги ('158.439 km', 'EZ 08/2021', 'Versand möglich')
-#     .aditem-main--top--right                      → дата ('Heute, 15:07' / '14.06.2026')
-#     script[application/ld+json]                    → {title, description}
+# Загрузка: обычный HTTP (httpx) с заголовками браузера — быстро и без headless-
+# Chromium. Если ответ подозрительный (не 200 / нет ни карточек, ни маркера «ничего
+# не найдено» — похоже на анти-бот стену), страница перезапрашивается через Playwright
+# и разбирается ТЕМ ЖЕ парсером.
+#
+# Парсинг НЕ завязан на CSS-классы (в ~сентябре 2026 Kleinanzeigen перевёл выдачу на
+# Tailwind — `article.aditem` и `.aditem-main--*` исчезли, scout месяц молча находил 0).
+# Опора только на стабильное:
+#   article[data-adid][data-href]                  → id + ссылка
+#   script[application/ld+json] внутри карточки    → {title, description}
+#   h2/h3                                          → заголовок (fallback)
+#   текстовые узлы по шаблону: '10.900 € VB' (цена), '90449 Город' (PLZ),
+#   '158.439 km' / 'EZ 08/2021' / 'Versand möglich' (теги),
+#   'Heute, 15:07' / '14.06.2026' (дата)
 
 import json
 import logging
@@ -21,9 +28,10 @@ import re
 import time
 import unicodedata
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
 from typing import Any, Optional
 
-from playwright.sync_api import Page, sync_playwright
+import httpx
 
 import config
 import database as db
@@ -220,66 +228,133 @@ def extract_year_generic(text: str) -> Optional[int]:
     return None
 
 
-# --- СКРАПИНГ ---
+# --- ЗАГРУЗКА И РАЗБОР HTML ВЫДАЧИ ---
 
-def _accept_cookies(page: Page) -> None:
-    for sel in ("#gdpr-banner-accept", "button:has-text('Alle akzeptieren')",
-                "button:has-text('Akzeptieren')"):
-        try:
-            b = page.query_selector(sel)
-            if b:
-                b.click(timeout=2000)
-                page.wait_for_timeout(400)
-                return
-        except Exception:
-            continue
+# «По запросу ничего не найдено» — легитимные 0 результатов (не блокировка).
+_EMPTY_RE = re.compile(r"Es wurden keine .{0,200}? gefunden|keine Ergebnisse", re.IGNORECASE)
 
+_PRICE_RE = re.compile(r"(?:\d[\d.]*\s*€(?:\s*VB)?|VB|Zu verschenken)", re.IGNORECASE)
+_PLZ_RE = re.compile(r"\d{5}\s+\S.{0,60}")
+_POSTED_RE = re.compile(r"(?:Heute|Gestern),?\s*\d{1,2}:\d{2}|\d{2}\.\d{2}\.\d{4}")
+_TAG_RE = re.compile(r"[\d.]+\s*km|EZ\s*\d{1,2}/\d{4}|.{0,25}Versand.{0,25}|Nur Abholung",
+                     re.IGNORECASE)
 
-def _item_text(item: Any, selector: str) -> str:
-    try:
-        e = item.query_selector(selector)
-        return (e.inner_text() or "").strip() if e else ""
-    except Exception:
-        return ""
+_HEADERS = {
+    "User-Agent": _UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "de-DE,de;q=0.9,en;q=0.5",
+}
 
 
-def _parse_item(item: Any, kind: str, query_id: int) -> Optional[dict[str, Any]]:
-    """Распарсить одну article.aditem в dict-строку scout_listings."""
-    ad_id = (item.get_attribute("data-adid") or "").strip()
+class ScoutFetchError(RuntimeError):
+    """Страница не похожа на выдачу (блокировка / новая вёрстка) даже после fallback."""
+
+
+class _CardParser(HTMLParser):
+    """Собирает карточки `article[data-adid]`: id, ссылку, JSON-LD и текстовые узлы."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.cards: list[dict[str, Any]] = []
+        self._cur: Optional[dict[str, Any]] = None
+        self._article_depth = 0
+        self._skip_depth = 0       # svg/style внутри карточки
+        self._heading_depth = 0
+        self._in_ld = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        a = dict(attrs)
+        if tag == "article":
+            if self._cur is None and a.get("data-adid"):
+                self._cur = {"ad_id": (a.get("data-adid") or "").strip(),
+                             "href": (a.get("data-href") or "").strip(),
+                             "ld": [], "texts": []}
+                self._article_depth = 1
+            elif self._cur is not None:
+                self._article_depth += 1
+            return
+        if self._cur is None:
+            return
+        if tag in ("svg", "style"):
+            self._skip_depth += 1
+        elif tag in ("h2", "h3"):
+            self._heading_depth += 1
+        elif tag == "script" and (a.get("type") or "") == "application/ld+json":
+            self._in_ld = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._cur is None:
+            return
+        if tag == "article":
+            self._article_depth -= 1
+            if self._article_depth <= 0:
+                self.cards.append(self._cur)
+                self._cur = None
+                self._skip_depth = self._heading_depth = 0
+                self._in_ld = False
+        elif tag in ("svg", "style") and self._skip_depth:
+            self._skip_depth -= 1
+        elif tag in ("h2", "h3") and self._heading_depth:
+            self._heading_depth -= 1
+        elif tag == "script":
+            self._in_ld = False
+
+    def handle_data(self, data: str) -> None:
+        if self._cur is None or self._skip_depth:
+            return
+        if self._in_ld:
+            self._cur["ld"].append(data)
+            return
+        txt = data.replace("­", "").replace("​", "").strip()
+        if txt:
+            self._cur["texts"].append((self._heading_depth > 0, txt))
+
+
+def _card_to_row(card: dict[str, Any], kind: str, query_id: int) -> Optional[dict[str, Any]]:
+    """Карточка из _CardParser → dict-строка scout_listings."""
+    ad_id = card.get("ad_id") or ""
     if not ad_id:
         return None
-    href = (item.get_attribute("data-href") or "").strip()
+    href = card.get("href") or ""
     url = (BASE + href) if href.startswith("/") else (href or None)
 
     # title + description из JSON-LD (надёжнее DOM)
     title = ""
     description = ""
-    try:
-        ld = item.query_selector("script[type='application/ld+json']")
-        if ld:
-            data = json.loads(ld.inner_text())
-            title = (data.get("title") or "").strip()
+    ld_raw = "".join(card.get("ld") or []).strip()
+    if ld_raw:
+        try:
+            data = json.loads(ld_raw)
+            title = (data.get("title") or data.get("name") or "").strip()
             description = (data.get("description") or "").strip()
-    except Exception:
-        pass
+        except Exception:
+            pass
+
+    texts: list[tuple[bool, str]] = card.get("texts") or []
     if not title:
-        title = _item_text(item, "h2 a, .text-module-begin a, .ellipsis")
+        title = next((t for h, t in texts if h), "")
 
-    price_raw = _item_text(item, ".aditem-main--middle--price-shipping--price, .aditem-main--middle--price")
-    price_eur, negotiable = parse_price(price_raw)
-    plz, city = parse_location(_item_text(item, ".aditem-main--top--left"))
-    bundesland = plz_to_bundesland(plz)
-    posted_raw = _item_text(item, ".aditem-main--top--right") or None
-
+    price_raw = ""
+    plz_raw = ""
+    posted_raw = ""
     tags: list[str] = []
-    try:
-        for e in item.query_selector_all(".aditem-main--bottom .simpletag"):
-            txt = (e.inner_text() or "").strip()
-            if txt:
-                tags.append(txt)
-    except Exception:
-        pass
-    shipping = 1 if any("versand" in t.lower() for t in tags) else 0
+    for is_heading, t in texts:
+        if is_heading:
+            continue
+        if not price_raw and _PRICE_RE.fullmatch(t):
+            price_raw = t  # первая цена — актуальная (вторая — зачёркнутая старая)
+        elif not plz_raw and _PLZ_RE.fullmatch(t):
+            plz_raw = t
+        elif not posted_raw and _POSTED_RE.fullmatch(t):
+            posted_raw = t
+        elif len(t) <= 50 and _TAG_RE.fullmatch(t):
+            tags.append(t)
+    if not description:
+        description = next((t for h, t in texts if not h and len(t) > 40 and t != title), "")
+
+    price_eur, negotiable = parse_price(price_raw)
+    plz, city = parse_location(plz_raw)
+    shipping = 1 if any("versand" in t.lower() and "kein" not in t.lower() for t in tags) else 0
 
     blob = f"{title}\n{description}"
     row: dict[str, Any] = {
@@ -292,9 +367,9 @@ def _parse_item(item: Any, kind: str, query_id: int) -> Optional[dict[str, Any]]
         "negotiable": 1 if negotiable else 0,
         "plz": plz,
         "city": city,
-        "bundesland": bundesland,
+        "bundesland": plz_to_bundesland(plz),
         "description": (description[:600] or None),
-        "posted_raw": posted_raw,
+        "posted_raw": posted_raw or None,
         "shipping": shipping,
         "query_id": query_id,
         "model_family": extract_model_family(blob),
@@ -318,10 +393,116 @@ def _parse_item(item: Any, kind: str, query_id: int) -> Optional[dict[str, Any]]
     return row
 
 
+def parse_search_html(html: str, kind: str, query_id: int) -> list[dict[str, Any]]:
+    """HTML страницы поиска → список dict-строк (порядок выдачи, без дедупа)."""
+    parser = _CardParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception as e:  # битый HTML не должен ронять весь прогон
+        logger.warning("scout: html parse error: %s", e)
+    out: list[dict[str, Any]] = []
+    for card in parser.cards:
+        try:
+            row = _card_to_row(card, kind, query_id)
+        except Exception as e:
+            logger.debug("scout: card parse fail: %s", e)
+            continue
+        if row:
+            out.append(row)
+    return out
+
+
+def looks_like_results_page(html: str) -> bool:
+    """Это нормальная выдача (есть карточки или явное «ничего не найдено»)?"""
+    return bool(html) and ("data-adid=" in html or bool(_EMPTY_RE.search(html)))
+
+
+def _accept_cookies(page: Any) -> None:
+    for sel in ("#gdpr-banner-accept", "button:has-text('Alle akzeptieren')",
+                "button:has-text('Akzeptieren')"):
+        try:
+            b = page.query_selector(sel)
+            if b:
+                b.click(timeout=2000)
+                page.wait_for_timeout(400)
+                return
+        except Exception:
+            continue
+
+
+class _BrowserFallback:
+    """Ленивый Playwright: поднимается только если HTTP-ответ подозрительный."""
+
+    def __init__(self) -> None:
+        self._pw: Any = None
+        self._browser: Any = None
+
+    def get(self, url: str) -> str:
+        if self._browser is None:
+            from playwright.sync_api import sync_playwright
+            self._pw = sync_playwright().start()
+            self._browser = self._pw.chromium.launch(headless=True)
+        # Свежий context на каждую навигацию: Kleinanzeigen отдаёт cookie-wall без
+        # карточек со 2-й навигации в той же browser-сессии (анти-бот эвристика).
+        ctx = self._browser.new_context(user_agent=_UA, locale="de-DE",
+                                        viewport={"width": 1366, "height": 1000})
+        try:
+            page = ctx.new_page()
+            page.goto(url, timeout=40000, wait_until="domcontentloaded")
+            _accept_cookies(page)
+            try:
+                page.wait_for_selector("article[data-adid]", timeout=12000)
+            except Exception:
+                pass
+            return page.content()
+        finally:
+            ctx.close()
+
+    def close(self) -> None:
+        try:
+            if self._browser is not None:
+                self._browser.close()
+            if self._pw is not None:
+                self._pw.stop()
+        except Exception:
+            logger.debug("scout: browser close fail", exc_info=True)
+
+
+def fetch_search_page(client: httpx.Client, url: str,
+                      browser: Optional[_BrowserFallback] = None) -> str:
+    """HTML страницы поиска: httpx → (если подозрительно) Playwright.
+
+    404 на seite:N — штатный конец пагинации → ''.
+    ScoutFetchError — ни один способ не дал похожую на выдачу страницу.
+    """
+    try:
+        r = client.get(url)
+        if r.status_code == 404:
+            return ""
+        if r.status_code == 200 and looks_like_results_page(r.text):
+            return r.text
+        reason = f"http {r.status_code}, {len(r.text)} байт, карточек нет"
+    except httpx.HTTPError as e:
+        reason = f"http error: {e}"
+
+    if browser is None:
+        raise ScoutFetchError(reason)
+    logger.warning("scout: %s → %s; пробую Playwright", url, reason)
+    try:
+        html = browser.get(url)
+    except Exception as e:
+        raise ScoutFetchError(f"{reason}; playwright: {e}") from e
+    if looks_like_results_page(html):
+        return html
+    raise ScoutFetchError(f"{reason}; playwright: тоже без карточек")
+
+
 def scrape_query(
-    page: Page,
+    client: httpx.Client,
     query: Any,
     page_delay_sec: float = 1.5,
+    browser: Optional[_BrowserFallback] = None,
 ) -> list[dict[str, Any]]:
     """Проскрапить один запрос постранично. Возвращает список dict-строк (с дедупом по ad_id)."""
     kind = query["kind"]
@@ -336,29 +517,17 @@ def scrape_query(
     for pnum in range(1, max_pages + 1):
         url = build_search_url(keywords, category, pnum)
         try:
-            page.goto(url, timeout=40000, wait_until="domcontentloaded")
-        except Exception as e:
-            logger.warning("scout: goto fail q=%s p=%s: %s", qid, pnum, e)
+            html = fetch_search_page(client, url, browser)
+        except ScoutFetchError:
+            if pnum == 1:
+                raise  # первая страница не загрузилась — это ошибка запроса
+            logger.warning("scout: q=%s стр.%s не загрузилась — стоп пагинации", qid, pnum)
             break
-        if pnum == 1:
-            _accept_cookies(page)
-        try:
-            page.wait_for_selector("article.aditem", timeout=12000)
-        except Exception:
-            # нет результатов на этой странице — конец
-            break
-        items = page.query_selector_all("article.aditem")
-        if not items:
+        rows = parse_search_html(html, kind, qid)
+        if not rows:
             break
         new_on_page = 0
-        for it in items:
-            try:
-                row = _parse_item(it, kind, qid)
-            except Exception as e:
-                logger.debug("scout: item parse fail: %s", e)
-                continue
-            if not row:
-                continue
+        for row in rows:
             aid = row["ad_id"]
             if aid in seen_ids:
                 continue
@@ -366,7 +535,7 @@ def scrape_query(
             out.append(row)
             new_on_page += 1
         # если страница вернула < 20 карточек — последняя страница
-        if len(items) < 20 or new_on_page == 0:
+        if len(rows) < 20 or new_on_page == 0:
             break
         if pnum < max_pages:
             time.sleep(page_delay_sec)
@@ -405,29 +574,17 @@ def run_scout(
     if not queries:
         return summary
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
+    browser = _BrowserFallback()
+    try:
+        with httpx.Client(headers=_HEADERS, timeout=30.0, follow_redirects=True) as client:
             for q in queries:
-                # Свежий context на КАЖДЫЙ запрос: Kleinanzeigen отдаёт cookie-wall
-                # без карточек (0 результатов) начиная со 2-й навигации в одной и той
-                # же browser-сессии — похоже на анти-бот эвристику по паттерну
-                # навигации, не на rate-limit по времени (не спасает и больший delay).
-                # Новый context = "чистая" сессия для сайта на каждый поисковый запрос.
-                ctx = browser.new_context(
-                    user_agent=_UA, locale="de-DE",
-                    viewport={"width": 1366, "height": 1000},
-                )
                 try:
-                    page = ctx.new_page()
-                    try:
-                        rows = scrape_query(page, q, page_delay_sec=page_delay_sec)
-                    except Exception as e:
-                        logger.exception("scout: query %s failed", q["id"])
-                        summary["errors"].append(f"q{q['id']} ({q['keywords']}): {e}")
-                        continue
-                finally:
-                    ctx.close()
+                    rows = scrape_query(client, q, page_delay_sec=page_delay_sec,
+                                        browser=browser)
+                except Exception as e:
+                    logger.exception("scout: query %s failed", q["id"])
+                    summary["errors"].append(f"q{q['id']} ({q['keywords']}): {e}")
+                    continue
                 new_count = 0
                 for row in rows:
                     is_new = db.upsert_scout_listing(row)
@@ -457,8 +614,8 @@ def run_scout(
                     "kind": q["kind"], "found": len(rows), "new": new_count,
                 })
                 time.sleep(page_delay_sec)
-        finally:
-            browser.close()
+    finally:
+        browser.close()
 
     # Деактивировать устаревшие — ПО ВОЗРАСТУ (last_seen старше scout_stale_days),
     # и только для kind, по которому реально что-то нашли в этот раз (иначе блокировка

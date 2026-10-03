@@ -212,6 +212,29 @@ def _fmt_scout_listing(item: dict) -> str:
     return f"{icon} {label} — {price}"
 
 
+def _alert_scout_empty(summary: dict, n_queries: int) -> None:
+    """0 объявлений по ВСЕМ запросам — почти наверняка поломка (сменилась вёрстка /
+    блокировка), а не пустой рынок. С 01.09.2026 scout так месяц молчал незамеченным.
+    Алерт не чаще раза в сутки."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    if config.get("scout_empty_alert_date") == today:
+        return
+    config.set("scout_empty_alert_date", today)
+    errors = summary.get("errors") or []
+    text = (
+        f"⚠️ <b>Scout: 0 объявлений по всем {n_queries} запросам</b>\n"
+        f"Похоже, Kleinanzeigen сменил вёрстку или блокирует запросы — "
+        f"рынок не обновляется. Нужна проверка modules/scout.py."
+    )
+    if errors:
+        text += "\n\nОшибки:\n" + "\n".join(
+            telegram_bot._html(e[:200]) for e in errors[:3])
+    try:
+        telegram_bot.notify(text)
+    except Exception:
+        logger.exception("scout: empty-alert notify fail")
+
+
 def scout_job() -> str:
     """Job: авто-прогон разведки рынка (если включён в настройках)."""
     if not config.scout_auto_enabled():
@@ -225,6 +248,8 @@ def scout_job() -> str:
     if summary["errors"]:
         msg += f", ошибок {len(summary['errors'])}"
     logger.info(msg)
+    if summary["total_seen"] == 0:
+        _alert_scout_empty(summary, len(queries))
     if summary["cars_new"] or summary["parts_new"]:
         new_listings = summary.get("new_listings") or []
         # Отдельные секции и отдельный кап на машины и запчасти (сиденья/скамейки/рельсы) —
