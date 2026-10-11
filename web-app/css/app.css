@@ -25,7 +25,7 @@
 }
 
 * { box-sizing: border-box; }
-html { font-size: 14px; }
+html { font-size: 16px; }  /* под ~413 dpi (DPR≈2.6): 14px было мелко; всё остальное в em/rem и масштабируется */
 body {
   margin: 0;
   background: var(--bg);
@@ -498,7 +498,7 @@ ul.list-unstyled { list-style: none; padding-left: 0; margin: 0; }
 .ok { color: var(--grn); }
 pre.payload {
   background: var(--sur2); padding: .75rem;
-  border-radius: calc(var(--r) - 2px); font-size: 12px; overflow: auto;
+  border-radius: calc(var(--r) - 2px); font-size: .86rem; overflow: auto;
 }
 
 /* --- тепловая карта scout --- */
