@@ -25,7 +25,7 @@
 }
 
 * { box-sizing: border-box; }
-html { font-size: 16px; }  /* под ~413 dpi (DPR≈2.6): 14px было мелко; всё остальное в em/rem и масштабируется */
+html { font-size: 18px; }  /* под ~413 dpi (DPR≈2.6): 14px было мелко; всё остальное в em/rem и масштабируется */
 body {
   margin: 0;
   background: var(--bg);
