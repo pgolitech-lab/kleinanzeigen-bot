@@ -1,0 +1,74 @@
+<h2>Edit-inline pattern + 409 lock-conflict</h2>
+<p class="subtitle">Когда оператор тапает «✏️ Правка RU», как выглядит редактирование? И что MA показывает если другой оператор уже взял lock?</p>
+
+<div class="mockup">
+  <div class="mockup-header">📝 Edit-inline (после tap «✏️ Правка RU»)</div>
+  <div class="mockup-body">
+    <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.55;margin:0;padding:.7rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px">
+┌──────────────────────────────────┐
+│ Sitzbank · 1500€            [📎] │
+│ 👤 Osman · 🏪 main               │
+│ 🟢 lock @PG2202                  │  ← наш lock виден (мы holder)
+├──────────────────────────────────┤
+│ ... events log ...               │
+├──────────────────────────────────┤
+│ 📝 Наш ответ #N (черновик)       │
+│ ┌── RU (правка) ──────────────┐  │  ← textarea на месте
+│ │ Минимум 1400, при           │  │
+│ │ самовывозе...│ <-- caret    │  │
+│ │                              │  │
+│ └──────────────────────────────┘ │
+│ [ 💾 Сохранить ] [ ✕ Отмена ]   │  ← заменяют action-grid на время edit
+│ ┌── DE → клиенту ─────────────┐  │  ← остальные секции read-only
+│ │ Mindestens 1400€... MfG      │  │
+│ └──────────────────────────────┘ │
+│ ┌── RU обратный перевод ──────┐  │
+│ │ ... (read-only)              │  │
+│ └──────────────────────────────┘ │
+└──────────────────────────────────┘
+
+Save:
+- POST /api/ma/messages/{id}/edit-ru {text}
+- backend: claude.translate_only(target=client_lang) + db.update + _broadcast_card
+- response: новый review payload (RU + back-translated DE)
+- frontend: re-render pending-draft с обновлёнными значениями
+
+Cancel: просто закрыть textarea, action-grid обратно</pre>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:1.5rem">
+  <div class="mockup-header">🟥 Lock conflict (409 на mount)</div>
+  <div class="mockup-body">
+    <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.55;margin:0;padding:.7rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px">
+┌──────────────────────────────────┐
+│ Sitzbank · 1500€            [📎] │
+│ 👤 Osman · 🏪 main               │
+│ 🟥 в работе у @other (3 мин)     │  ← lock-badge как в Phase 3a
+├──────────────────────────────────┤
+│ ... events log ...               │
+├──────────────────────────────────┤
+│ 📝 Наш ответ #N (черновик)       │
+│ ┌── RU/DE/RU-back · deal-brief ─┐│  ← read-only display, всё видно
+│ └─────────────────────────────────┘│
+│                                   │
+│ ⚠️ Карточка занята оператором     │  ← banner
+│ @other. Действия недоступны.       │
+│                                   │
+│ [ ↻ Проверить снова ]            │  ← retry-кнопка (poll lock-state)
+│                                   │
+│ (action-grid отсутствует —        │
+│  нет рендера кнопок вообще)       │
+└──────────────────────────────────┘
+
+При tap [↻ Проверить снова]:
+- POST /messages/{id}/lock/acquire
+  - 200 → lock now ours, render action-grid
+  - 409 → still locked, update remaining_min, banner stays</pre>
+  </div>
+</div>
+
+<div class="section" style="margin-top:1.5rem">
+  <p class="label">Action-grid в input-режиме</p>
+  <p>Edit-RU/DE/price/instruction — заменяют action-grid на pair <code>[💾 Apply][✕ Отмена]</code>. После Apply (или Cancel) — fresh re-render review payload (POST endpoint возвращает обновлённые поля), action-grid обратно.</p>
+</div>

@@ -1,0 +1,90 @@
+<h2>Review card — главный экран действий</h2>
+<p class="subtitle">Mobile-first вёрстка под Telegram WebApp viewport. Bootstrap 5 dark + native TG theme variables (<code>--tg-theme-bg-color</code> и пр.).</p>
+
+<div class="mockup" style="max-width:420px;margin:0 auto">
+  <div class="mockup-header">📱 #N · Sitzbank, Sitze Peugeot · 1500€</div>
+  <div class="mockup-body" style="padding:0;background:#1a1a1a;color:#e0e0e0;font-family:ui-sans-serif,system-ui">
+
+    <!-- Header strip -->
+    <div style="padding:.6rem .8rem;background:#222;border-bottom:1px solid #333;font-size:13px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span>🔴 ждут нас · ⏱ 5мин</span>
+        <span style="color:#888">@osman</span>
+      </div>
+      <div style="color:#888;margin-top:.2rem">🏪 main · pg.account@gmail.com</div>
+    </div>
+
+    <!-- Tabs -->
+    <div style="display:flex;border-bottom:1px solid #333;font-size:13px">
+      <div style="flex:1;padding:.5rem;text-align:center;border-bottom:2px solid #4a9eff;color:#4a9eff">Review</div>
+      <div style="flex:1;padding:.5rem;text-align:center;color:#888">Thread (12)</div>
+    </div>
+
+    <!-- Related warning (compact) -->
+    <div style="margin:.5rem .8rem;padding:.5rem;background:#3a2a1a;border-left:3px solid #d97706;border-radius:4px;font-size:12px">
+      ⚠️ Этот клиент уже писал по 2 другим объявлениям — <span style="color:#4a9eff">открыть историю</span>
+    </div>
+
+    <!-- Deal brief -->
+    <div style="margin:.5rem .8rem;padding:.6rem;background:#222;border-radius:6px;font-size:13px">
+      <div style="color:#888;font-size:11px;text-transform:uppercase;margin-bottom:.3rem">Deal brief</div>
+      <div>🤝 Клиент торгуется, готов до 1300€</div>
+      <div>💰 наша цена: 1450€ · 🎯 floor: 1200€</div>
+      <div>⏳ ждём ответ · 🏷 серьёзный</div>
+    </div>
+
+    <!-- Client message (collapsed by default, tap to expand) -->
+    <div style="margin:.5rem .8rem;padding:.6rem;background:#222;border-radius:6px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;color:#888;font-size:11px;margin-bottom:.3rem">
+        <span>СООБЩЕНИЕ КЛИЕНТА · DE</span>
+        <span style="color:#4a9eff">▼ показать оригинал</span>
+      </div>
+      <div>Можете ли скинуть до 1300? Готов забрать в субботу...</div>
+    </div>
+
+    <!-- DRAFT — наш ответ — ОСНОВНОЙ блок, side-by-side RU↔DE -->
+    <div style="margin:.5rem .8rem;padding:.6rem;background:#1e2a1e;border:1px solid #2d4a2d;border-radius:6px">
+      <div style="display:flex;justify-content:space-between;color:#888;font-size:11px;margin-bottom:.4rem">
+        <span>НАШ ОТВЕТ (черновик)</span>
+        <span>✏️ редактировать</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;font-size:13px">
+        <div>
+          <div style="color:#888;font-size:10px;margin-bottom:.2rem">RU</div>
+          <div>Спасибо! Минимум 1400€, готов уступить только при самовывозе...</div>
+        </div>
+        <div style="border-left:1px solid #333;padding-left:.5rem">
+          <div style="color:#888;font-size:10px;margin-bottom:.2rem">DE → клиенту</div>
+          <div>Vielen Dank! Mindestens 1400€, kann nur bei Selbstabholung nachgeben... MfG</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick action grid -->
+    <div style="margin:.6rem .8rem;display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
+      <button style="padding:.6rem;background:#1d4ed8;color:#fff;border:0;border-radius:6px;font-size:13px;font-weight:600">✅ ОТПРАВИТЬ</button>
+      <button style="padding:.6rem;background:#374151;color:#fff;border:0;border-radius:6px;font-size:13px">🚀 Автопилот</button>
+      <button style="padding:.5rem;background:#222;color:#fff;border:1px solid #333;border-radius:6px;font-size:12px">💎 Без торга</button>
+      <button style="padding:.5rem;background:#222;color:#fff;border:1px solid #333;border-radius:6px;font-size:12px">💸 Своя цена</button>
+      <button style="padding:.5rem;background:#222;color:#fff;border:1px solid #333;border-radius:6px;font-size:12px">👊 Жёстче</button>
+      <button style="padding:.5rem;background:#222;color:#fff;border:1px solid #333;border-radius:6px;font-size:12px">☺️ Мягче</button>
+      <button style="padding:.5rem;background:#222;color:#fff;border:1px solid #333;border-radius:6px;font-size:12px">✂️ Короче</button>
+      <button style="padding:.5rem;background:#222;color:#fff;border:1px solid #333;border-radius:6px;font-size:12px">🔁 Переформ.</button>
+      <button style="padding:.5rem;background:#7f1d1d;color:#fff;border:0;border-radius:6px;font-size:12px;grid-column:span 1">❌ Пропустить</button>
+      <button style="padding:.5rem;background:#7f1d1d;color:#fff;border:0;border-radius:6px;font-size:12px;grid-column:span 1">💰 Продано</button>
+    </div>
+
+  </div>
+</div>
+
+<div class="section" style="margin-top:1.5rem">
+  <p class="label">Что выигрываем по сравнению с TG-карточкой</p>
+  <ul>
+    <li><strong>RU и DE side-by-side</strong> — оператор видит и инструкцию, и реальный текст для клиента одним взглядом. В боте это два отдельных блока в одном &lt;blockquote&gt;</li>
+    <li><strong>Edit инлайн</strong> — тап на блок → textarea на месте. Никаких <code>_PENDING_INPUTS</code>, никакого «введите текст в чат»</li>
+    <li><strong>Tabs Review ↔ Thread</strong> — переключение мгновенное; в боте «📋 История» = новое сообщение</li>
+    <li><strong>Deal brief всегда видно</strong> сверху, не ниже клавиатуры</li>
+    <li><strong>Related warning компактный</strong> — одна строка с deep-link, без длинного блока</li>
+    <li><strong>2-column grid для действий</strong> — больше пространства между кнопками, не перепутаешь «Жёстче»/«Мягче»</li>
+  </ul>
+</div>

@@ -1,0 +1,22 @@
+<h2>Phase 3 — Review actions</h2>
+<p class="subtitle">Самая большая фаза. Сначала решим scope, потом UX-вопросы по review-карточке. Сюда полетят мокапы action-grid, edit-inline pattern, lock-конфликт.</p>
+
+<div class="section">
+  <p class="label">Что в Phase 3 (по spec)</p>
+  <ul>
+    <li><strong>operator_lock рефакторинг</strong> — выносим _THREAD_LOCKS из telegram_bot.py в общий модуль</li>
+    <li><strong>Lock endpoints</strong>: acquire/release</li>
+    <li><strong>GET review payload</strong>: ru_client/ru_answer/de_answer/ru_translation/deal_brief/related/lock_state</li>
+    <li><strong>POST send / skip / sold</strong> — финальные действия</li>
+    <li><strong>POST regenerate</strong> {strategy: harder/softer/shorter/rephrase/no_haggle}</li>
+    <li><strong>POST edit-ru / edit-de</strong> — правки текста с back-translation</li>
+    <li><strong>POST price / instruction</strong> — кастомные регенерации</li>
+    <li><strong>Review screen UI</strong> с action-grid, edit-inline textarea, состояниями (idle, edit-mode, lock-conflict)</li>
+    <li><strong>Bot ↔ MA broadcast</strong> — после действий MA вызывает _broadcast_card</li>
+  </ul>
+</div>
+
+<div class="section">
+  <p class="label">Сейчас</p>
+  <p>Жди вопрос в чате. Этот экран обновится когда дойдём до раскладок.</p>
+</div>

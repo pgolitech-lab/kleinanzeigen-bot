@@ -1,0 +1,74 @@
+<h2>Action grid — 2 раскладки</h2>
+<p class="subtitle">Sticky-bottom bar под pending-draft block. На confirm — кнопка morphит в [Да] [Нет] inline. Все кнопки 2-column на mobile (минимум 44px высота для тачей).</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.6;margin:0;padding:.7rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+┌──────────────────────────────────┐
+│ [ ✅ ОТПРАВИТЬ ] (full-width)     │
+├──────────────────────────────────┤
+│ [✏️ Правка RU] │ [✏️ Правка DE] │
+│ [💎 Без торга]│ [💸 Своя цена ] │
+│ [👊 Жёстче]   │ [☺️ Мягче]      │
+│ [✂️ Короче]   │ [🔁 Переформ.] │
+│ [📝 Своя инст]│ [❌ Пропустить]│
+│ [💰 Продано]  │ [📋 История]   │
+└──────────────────────────────────┘
+
+Confirm-state (после tap "❌ Пропустить"):
+┌──────────────────────────────────┐
+│ [ ✅ ОТПРАВИТЬ ] (full-width)     │
+├──────────────────────────────────┤
+│ [✏️ Правка RU] │ [✏️ Правка DE] │
+│ [💎 Без торга]│ [💸 Своя цена ] │
+│ [👊 Жёстче]   │ [☺️ Мягче]      │
+│ [✂️ Короче]   │ [🔁 Переформ.] │
+│ [📝 Своя инст]│⚠️Пропустить?    │
+│               │ [Да] [Нет]      │
+│ [💰 Продано]  │ [📋 История]   │
+└──────────────────────────────────┘</pre>
+    </div>
+    <div class="card-body">
+      <h3>A · Bot-mirror (как в TG-карточке)</h3>
+      <p><strong>Pros:</strong> оператор уже знает раскладку — нулевое обучение. Группы те же что в боте. Confirm — кнопка превращается в <code>⚠️ Пропустить? [Да][Нет]</code> in place.<br>
+      <strong>Cons:</strong> нет визуальной группировки по типу действия (final / edit / regenerate / final-bad).</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.6;margin:0;padding:.7rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+┌──────────────────────────────────┐
+│ [ ✅ ОТПРАВИТЬ ] (full-width)    │
+├──────────────────────────────────┤
+│ ━ Регенерировать ━              │
+│ [💎 Без торга]│ [💸 Цена]       │
+│ [👊 Жёстче]   │ [☺️ Мягче]      │
+│ [✂️ Короче]   │ [🔁 Reform.]    │
+│ [📝 Инструкция]                  │
+├──────────────────────────────────┤
+│ ━ Править текст ━                │
+│ [✏️ RU]      │ [✏️ DE]          │
+├──────────────────────────────────┤
+│ ━ Закрыть ━                      │
+│ [❌ Пропустить]│ [💰 Продано]    │
+└──────────────────────────────────┘
+
+Confirm — native browser confirm()
+"Отправить ответ клиенту?" [OK][Cancel]
+
+(или inline как в варианте A)</pre>
+    </div>
+    <div class="card-body">
+      <h3>B · Grouped по семантике</h3>
+      <p><strong>Pros:</strong> явная группировка. Регенерации (новый draft без отправки), правки (текст вручную), close-actions (отправить/скип/продано). Легче научить нового оператора.<br>
+      <strong>Cons:</strong> отличается от бота — switching cost. Больше места из-за разделителей. <code>📋 История</code> убрана из grid (она и так в Phase 2 thread.js — отдельная страница не нужна).</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:1.5rem">
+  <p class="label">Confirm pattern</p>
+  <p>Inline confirm: tap кнопки → она morphит в <code>⚠️ &lt;label&gt;? [Да] [Нет]</code> на месте. Действия с input (edit-ru/edit-de/💸 цена/📝 инстр) — раскрывают textarea/input в pending-draft block, кнопка [Apply] = confirm. Native browser confirm() мы НЕ используем (TG WebView на iOS его душит).</p>
+</div>

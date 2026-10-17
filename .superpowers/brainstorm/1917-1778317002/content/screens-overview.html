@@ -1,0 +1,52 @@
+<h2>6 экранов Mini App — навигация</h2>
+<p class="subtitle">Hash-routing: <code>#/pipeline</code>, <code>#/review/123</code>, <code>#/thread/abc</code>, <code>#/autopilot/abc</code>, <code>#/client/foo@bar.com</code>, <code>#/settings</code>. TG BackButton API синхронизируется с history.back().</p>
+
+<div class="mockup">
+  <div class="mockup-header">Flow между экранами</div>
+  <div class="mockup-body">
+    <pre style="font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.55;margin:0">
+                    ┌──────────────────┐
+   bot DM нотиф ──► │   PIPELINE       │ ◄── Telegram menu button
+                    │   #/pipeline     │
+                    └────────┬─────────┘
+                             │ tap thread
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐   ┌──────────┐   ┌──────────────┐
+        │  REVIEW  │   │  THREAD  │   │  AUTOPILOT   │
+        │ /review  │◄─►│ /thread  │   │ /autopilot   │
+        │   /N     │   │   /abc   │   │    /abc      │
+        └────┬─────┘   └────┬─────┘   └──────┬───────┘
+             │              │                │
+             │ «📋 история» │ «📋 история»   │
+             ▼              ▼                │
+        ┌──────────────────────┐             │
+        │   CLIENT HISTORY     │             │
+        │  /client/email@x     │             │
+        └──────────────────────┘             │
+                                             │
+                  ┌──────────────────────────┘
+                  ▼
+            ┌──────────┐
+            │ SETTINGS │  ◄── из любого экрана через ⚙ в header
+            │/settings │
+            └──────────┘
+    </pre>
+  </div>
+</div>
+
+<div class="section" style="margin-top:1.5rem">
+  <p class="label">Что важно</p>
+  <ul>
+    <li><strong>Pipeline</strong> = entry-point, первый что видит оператор когда тапает MA</li>
+    <li><strong>Review</strong> и <strong>Thread</strong> — два угла одного треда: review = «что делаем сейчас» (карточка с действиями), thread = «что было» (лог); переключаются tab-ом</li>
+    <li><strong>Autopilot</strong> экран нужен только пока тред в автопилоте; если не активен — кнопка «🚀 Запустить» прямо в Review</li>
+    <li><strong>Client history</strong> — глубокая ссылка из related-warning блока</li>
+    <li><strong>Settings</strong> — отдельный экран, доступ из header-а</li>
+  </ul>
+</div>
+
+<div class="section">
+  <p class="label">Дальше</p>
+  <p>Сейчас покажу детальную раскладку самого сложного экрана — Review card. Остальные 5 — производные.</p>
+</div>

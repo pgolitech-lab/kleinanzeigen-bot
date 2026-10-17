@@ -1,0 +1,53 @@
+# SQLite БД содержит секреты (Anthropic API key, Gmail App Password, Telegram bot token)
+# и накопленные сообщения / уроки — НЕ коммитим.
+kleinanzeigen.db
+kleinanzeigen.db-journal
+kleinanzeigen.db-wal
+kleinanzeigen.db-shm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Claude Code project-local config — личные настройки
+.claude/
+
+# Временные файлы / диагностика
+_*.py
+!**/__init__.py
+/tmp/
+*.log
+
+# Disabled service-файлы (если временно отключали через .disabled)
+*.disabled
+
+# Runtime-состояние трекинга TG-сообщений (для очистки чата) — не коммитим
+tracking_state.json
+tracking_state.json.tmp
+
+# Дампы БД и бэкапы — содержат ключи и переписку клиентов, репозиторий публичный
+backups/
+*.db
+*.db-wal
+*.db-shm
+*.bak
+
+# WSL-копия 2026-10-18
+*.db
+*.sqlite
+.env
+.env.*
+!.env.example

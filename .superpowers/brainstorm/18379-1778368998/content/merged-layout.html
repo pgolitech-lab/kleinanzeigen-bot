@@ -1,0 +1,83 @@
+<h2>Слитый thread + review screen — 2 раскладки</h2>
+<p class="subtitle">Tap pipeline → этот экран. Если pending draft есть — внизу/сверху виден action-grid. Если нет — только история.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;margin:0;padding:.7rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+┌─────────────────────────────────┐
+│ Sitzbank · 1500€        [📎 ad] │  Header (sticky top)
+│ 👤 Osman · 🏪 main              │
+│ 🟢 Lock free                    │
+├─────────────────────────────────┤
+│ ⚠️ Этот клиент уже…              │  Related warning
+├─────────────────────────────────┤
+│ 👤 10:00  Hallo, ist noch da?   │  Chat-style лог
+│ 🏪 11:00  Vielen Dank! Ja, …    │
+│ 👤 12:30  Können Sie 1300?      │
+│ 🤖ack 12:31 Bin am Steuer…       │
+├─────────────────────────────────┤
+│ 📝 НАШ ОТВЕТ #N (черновик)      │  Pending draft
+│ ┌──── RU ────┐ ┌── DE → нему ─┐│  side-by-side
+│ │идея от GPT │ │текст клиенту││
+│ └────────────┘ └─────────────┘│
+│ 💬 Deal: 1300€ floor: 1200€     │  Deal brief
+├─────────────────────────────────┤
+│ ┌──────────────────────────┐    │
+│ │ ✅ ОТПРАВИТЬ              │   │  Action grid
+│ └──────────────────────────┘    │  — снизу как
+│ [💎 Без торга] [💸 Цена]        │   обычное мобильное
+│ [👊 Жёстче]   [☺️ Мягче]        │   "send-bar"
+│ [✂️ Короче]   [🔁 Переформ.]    │
+│ [✏️ Edit RU]  [✏️ Edit DE]      │
+│ [📝 Своя инстр.] [💰 Продано]   │
+│ [❌ Пропустить]                  │
+└─────────────────────────────────┘</pre>
+    </div>
+    <div class="card-body">
+      <h3>A · История сверху, action-bar снизу</h3>
+      <p><strong>Pros:</strong> хронология читается естественно (старое→новое→draft→акт). Mobile-friendly: action-grid там где обычно поле ввода. Похоже на bot-карточку — оператор привычен.<br>
+      <strong>Cons:</strong> длинный тред = много прокрутки до actions. Решается sticky-bottom для action-bar (всегда внизу viewport, история скроллится под ним).</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;margin:0;padding:.7rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+┌─────────────────────────────────┐
+│ Sitzbank · 1500€        [📎 ad] │  Header
+│ 👤 Osman · 🏪 main · 🟢 Lock     │
+├─────────────────────────────────┤
+│ ⚠️ Этот клиент уже…              │  Related (compact)
+├─────────────────────────────────┤
+│ 📝 ПОСЛЕДНЕЕ INCOMING + DRAFT   │  Primary section
+│ ┌── от клиента ─────────────┐   │  виден сразу
+│ │ Können Sie 1300?           │  │
+│ └─────────────────────────────┘ │
+│ ┌── RU (идея) ─┐ ┌── DE ─────┐ │
+│ │ …            │ │ …          ││
+│ └──────────────┘ └────────────┘│
+│ 💬 Deal: …                     │
+│                                 │
+│ [✅ ОТПРАВИТЬ] (full-width)     │
+│ [💎][💸] [👊][☺️] [✂️][🔁]       │  Action grid
+│ [✏️ RU][✏️ DE] [📝][❌][💰]      │
+├─────────────────────────────────┤
+│ 📜 История треда (▼ свернуть)   │
+│ 👤 10:00 Hallo, ist noch da?    │
+│ 🏪 11:00 Vielen Dank! Ja, …     │
+│ 🤖ack 12:31 Bin am Steuer…       │
+└─────────────────────────────────┘</pre>
+    </div>
+    <div class="card-body">
+      <h3>B · Action-секция сверху, история ниже</h3>
+      <p><strong>Pros:</strong> primary task (draft + acts) виден без скролла. Если нет pending — секция отсутствует, история занимает весь экран. Если pending — оператор сразу видит что отправлять.<br>
+      <strong>Cons:</strong> история становится «контекст», иногда теряет важное (last incoming уже вынесен в action-секцию). Часть thread-events дублируется. Может быть collapsible.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:1.5rem">
+  <p class="label">Multi-pending в треде</p>
+  <p>Оба варианта показывают <strong>самый свежий pending msg_id</strong> в action-секции. Старые pending видны в истории как нормальные incoming-events с маркером 📝 (но не имеют action-grid). Оператор обработал свежий → screen refreshит → следующий по свежести становится active. Если нужно открыть конкретный старый pending вручную — link на /review/{msg_id} (deep route, который рендерит ту же merged-страницу но фокусирует на этот msg_id).</p>
+</div>

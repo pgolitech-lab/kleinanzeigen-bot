@@ -1,0 +1,84 @@
+<h2>3 варианта развёртывания Mini App</h2>
+<p class="subtitle">Разница главным образом в том, где живёт SPA и как HTTPS-доступен backend. Везде стек = vanilla JS + HTM (без билда).</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;margin:0;padding:1rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+TG client
+   │
+   ├──► open https://pgolitech-lab.github.io/kleinanzeigen-bot/
+   │      (GitHub Pages from main:/web-app/)
+   │      [HTML + JS load]
+   │
+   └──► fetch /api/* with initData
+          │
+          ▼
+   cloudflared tunnel  https://xxx.trycloudflare.com
+          │            (free, бесплатный random subdomain)
+          ▼
+   prod 192.168.88.28:8080  (FastAPI, текущий)
+          │
+          ▼
+   SQLite + scheduler.* helpers</pre>
+    </div>
+    <div class="card-body">
+      <h3>A · Same repo + cloudflared (рекомендуемый)</h3>
+      <p><strong>Repo</strong>: SPA в <code>/web-app/</code> того же kleinanzeigen-bot репо. GitHub Pages → settings → folder=/web-app.<br>
+      <strong>Deploy SPA</strong>: <code>git push</code>, no build.<br>
+      <strong>Backend HTTPS</strong>: cloudflared tunnel (бесплатный, ~30 сек поднять, переживает рестарт через systemd).<br>
+      <strong>Auth</strong>: FastAPI middleware валидирует <code>initData</code> через HMAC от bot-token.<br>
+      <strong>Минусы</strong>: trycloudflare URL рандомный — если перезапустится без named tunnel, меняется. Решается named tunnel за 5 минут (cf account, без домена).</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;margin:0;padding:1rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+TG client
+   │
+   ├──► open https://kleinanzeigen-app.your-domain.tld
+   │      (отдельный репо `kleinanzeigen-bot-mini-app`,
+   │       GitHub Pages с CNAME на свой домен)
+   │
+   └──► fetch /api/* with initData
+          ▼
+   nginx + Let's Encrypt
+          ▼
+   prod :8080 FastAPI</pre>
+    </div>
+    <div class="card-body">
+      <h3>B · Свой домен + Let's Encrypt</h3>
+      <p><strong>Repo</strong>: отдельный репо для SPA. CNAME на купленный домен.<br>
+      <strong>Backend HTTPS</strong>: nginx-reverse-proxy + LE-cert на api.your-domain.tld.<br>
+      <strong>Плюсы</strong>: красивые URL, стабильные навсегда, профессионально.<br>
+      <strong>Минусы</strong>: нужен домен (~$10/год), nginx config, LE renewal, отдельный репо синхронизировать с основным. Серьёзнее по setup-у — 2-3 часа против 30 минут на A.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;margin:0;padding:1rem;background:#1a1a1a;color:#e0e0e0;border-radius:6px;overflow:auto">
+TG client
+   │
+   └──► open https://your-domain.tld/ma
+          (FastAPI отдаёт static SPA из /web/ma/)
+          │
+          └──► fetch /api/* (тот же origin)
+                 ▼
+          FastAPI :8080 (через cloudflared/LE)</pre>
+    </div>
+    <div class="card-body">
+      <h3>C · FastAPI-served (без GitHub Pages)</h3>
+      <p><strong>Repo</strong>: SPA в <code>/web/ma/</code> того же репо, FastAPI mount-ит как StaticFiles.<br>
+      <strong>Backend HTTPS</strong>: всё равно нужен (cloudflared / LE).<br>
+      <strong>Плюсы</strong>: один origin → CORS не нужен, deploy = restart unit.<br>
+      <strong>Минусы</strong>: не выполняет твоё пожелание «оставить на github и пусть TG тянет оттуда». GitHub становится только source-of-truth, не deploy-target.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:1.5rem">
+  <p class="label">Моя рекомендация</p>
+  <p><strong>A · Same repo + cloudflared</strong>. Соответствует твоему «git push → live», бесплатно, минимум moving parts. Ниже разберём на нём детали (auth, экраны, синхронизация с ботом). Если в процессе захочется domain — переходим на B без переписывания кода (меняется только URL и cert).</p>
+</div>
