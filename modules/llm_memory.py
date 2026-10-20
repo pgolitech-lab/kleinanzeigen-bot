@@ -254,8 +254,13 @@ def client_memory_text(msg_row: Any, max_chars: int = MEMORY_MAX_CHARS) -> str:
             account_id=_rget(msg_row, "account_id"), include_maybe=True,
         )
         seen = {thread_id}
+        account_id = _rget(msg_row, "account_id")
         for r in related:
             tid = _rget(r, "gmail_thread_id")
+            # Только переписки ЭТОГО аккаунта: иначе бот выдаст клиенту связь между
+            # нашими 5 аккаунтами и подсунет цены чужого товара
+            if account_id is not None and _rget(r, "account_id") != account_id:
+                continue
             if tid and tid not in seen:
                 seen.add(tid)
                 line = _thread_line(tid, probable=bool(_rget(r, "maybe_same")))
@@ -289,7 +294,8 @@ def learn_from_sent(
     llm_draft_client / llm_draft_ru — черновик LLM до правок оператора. Если не переданы,
     берутся из колонок messages.llm_draft_de / llm_draft_ru (когда db их добавит).
     Если отправленный текст почти совпадает с черновиком (или черновика не было) — урока нет.
-    Иначе Haiku формулирует, что исправил оператор → lessons (source='operator_edit').
+    Иначе Sonnet формулирует, что исправил оператор → lessons (source_type='operator_edit',
+    source_ref=message_id — повторный вызов обновляет тот же урок).
     Возвращает id урока или None. Исключения LLM пробрасываются — вызывающий логирует
     (вызывать в фоне: на отправку это не влияет).
     """
@@ -336,8 +342,9 @@ def learn_from_sent(
         good_answer_ru=_rget(row, "ru_translation") or None,
         good_answer_de=sent_client,
         lesson_ru=lesson["lesson_ru"],
-        source="operator_edit",
-        gmail_thread_id=_rget(row, "gmail_thread_id"),
+        # идемпотентно (uq_lessons_source): повторная отправка/правка обновляет урок письма
+        source_type="operator_edit",
+        source_ref=str(message_id),
         buyer_email=_rget(row, "buyer_name"),
         category=ad_category(_rget(row, "ad_id")),
     )

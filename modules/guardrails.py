@@ -125,6 +125,14 @@ def language_verdict(text: str, client_lang: Optional[str]) -> str:
     return "unsure"
 
 
+def has_prose(text: str) -> bool:
+    """Есть ли в тексте связная речь (≥2 служебных слов какого-либо языка), а не
+    только имена/модели/цены («Peugeot Expert 1200 €», URL) — их перевод законно
+    совпадает с исходником."""
+    words = [w.lower() for w in _WORD_RE.findall(text or "")]
+    return any(sum(1 for w in words if w in sw) >= 2 for sw in _STOPWORDS.values())
+
+
 def outgoing_language_ok(text: str, client_lang: Optional[str]) -> bool:
     """Чистая (без LLM) проверка ПИСЬМЕННОСТИ исходящего: кириллица — только клиентам
     на кириллических языках (ru/uk/bg/…), латиница — латинским и т.д. Пустой текст → False.

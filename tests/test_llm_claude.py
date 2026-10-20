@@ -302,3 +302,13 @@ def test_ad_state_from_latest_title_and_sold_brief(tmp_db):
     tmp_db.upsert_ad_brief(ad_id="A1", ad_title="x", ad_url="", ad_price="", brief_md="b", key_facts_json="{}")
     tmp_db.mark_ad_sold("A1")
     assert claude.ad_state_for(tmp_db.get_message(old)) == "sold"
+
+
+def test_translate_accepts_text_already_in_target_and_names(fake_llm):
+    # Черновик уже на немецком → «перевод» = тот же текст: не ошибка (translate-draft)
+    de = "Ja, die Sitzbank ist noch da und gerne mit Lieferung. MfG"
+    fake_llm.response = _resp({"translation": de})
+    assert claude.translate_only(de, target_lang="de")["translation"] == de
+    # Обратный перевод на RU для «имён/моделей/цен» законно остаётся латиницей
+    fake_llm.response = _resp({"translation": "Peugeot Expert 1200 €"})
+    assert claude.translate_only("Peugeot Expert 1200 €", target_lang="ru", source_lang="de")

@@ -61,7 +61,7 @@ def _migrate_lessons(db):
     """Колонки уроков, которые добавляет миграция модуля db (в тесте — вручную, если их нет)."""
     with db.get_conn() as conn:
         have = {r[1] for r in conn.execute("PRAGMA table_info(lessons)")}
-        for col in ("lesson_ru", "source", "gmail_thread_id", "buyer_email", "outcome", "category"):
+        for col in ("lesson_ru", "buyer_email", "outcome", "category"):
             if col not in have:
                 conn.execute(f"ALTER TABLE lessons ADD COLUMN {col} TEXT")
     llm_memory._COLS_CACHE.clear()
@@ -90,7 +90,8 @@ def test_learn_from_sent_only_when_operator_rewrote(tmp_db):
     with tmp_db.get_conn() as conn:
         row = conn.execute("SELECT * FROM lessons WHERE id=?", (lid,)).fetchone()
     assert row["good_answer_de"].startswith("Der Preis") and row["bad_draft_de"].startswith("Ich kann")
-    assert row["lesson_ru"].startswith("Держи цену") and row["source"] == "operator_edit"
+    assert row["lesson_ru"].startswith("Держи цену") and row["source_type"] == "operator_edit"
+    assert row["source_ref"] == str(mid)
 
 
 def test_autopilot_derives_memory_from_history():
@@ -114,3 +115,14 @@ def test_client_memory_marks_probable_same_person(tmp_db):
                              ad_title="Sitzbank", de_client="Hallo", created_at="2026-10-01T10:00")
     text = llm_memory.client_memory_text(tmp_db.get_message(cur))
     assert "ВОЗМОЖНО тот же человек" in text and "Konsole" in text
+
+
+def test_client_memory_ignores_other_accounts(tmp_db):
+    with tmp_db.get_conn() as conn:
+        conn.execute("INSERT INTO accounts (id, name, gmail_email, gmail_app_password, is_active, created_at) "
+                     "VALUES (2, 'other', 'o@x', 'p', 1, '2026-01-01')")
+    tmp_db.add_message(2, "in", gmail_thread_id="acc2", buyer_name="b@relay", ad_title="Fremd",
+                       de_client="Preis?", created_at="2026-09-01T10:00")
+    cur = tmp_db.add_message(1, "in", gmail_thread_id="acc1", buyer_name="b@relay", de_client="Hallo",
+                             created_at="2026-10-01T10:00")
+    assert "Fremd" not in llm_memory.client_memory_text(tmp_db.get_message(cur))

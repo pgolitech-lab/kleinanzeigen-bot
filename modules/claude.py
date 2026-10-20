@@ -170,9 +170,20 @@ def rows_to_history(
     before: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """Строки messages → формат истории для format_history (см. history_for)."""
+    # Наши ответы, отправленные ПОСЛЕ следующего письма клиента, отвечали уже на него —
+    # при регенерации старого черновика их не показываем (auto-ack/compose до него — да).
+    next_in = None
+    if before:
+        later = [_rget(r, "created_at") or "" for r in rows
+                 if r["direction"] == "in" and (_rget(r, "created_at") or "") > before
+                 and r["id"] != exclude_id]
+        next_in = min(later) if later else None
     out: list[dict[str, Any]] = []
     for r in rows:
         if exclude_id is not None and r["id"] == exclude_id:
+            continue
+        if next_in and r["direction"] == "out" and \
+                (_rget(r, "sent_at") or _rget(r, "created_at") or "") > next_in:
             continue
         # Отсекаем только БОЛЕЕ ПОЗДНИЕ письма клиента. Наши out-строки (auto-ack,
         # compose) создаются с utcnow() позже Date-заголовка текущего письма —
@@ -611,15 +622,18 @@ def _lang_pair(direction: str, target_lang: Optional[str], source_lang: Optional
 
 def _check_translation(label: str, src: str, translation: str, target: str,
                        source_lang: Optional[str]) -> None:
-    """Перевод не должен быть эхом исходника и должен быть на целевом языке.
+    """Ловит НЕПЕРЕВЕДЁННЫЙ результат до того, как он уйдёт клиенту.
 
-    Ловит случай «модель вернула исходный русский текст» до того, как он уйдёт клиенту.
+    Ошибка только если исходник — связная речь НЕ на целевом языке, а результат
+    остался на нём же (эхо или та же письменность при другой целевой). Текст,
+    уже написанный на целевом языке, и «имена/модели/цены» законно совпадают.
     """
-    from modules.guardrails import language_verdict
-    same_lang = source_lang and source_lang.lower() == target
-    if not same_lang and len(src.strip()) > 20 and translation.strip() == src.strip():
-        raise LLMResponseError(f"{label}: модель вернула исходный текст без перевода")
-    if language_verdict(translation, target) == "mismatch":
+    from modules.guardrails import has_prose, language_verdict
+    if not has_prose(src) or language_verdict(src, target) != "mismatch":
+        return
+    if translation.strip() == src.strip():
+        raise LLMResponseError(f"{label}: модель вернула исходный текст без перевода на «{target}»")
+    if language_verdict(translation, target) == "mismatch" and has_prose(translation):
         raise LLMResponseError(f"{label}: результат не на языке «{target}»")
 
 
@@ -1079,7 +1093,8 @@ def generate_auto_ack(
     ack = data["ack_text"].strip()
     ack_ru = (data.get("ack_text_ru") or "").strip() or (ack if lang == "ru" else "")
     if not ack_ru:
-        raise LLMResponseError("auto-ack: пустое RU-зеркало ack_text_ru")
+        # Зеркало нужно только оператору — заглушку клиенту из-за него не срываем
+        logger.warning("auto-ack: модель не вернула RU-зеркало (lang=%s) — оператор увидит без перевода", lang)
     return {
         "client_lang": lang,
         "ack_text": ack,
