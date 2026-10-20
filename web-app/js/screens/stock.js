@@ -74,7 +74,11 @@ async function renderList(mount) {
   root.querySelector(".v-rev").textContent = money(T.expected_revenue_list);
   root.querySelector(".v-prof").textContent = money(T.expected_profit_list);
   if (!T.tracked) {
-    root.querySelector(".st-hero").after(el(`<div class="st-note">Остатки ещё не внесены — сделайте «Приход» или инвентаризацию в карточке товара.</div>`));
+    // пустой склад: вместо плитки из прочерков — одна крупная кнопка
+    const hero = root.querySelector(".st-hero");
+    const first = el(`<div class="st-first"><p>Остатки ещё не внесены.</p><p class="small">Внесите первый приход — сколько штук и за сколько куплено. Тогда склад покажет вложения и прибыль.</p><button class="btn btn-primary st-first-b" type="button">➕ Первый приход</button></div>`);
+    hero.replaceWith(first);
+    first.querySelector(".st-first-b").addEventListener("click", () => receiptSheet(items, () => renderList(mount)));
   }
   const banners = root.querySelector(".st-banners");
   if (T.open_questions) banners.appendChild(banner("#/stock/questions", `❓ Тот же товар? Вопросов: ${T.open_questions}`, "warn"));

@@ -744,7 +744,7 @@ pre.payload {
 .fchips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
 .fchips::-webkit-scrollbar { display: none; }
 .fchip {
-  flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 13px;
+  flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 13px;
   border-radius: 999px; border: 0; background: var(--tonal); color: var(--sub);
   font: inherit; font-size: .84rem; font-weight: 600; white-space: nowrap; cursor: pointer;
 }
@@ -882,7 +882,7 @@ em.good { color: var(--good); }
 /* чипы быстрых значений, кнопки листов */
 .chips-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .qchip {
-  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line2);
+  min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line2);
   background: var(--tonal); color: var(--text); font: inherit; font-size: .86rem; font-weight: 600; cursor: pointer;
 }
 .qchip:active { background: var(--line2); }
@@ -1014,7 +1014,7 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 .pult { display: flex; gap: 6px; overflow-x: auto; margin: 10px -12px 0; padding: 2px 12px; scrollbar-width: none; }
 .pult::-webkit-scrollbar { display: none; }
 .pchip {
-  flex: none; min-height: 40px; padding: 0 13px; border-radius: 999px;
+  flex: none; min-height: 44px; padding: 0 13px; border-radius: 999px;
   border: 1px solid var(--line2); background: var(--card); color: var(--text);
   font: inherit; font-size: .84rem; font-weight: 650; white-space: nowrap; cursor: pointer;
 }
@@ -1234,7 +1234,7 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 .c-maybe h3 .ic { width: 16px; height: 16px; }
 .c-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .tagbtn {
-  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line2);
+  min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line2);
   background: var(--tonal); color: var(--sub); font: inherit; font-size: .84rem; font-weight: 650; cursor: pointer;
 }
 .tagbtn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
@@ -1349,7 +1349,7 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 .r-row { padding: 8px; border-radius: 12px; background: var(--tonal); display: flex; flex-direction: column; gap: 6px; }
 .r-src { font-size: .82rem; color: var(--sub); }
 .r-ctl { display: grid; grid-template-columns: 64px minmax(0, 1fr) 84px; gap: 6px; align-items: center; }
-.r-ctl .form-control { min-height: 40px; padding: 4px 8px; }
+.r-ctl .form-control { min-height: 44px; padding: 4px 8px; }
 .r-prod { justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .product { display: flex; flex-direction: column; gap: 12px; }
 .pd-hero { text-align: center; padding: 12px 6px 0; }
@@ -1452,7 +1452,7 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 .nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; padding: 3px; list-style: none; border-radius: 12px; background: var(--tonal); }
 .nav-fill .nav-item { flex: 1; }
 .nav-link {
-  display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 40px; padding: 4px 8px;
+  display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 44px; padding: 4px 8px;
   border-radius: 10px; color: var(--sub); text-decoration: none; font-weight: 700; font-size: .84rem; cursor: pointer; white-space: nowrap;
 }
 .nav-link.active { background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); }
@@ -1500,3 +1500,19 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 :root[data-layout="flex"] .th-head { gap: 4px; }
 :root[data-layout="flex"] .th-head .av { --s: 26px; }
 :root[data-layout="flex"] .th-sub, :root[data-layout="flex"] .th-ad { display: none; }
+
+/* советы QA: блок «что сделать», пустой склад, обрезка подписей, чипы 44 px */
+.nextup { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin-bottom: 10px; padding: 10px 14px; border-radius: var(--r); border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line)); background: color-mix(in srgb, var(--danger) 9%, var(--card)); color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.nextup .nu-t { flex: 1; min-width: 0; font-size: .9rem; }
+.nextup .nu-go { flex: none; color: var(--link); font-weight: 700; }
+.sumstrip .sc small { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+.fchip { min-height: 44px; }
+.st-first { display: flex; flex-direction: column; gap: 8px; align-items: stretch; text-align: center; padding: 18px 14px; border-radius: var(--r); background: var(--card); border: 1px solid var(--line); }
+.st-first p { margin: 0; }
+.st-first-b { min-height: 56px; font-size: 1.05rem; }
+.st-actions { flex-wrap: wrap; }
+.st-actions .btn { flex: 1 1 140px; min-width: 0; white-space: normal; text-align: center; line-height: 1.2; }
+.var-down { padding: 14px; color: var(--sub); }
+:root[data-layout="flex"] .pane { overflow-x: hidden; }
+:root[data-layout="flex"] .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:root[data-layout="flex"] .nextup { min-height: 44px; padding: 6px 10px; }

@@ -532,7 +532,13 @@ function renderThread(mount, params, data, opts = {}) {
     try {
       r = await api(`/api/ma/messages/${msgId}/variants`, { method: "POST", body: {}, timeoutMs: LLM_TIMEOUT_MS });
     } catch (e) {
-      if (box.isConnected) box.innerHTML = "", box.appendChild(el(`<div class="text-danger small"></div>`)).textContent = e.message ?? String(e);
+      if (box.isConnected) {
+        // 5xx/таймаут = ИИ недоступен: не показываем сырой «HTTP 500»
+        const m = String(e.message ?? e);
+        const down = /HTTP 5\d\d|timeout|таймаут|Failed to fetch|Network/i.test(m);
+        box.replaceChildren(el(`<div class="var-down small"></div>`));
+        box.firstChild.textContent = down ? "ИИ сейчас недоступен — возьмите чип «−5 %» или напишите ответ сами." : m;
+      }
       return;
     }
     if (!box.isConnected) return;
