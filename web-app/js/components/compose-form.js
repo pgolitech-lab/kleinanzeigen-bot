@@ -4,7 +4,7 @@
 // уйдёт клиенту. compose больше не переводит повторно при отправке (см. modules/outgoing.py,
 // инцидент 2026-07-02: ответ на немецком без предпросмотра ушёл клиенту переведённым на русский).
 import { api, LLM_TIMEOUT_MS } from "../api.js";
-import { el } from "../utils.js";
+import { el, sendOutcome } from "../utils.js";
 import { tg, confirm as tgConfirm } from "../tg.js";
 
 export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
@@ -106,15 +106,12 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
         method: "POST",
         body: { text: lastPreview.ru_text, final_text: finalText, target_lang: lastPreview.target_lang },
       });
-      try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (e) {}
+      // Итог — по ответу сервера, а не «всегда ушло»: баннер нарисует экран треда.
+      const outcome = sendOutcome(res);
       try {
-        if (tg?.showPopup) {
-          tg.showPopup({ title: "Отправлено", message: "Письмо ушло клиенту.", buttons: [{ type: "ok" }] },
-            () => onSubmitComplete(res));
-        } else {
-          onSubmitComplete(res);
-        }
-      } catch (e) { onSubmitComplete(res); }
+        tg?.HapticFeedback?.notificationOccurred(outcome.level === "ok" ? "success" : "warning");
+      } catch (e) { /* хаптика необязательна */ }
+      onSubmitComplete(res);
     } catch (e) {
       showErr(e.message ?? String(e));
       confirmSendBtn.disabled = false; cancelBtn.disabled = false; translateBtn.disabled = false;

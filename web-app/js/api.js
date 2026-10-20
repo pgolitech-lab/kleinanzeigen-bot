@@ -5,7 +5,7 @@ import { initData } from "./tg.js";
 //   1. ?api=<url> в адресе Mini App — бот подставляет актуальный туннель в
 //      Menu Button и web_app-кнопки (свежий при каждом открытии);
 //   2. sessionStorage — тот же ?api= в рамках открытого окна;
-//   3. FALLBACK_API_BASE — зашитый URL (его правит tunnel-url-sync в режиме git).
+//   3. FALLBACK_API_BASE — последний известный адрес туннеля (запасной, если ?api= нет).
 // TUNNEL_RE (только https://<имя>.trycloudflare.com) — фильтр от мусора, НЕ
 // защита: такой поддомен анонимно получит кто угодно. Защищает то, что initData
 // подписана токеном нашего бота и выдаётся только его кнопками. Остаточный
@@ -107,7 +107,17 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`HTTP ${res.status}: ${text}`);
+    // FastAPI кладёт причину в {"detail": "..."} — показываем её, а не сырой JSON.
+    // В Error сохраняем status/detail: экраны различают 409 и прочее по e.status.
+    let detail = null;
+    try {
+      const j = JSON.parse(text);
+      if (typeof j?.detail === "string") detail = j.detail;
+    } catch (e) { /* не JSON — оставляем text */ }
+    const err = new Error(detail ?? `HTTP ${res.status}: ${text}`);
+    err.status = res.status;
+    err.detail = detail;
+    throw err;
   }
   // 204 No Content (например /lock/release, /reject) — нет JSON body
   if (res.status === 204 || res.headers.get("content-length") === "0") {

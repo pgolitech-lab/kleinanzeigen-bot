@@ -3,7 +3,7 @@
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
 import { api, API_BASE, LLM_TIMEOUT_MS } from "../api.js";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js";
+import { el, berlinTime, setLoading, setError, accountColor, sendOutcome } from "../utils.js";
 import { setTitle } from "../components/backbar.js";
 import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js";
 import { buildEditForm } from "../components/edit-form.js";
@@ -325,7 +325,7 @@ export async function render(mount, params, opts = {}) {
           review.lock = lockRes;
         }
       } catch (e) {
-        if (e.message && e.message.includes("HTTP 409")) {
+        if (e.status === 409) {
           acquireError = "locked";
         } else {
           acquireError = "network";
@@ -342,14 +342,29 @@ export async function render(mount, params, opts = {}) {
   }
 }
 
+// Итог «Отправить» — строго по ответу сервера (sendOutcome), а не «всегда успех».
+function sendResultBanner(res) {
+  const o = sendOutcome(res);
+  const b = el(`<div class="alert small py-2"></div>`);
+  b.classList.add(o.level === "ok" ? "alert-success" : o.level === "bad" ? "alert-danger" : "alert-warning");
+  b.textContent = o.text;
+  return b;
+}
+
 function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor, opts = {}) {
   const container = el(`<div></div>`);
   if (data.header?.ad_title) setTitle(data.header.ad_title);
 
   container.appendChild(threadHeader(data.header, review?.lock ?? null, ourActor));
-  if (opts.sentBanner) {
-    container.appendChild(el(
-      `<div class="alert alert-success small py-2">✅ Сообщение отправлено клиенту</div>`));
+  if (opts.conflictText) {
+    // 409 от /send: текст причины от сервера + переход в «Написать»
+    const b = el(`<div class="alert alert-warning small py-2"><div class="t"></div>
+      <button class="btn btn-sm btn-primary mt-2 compose-btn">✉️ Написать клиенту</button></div>`);
+    b.querySelector(".t").textContent = opts.conflictText;
+    b.querySelector(".compose-btn").addEventListener("click", () => composeHandler());
+    container.appendChild(b);
+  } else if (opts.sendResult) {
+    container.appendChild(sendResultBanner(opts.sendResult));
   }
   const related = relatedBlock(data.related);
   if (related) container.appendChild(related);
@@ -725,15 +740,23 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
       sendBtn.textContent = "⏳ Отправляю…";
       try {
         // force=true только при явной галочке-разрешении оператора
-        await api(`/api/ma/messages/${latestPendingMsgId}/send`, {
+        const res = await api(`/api/ma/messages/${latestPendingMsgId}/send`, {
           method: "POST",
           body: {mode: "as_is", force: blocked && allowCb.checked === true},
         });
         closeSheet();
         // focus_msg_id сбрасываем: иначе перерисовка вернёт только что отправленный
         // черновик как «ждёт проверки» с активной отправкой
-        render(mount, {...params, focus_msg_id: null}, {sentBanner: true});
+        render(mount, {...params, focus_msg_id: null}, {sendResult: res ?? {}});
       } catch (e) {
+        // 409 «уже отправлено» — этот черновик больше не отправить: показываем
+        // причину и предлагаем «Написать» новое сообщение.
+        if (e.status === 409 && /уже отправлено/i.test(e.message)) {
+          closeSheet();
+          render(mount, {...params, focus_msg_id: null},
+                 {conflictText: e.message});
+          return;
+        }
         showFlowErr(box, e);
         sending = false;
         [editBtn, cancelBtn].forEach(b => b.disabled = false);
@@ -792,7 +815,7 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   function composeHandler() {
     const form = buildComposeForm({
       threadId: params.thread_id,
-      onSubmitComplete: () => { closeSheet(); render(mount, params); },
+      onSubmitComplete: (res) => { closeSheet(); render(mount, params, {sendResult: res ?? {}}); },
       onCancel: () => closeSheet(),
     });
     openSheet(form, "✉️ Написать клиенту");
