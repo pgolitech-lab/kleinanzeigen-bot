@@ -636,3 +636,54 @@ def test_partial_rank_run_is_not_success_nor_missing(env, monkeypatch):
     # нашего объявления в частичной выдаче нет — «пропало» писать нельзя
     rep = ma.rank_report(ad_id="9000000001")["items"][0]
     assert rep["status"] != "missing"
+
+
+# --- поиск по товару ------------------------------------------------------------------
+
+def _wb(db_mod, now, n=4):
+    cities = [("Berlin", "10115"), ("Berlin", "10117"), ("Köln", "50667"), ("Aachen", "52062")]
+    for i in range(n):
+        c, plz = cities[i % 4]
+        add_market(db_mod, ad_id=f"85000000{i:02d}", title=f"Werkbank Holz {i}", price=100 + 50 * i,
+                   plz=plz, city=c, first=_iso(now, 3), last=_iso(now, 0))
+
+
+def test_product_search_stats_regions_listings_and_ours(env):
+    db_mod, _dbm, ma, now = env
+    _wb(db_mod, now)
+    add_msg(db_mod, ad_id="9100000001", title="Werkbank Holz massiv", price="200 €", created_at=_iso(now, 1))
+    r = ma.product_search("werkbank")
+    assert r["status"] == "ok" and r["total"] == 4 and r["n_active"] == 4
+    assert r["price"]["min"] == 100 and r["price"]["max"] == 250 and r["price"]["median"] == 175
+    assert r["cities"][0]["city"] == "Berlin" and r["cities"][0]["count"] == 2
+    assert r["regions"][0]["plz_area"] == "10" and r["regions"][0]["count"] == 2
+    assert [x["price_eur"] for x in r["listings"]] == [100, 150, 200, 250]
+    assert r["ours"]["count"] == 1 and r["ours"]["items"][0]["verdict"] == "pricier"
+    assert r["ours"]["position_ru"] and r["sources"] == {"db": 4, "live": None, "live_error": None, "live_asked": False}
+    assert {"ad_id", "title", "price_eur", "city", "url", "age_days", "ours"} <= set(r["listings"][0])
+
+
+def test_product_search_honest_empty_and_few(env, monkeypatch):
+    db_mod, _dbm, ma, now = env
+    assert ma.product_search("")["status"] == "empty_query"
+    r = ma.product_search("Hobelbank")
+    assert r["status"] == "no_data" and "scout" in r["message_ru"] and r["listings"] == []
+    _wb(db_mod, now, n=2)
+    assert ma.product_search("werkbank")["status"] == "few_data"
+    # живая выдача недоступна — честный статус, не пустота
+    monkeypatch.setattr(ma, "_live_search", lambda q: ([], "выдача Kleinanzeigen недоступна: timeout"))
+    r = ma.product_search("Hobelbank", live=True)
+    assert r["status"] == "source_unavailable" and "timeout" in r["message_ru"] and r["sources"]["live_error"]
+
+
+def test_product_search_live_merges_without_db_write(env, monkeypatch):
+    db_mod, _dbm, ma, now = env
+    _wb(db_mod, now, n=2)
+    live = [{"ad_id": "8600000001", "title": "Werkbank Stahl", "price_eur": 300.0, "city": "Bonn",
+             "plz": "53111", "url": "u", "posted_raw": "Heute"},
+            {"ad_id": "8600000002", "title": "Hobelbank", "price_eur": 50.0, "city": "X", "plz": "1", "url": "u"}]
+    monkeypatch.setattr(ma, "_live_search", lambda q: (live, None))
+    r = ma.product_search("Werkbank", live=True)
+    assert r["total"] == 3 and r["sources"]["live"] == 2 and any(x["source"] == "live" for x in r["listings"])
+    with db_mod.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM scout_listings WHERE ad_id='8600000001'").fetchone()[0] == 0

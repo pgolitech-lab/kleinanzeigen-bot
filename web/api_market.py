@@ -30,6 +30,13 @@ def market_advice(product_id: int, user: dict = Depends(verify_init_data_dep)) -
     return _item(market_advisor.advise_price(product_id=product_id))
 
 
+@router.get("/market/search")
+def market_search(q: str = Query("", max_length=80), live: bool = False, limit: int = Query(40, ge=1, le=100),
+                  user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Поиск по товару: сколько продаётся, цены, где, где мы. live=1 — ещё и публичная выдача (≤ 2 стр.)."""
+    return market_advisor.product_search(q, live=live, limit=limit)
+
+
 @router.get("/market/duplicates")
 def market_duplicates(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     return market_advisor.duplicates_report()

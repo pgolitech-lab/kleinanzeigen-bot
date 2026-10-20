@@ -1712,6 +1712,196 @@ def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text
 # ══════════════════════════════════════════════════════════════════════════════
 # СВОДКА И ДЖОБЫ
 # ══════════════════════════════════════════════════════════════════════════════
+# ПОИСК ПО ТОВАРУ (вкладка «Рынок»)
+# ══════════════════════════════════════════════════════════════════════════════
+
+SEARCH_LIVE_TTL_DAYS = 0.25    # живой запрос по одной фразе не чаще раза в 6 ч
+SEARCH_LIVE_PAGES = 2          # публичная выдача, ≤ 2 страниц (≈ 50 объявлений)
+SEARCH_MAX_LISTINGS = 40       # сколько объявлений отдаём списком
+
+
+def _search_row(m: dict[str, Any], ours: bool, now: datetime, source: str) -> dict[str, Any]:
+    age = _iso_age_days(m.get("first_seen_at"), now)
+    return {"ad_id": m.get("ad_id"), "title": m.get("title"), "price_eur": m.get("price_eur"),
+            "city": m.get("city"), "plz": m.get("plz"), "url": m.get("url"),
+            "age_days": None if age is None else round(age, 1), "posted_raw": m.get("posted_raw"),
+            "active": bool(m.get("active", 1)), "ours": ours, "source": source}
+
+
+def _live_search(query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """Публичная выдача по фразе (без логина, ≤ 2 страниц, кэш 6 ч). -> (rows, error)."""
+    key = "psearch:" + db_market.text_hash(" ".join(tokens(query)))
+    cached = db_market.cache_get(key, max_age_days=SEARCH_LIVE_TTL_DAYS)
+    if cached is not None:
+        return cached.get("rows", []), None
+    from modules import scout
+    import httpx
+    rows: list[dict[str, Any]] = []
+    browser = scout._BrowserFallback()
+    try:
+        with httpx.Client(headers=scout._HEADERS, timeout=30.0, follow_redirects=True) as client:
+            for pnum in range(1, SEARCH_LIVE_PAGES + 1):
+                try:
+                    html = scout.fetch_search_page(client, scout.build_search_url(query, "", pnum), browser)
+                except Exception as e:  # noqa: BLE001
+                    if pnum == 1:
+                        return [], f"выдача Kleinanzeigen недоступна: {e}"[:300]
+                    break
+                page_rows = scout.parse_search_html(html, "part", 0)
+                if not page_rows:
+                    break
+                rows += page_rows
+                if pnum < SEARCH_LIVE_PAGES:
+                    time.sleep(random.uniform(3.0, 6.0))
+    finally:
+        browser.close()
+    if not rows:
+        return [], "выдача пуста или не распознана"
+    keep = [{k: r.get(k) for k in ("ad_id", "title", "url", "price_eur", "city", "plz", "posted_raw")}
+            for r in rows]
+    db_market.cache_set(key, "psearch", {"rows": keep})
+    return keep, None
+
+
+def _price_stats(prices: list[float]) -> dict[str, Any]:
+    if not prices:
+        return {"min": None, "p25": None, "median": None, "p75": None, "max": None}
+    return {"min": round(min(prices)), "p25": round(_percentile(prices, 0.25)),
+            "median": round(statistics.median(prices)), "p75": round(_percentile(prices, 0.75)),
+            "max": round(max(prices))}
+
+
+def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTINGS,
+                   now: Optional[datetime] = None, _ctx: Optional[_Ctx] = None) -> dict[str, Any]:
+    """Поиск по ТОВАРУ: сколько такого продаётся, по какой цене и где (не по городу).
+
+    query — слова товара («Werkbank», «sitzbank traveller»): объявление подходит, если в заголовке
+    есть ВСЕ слова. Источник — накопленный рынок scout (за 60 дней); live=True дополнительно
+    берёт публичную выдачу (≤ 2 страниц, кэш 6 ч, без логина) — для товаров, которых scout не ищет.
+    Пустой query → только подсказки.
+
+    {
+      "query", "status": "ok" | "few_data" | "no_data" | "empty_query" | "source_unavailable",
+      "message_ru": str — объяснение для экрана (почему мало/пусто, что делать),
+      "suggestions": [{"query", "label", "ours": int}] — быстрые подсказки из наших товаров,
+      "sources": {"db": int, "live": int|None, "live_error": str|None, "live_asked": bool},
+      "data_health": {scout_last_run, age_days, stale, reason},
+      "total": int — объявлений рынка (без наших), "n_active": int,
+      "price": {min, p25, median, p75, max} — по ценам рынка (без наших), € | None,
+      "ours": {"count": int, "items": [{item_id, title, price_eur, vs_median_pct, verdict:
+               "cheaper"|"pricier"|"in_market"|None, rank_cheaper_than_pct}], "position_ru": str|None},
+      "cities": [{"city", "plz_area", "count", "median_eur"}] — топ-10 по числу,
+      "regions": [{"plz_area": "52", "count", "median_eur"}] — топ-10 по первым 2 цифрам PLZ,
+      "listings": [{ad_id, title, price_eur, city, plz, url, age_days, posted_raw, active, ours, source}]
+                  — от дешёвых к дорогим, ≤ limit (наши помечены ours=true)
+    }
+    """
+    ctx = _ctx or _Ctx(now)
+    q = (query or "").strip()
+    items = own_items(ctx)
+    sugg, seen_q = [], set()
+    for it in items:
+        ph = search_phrase(it) or " ".join(tokens(it["title"])[:2])
+        if ph and ph not in seen_q:
+            seen_q.add(ph)
+            sugg.append({"query": ph, "label": it["title"], "ours": 1})
+    res: dict[str, Any] = {
+        "query": q, "status": "ok", "message_ru": "", "suggestions": sugg[:12],
+        "sources": {"db": 0, "live": None, "live_error": None, "live_asked": bool(live)},
+        "data_health": health_info(ctx), "total": 0, "n_active": 0, "price": _price_stats([]),
+        "ours": {"count": 0, "items": [], "position_ru": None}, "cities": [], "regions": [], "listings": []}
+    qt = tokens(q)
+    if not qt:
+        res["status"], res["message_ru"] = "empty_query", "Введите товар, например «Werkbank» или выберите из подсказок."
+        return res
+
+    def hit(title: Optional[str]) -> bool:
+        tt = set(tokens(title))
+        return all(w in tt or any(x.startswith(w) for x in tt) for w in qt)
+
+    since = COMPARABLE_DAYS
+    rows: list[dict[str, Any]] = []
+    for m in ctx.market.values():
+        if m["ek"] != "part" or not hit(m["title"]):
+            continue
+        age = _iso_age_days(m["last_seen_at"], ctx.now)
+        if not m["active"] and (age is None or age > since):
+            continue
+        rows.append(_search_row(m, ctx.is_ours(m["ad_id"]), ctx.now, "db"))
+    res["sources"]["db"] = len(rows)
+    if live:
+        live_rows, err = _live_search(q)
+        res["sources"]["live"], res["sources"]["live_error"] = len(live_rows), err
+        have = {r["ad_id"] for r in rows}
+        for lr in live_rows:
+            if lr.get("ad_id") and lr["ad_id"] not in have and hit(lr.get("title")):
+                lr = {**lr, "first_seen_at": None, "active": 1}
+                rows.append(_search_row(lr, ctx.is_ours(lr["ad_id"]), ctx.now, "live"))
+    market = [r for r in rows if not r["ours"]]
+    priced = [r["price_eur"] for r in market if r["price_eur"] and r["price_eur"] >= 20]
+    res["total"], res["n_active"] = len(market), sum(1 for r in market if r["active"])
+    res["price"] = _price_stats(priced)
+    # разрез «где продаётся»
+    by_city: dict[tuple, list] = {}
+    by_reg: dict[str, list] = {}
+    for r in market:
+        if r["city"]:
+            by_city.setdefault((r["city"], (r["plz"] or "")[:2]), []).append(r)
+        if r["plz"]:
+            by_reg.setdefault(r["plz"][:2], []).append(r)
+
+    def agg(g: list) -> tuple[int, Optional[int]]:
+        ps = [x["price_eur"] for x in g if x["price_eur"] and x["price_eur"] >= 20]
+        return len(g), (round(statistics.median(ps)) if ps else None)
+    res["cities"] = sorted(({"city": k[0], "plz_area": k[1] or None, "count": agg(g)[0], "median_eur": agg(g)[1]}
+                            for k, g in by_city.items()), key=lambda x: -x["count"])[:10]
+    res["regions"] = sorted(({"plz_area": k, "count": agg(g)[0], "median_eur": agg(g)[1]}
+                             for k, g in by_reg.items()), key=lambda x: -x["count"])[:10]
+    # где мы
+    med = res["price"]["median"]
+    our_items = []
+    for it in items:
+        if not all(w in set(tokens(it["title"])) or any(x.startswith(w) for x in tokens(it["title"])) for w in qt):
+            continue
+        p = it["price_eur"]
+        e: dict[str, Any] = {"item_id": it["item_id"], "title": it["title"], "price_eur": p,
+                             "vs_median_pct": None, "verdict": None, "rank_cheaper_than_pct": None}
+        if p and med and len(priced) >= MIN_COMPARABLE:
+            d = round((p - med) / med * 100)
+            e["vs_median_pct"] = d
+            e["verdict"] = "pricier" if d > 5 else "cheaper" if d < -5 else "in_market"
+            e["rank_cheaper_than_pct"] = round(100 * sum(1 for x in priced if x > p) / len(priced))
+        our_items.append(e)
+    res["ours"] = {"count": len(our_items), "items": our_items, "position_ru": None}
+    if our_items and our_items[0]["verdict"]:
+        e = our_items[0]
+        word = {"pricier": "дороже", "cheaper": "дешевле", "in_market": "около"}[e["verdict"]]
+        res["ours"]["position_ru"] = (f"наша цена {int(e['price_eur'])} € — {word} медианы {med} € "
+                                      f"({e['vs_median_pct']:+d} %), дешевле {e['rank_cheaper_than_pct']} % рынка")
+    rows.sort(key=lambda r: (r["price_eur"] is None, r["price_eur"] or 0))
+    res["listings"] = rows[:max(1, int(limit))]
+    # честный статус
+    n = len(priced)
+    h = res["data_health"]
+    if res["sources"]["live_error"] and not rows:
+        res["status"] = "source_unavailable"
+        res["message_ru"] = f"{res['sources']['live_error']}. В накопленных данных scout по «{q}» ничего нет."
+    elif not market:
+        res["status"] = "no_data"
+        res["message_ru"] = (f"По «{q}» в накопленных данных ничего нет — scout такой товар не ищет."
+                             + ("" if live else " Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч)."))
+    elif n < MIN_COMPARABLE:
+        res["status"] = "few_data"
+        res["message_ru"] = f"Мало данных: объявлений {len(market)}, с ценой {n} — цифры ориентировочные."
+    if res["status"] in ("ok", "few_data") and not live and h["stale"]:
+        res["message_ru"] = (res["message_ru"] + " " if res["message_ru"] else "") + \
+            f"Данные scout старые ({h['reason']})."
+    if res["sources"]["live_error"] and rows:
+        res["message_ru"] += f" Живая выдача недоступна: {res['sources']['live_error']}."
+    return res
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 
 STALE_MARKET_DAYS = 3  # рынок (scout) старше — советы по цене помечаются «протухшим рынком»
 

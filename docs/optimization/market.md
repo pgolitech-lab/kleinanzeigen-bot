@@ -100,3 +100,15 @@ LLM: `visibility_tips` и `repost_text` — Sonnet через `claude_utils.call
 - Снимки выдачи чистятся сами (раз в сутки при записи, > 120 дней) — DELETE только по своим таблицам `market_*`.
 - «Быстро ушло» (≤ 7 дней в выдаче) ≠ «продано»: перепосты конкурентов (тот же заголовок + PLZ) отсекаются, остальное — прокси.
 - Фото для дублей не сравниваются; аккаунт объявления без писем угадывается по PLZ нашего объявления с известным аккаунтом.
+
+## Поиск по товару (вкладка «Рынок»)
+`GET /api/ma/market/search?q=Werkbank&live=0|1&limit=40` → `ma.product_search(q, live, limit)`.
+Совпадение: в заголовке есть ВСЕ слова запроса (префикс тоже). Источник — рынок scout за 60 дн.; `live=1` добавляет
+публичную выдачу (≤ 2 стр., без логина, кэш 6 ч, в БД не пишется). Ответ:
+`status` ok | few_data | no_data | empty_query | source_unavailable + `message_ru` (показывать всегда);
+`suggestions[{query,label,ours}]` (быстрые чипы из наших товаров); `sources{db,live,live_error,live_asked}`;
+`data_health`; `total`, `n_active`; `price{min,p25,median,p75,max}` (без наших); `ours{count, items[{item_id,title,
+price_eur,vs_median_pct,verdict cheaper|pricier|in_market,rank_cheaper_than_pct}], position_ru}`;
+`cities[{city,plz_area,count,median_eur}]`, `regions[{plz_area,count,median_eur}]` (топ-10);
+`listings[{ad_id,title,price_eur,city,plz,url,age_days,posted_raw,active,ours,source db|live}]` (дешёвые первыми).
+no_data: кнопка «Искать на Kleinanzeigen» = повтор с live=1.
