@@ -37,16 +37,23 @@ logger = logging.getLogger(__name__)
 _CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
 # Строка уже отвечена/закрыта: перезапись черновика затёрла бы отправленный клиенту текст
 # (инцидент аудита №45: «Предложить» переводил sent → edited и затирал de_answer).
-_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "skipped", "skipped_sold", "archived"}
+_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "skipped_sold", "archived"}
+
+
+def _already_sent(row) -> bool:
+    """Клиенту уже ушло (или уходит) письмо по этой строке — включая строки, испорченные
+    до фикса (status edited, но sent_at/sent_message_id стоят)."""
+    keys = row.keys()
+    if row["status"] in {"sent", "sent_debug", "sending"}:
+        return True
+    return bool(("sent_at" in keys and row["sent_at"])
+                or ("sent_message_id" in keys and row["sent_message_id"]))
 
 
 def _is_answered(row) -> bool:
-    keys = row.keys()
-    if row["status"] in _ANSWERED_STATUSES:
-        return True
-    # edited/approved после отправки (уже испорченные строки) — по факту отправки
-    return bool(("sent_at" in keys and row["sent_at"])
-                or ("sent_message_id" in keys and row["sent_message_id"]))
+    """Черновик менять нельзя: отправлено или тред закрыт (продано/архив).
+    «Пропущено» (skipped) — можно: оператор передумал и хочет ответить."""
+    return row["status"] in _ANSWERED_STATUSES or _already_sent(row)
 
 
 def _ensure_draft_editable(row) -> None:
@@ -623,6 +630,10 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    # Повторная отправка уже ушедшего письма (в т.ч. строки, испорченные до фикса №45)
+    if _already_sent(row):
+        raise HTTPException(409, f"Письмо по этому сообщению уже отправлено ({row['status']}) — "
+                                 "повторно не шлём. Для нового ответа используйте «Написать».")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 

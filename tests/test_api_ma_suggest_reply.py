@@ -129,3 +129,28 @@ def test_draft_endpoints_refuse_sent_row(client):
         r = c.post(f"/api/ma/messages/42/{path}", json=body, headers=h)
         assert r.status_code == 409, path
     mdb.update_message.assert_not_called()
+
+
+def test_send_refuses_already_sent_row(client):
+    """Строка, испорченная до фикса (edited + sent_at), повторно клиенту не уходит."""
+    c, mdb, mtb, msched = client
+    mdb.get_message.return_value = _row(id=42, status="edited", sent_at="2026-10-19T10:00:00",
+                                        sent_message_id="<m>", gmail_thread_id="abc",
+                                        client_lang="de", de_answer="Hallo")
+    r = c.post("/api/ma/messages/42/send", json={"mode": "as_is"},
+               headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert r.status_code == 409
+    msched.send_one.assert_not_called()
+
+
+def test_suggest_allowed_after_skip(client):
+    """Оператор пропустил, потом передумал — черновик можно сделать."""
+    c, mdb, mtb, msched = client
+    skipped = _row(id=42, direction="in", gmail_thread_id="abc", status="skipped",
+                   sent_at=None, sent_message_id=None, ad_title="X", ad_price="1", ad_url=None,
+                   buyer_display_name="B", buyer_name="b@x.com", account_id=1)
+    mdb.thread_history.return_value = [skipped]
+    r = c.post("/api/ma/threads/abc/suggest-reply",
+               headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert r.status_code == 200
+    msched.regenerate_draft.assert_called_once_with(42, "regen")
