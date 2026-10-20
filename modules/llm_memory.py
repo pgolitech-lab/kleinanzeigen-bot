@@ -75,6 +75,8 @@ def lessons_for(msg_row: Any, limit: int = LESSONS_LIMIT) -> list[dict[str, Any]
     params = inspect.signature(db.find_relevant_lessons).parameters
     if "buyer_email" in params and "category" in params:
         kwargs.update(buyer_email=_rget(msg_row, "buyer_name"), category=ad_category(ad_id))
+    if "include_mined" in params:
+        kwargs["include_mined"] = True  # format_lessons выводит lesson_ru смайненных уроков
     else:
         _error_once("lessons_sig", "db.find_relevant_lessons без buyer_email/category (нет миграции db) — "
                                    "уроки ранжируются только по объявлению/аккаунту")
@@ -343,8 +345,10 @@ def learn_from_sent(
         good_answer_de=sent_client,
         lesson_ru=lesson["lesson_ru"],
         # идемпотентно (uq_lessons_source): повторная отправка/правка обновляет урок письма
+        source="operator_edit",           # db: source → source_type, фильтр find_relevant_lessons
         source_type="operator_edit",
         source_ref=str(message_id),
+        gmail_thread_id=_rget(row, "gmail_thread_id"),
         buyer_email=_rget(row, "buyer_name"),
         category=ad_category(_rget(row, "ad_id")),
     )

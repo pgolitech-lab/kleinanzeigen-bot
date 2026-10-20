@@ -5,8 +5,8 @@
 объявлениях разные relay-email Kleinanzeigen; покупатели без имени — по email). Для каждого —
 один вызов основной модели со всеми его тредами:
   * итог каждого треда (продано / сорвалось / замолчал / открыт), финальная цена;
-  * 0–2 обобщённых урока на тред → lessons (source_type='history_review',
-    source_ref='<thread>#<n>' — повтор обновляет, а не дублирует);
+  * 0–2 обобщённых урока на тред → lessons (source='mined',
+    source_ref='<thread>:<n>' — повтор обновляет, а не дублирует);
   * досье (кто, когда, о чём, цены, договорённости) → client_dossiers (db.upsert_client_dossier).
 
 Идемпотентно: человек пропускается, если досье уже учитывает его последнее письмо
@@ -244,8 +244,13 @@ def mine_person(person: dict[str, Any], model: str) -> dict[str, Any]:
 
 def needs_review(person: dict[str, Any]) -> bool:
     """Досье ещё нет или появились письма новее учтённых в нём."""
-    dossier = db.get_dossier(person["account_id"], person["name"]) if person["name"] else \
-        db.get_dossier_for_email(person["emails"][0])
+    dossier = None
+    for email in person["emails"]:
+        dossier = db.get_dossier_for_email(email)
+        if dossier is not None:
+            break
+    if dossier is None and person["name"]:
+        dossier = db.get_dossier(person["account_id"], person["name"])
     if dossier is None:
         return True
     return (_field(dossier, "dossier_max_msg_id") or 0) < person_max_id(person)
@@ -270,7 +275,7 @@ def write_result(res: dict[str, Any]) -> int:
                 message_id=last_in["id"], account_id=_field(last_in, "account_id"),
                 ad_id=_field(last_in, "ad_id"), client_lang=_field(last_in, "client_lang"),
                 client_situation_ru=ls.get("situation_ru"), lesson_ru=ls["lesson_ru"].strip(),
-                source_type="history_review", source_ref=f"{tid}#{n}",
+                source="mined", source_type="mined", source_ref=f"{tid}:{n}", gmail_thread_id=tid,
                 buyer_email=_field(last_in, "buyer_name"), outcome=t.get("outcome"),
                 category=llm_memory.ad_category(_field(last_in, "ad_id")),
             )
@@ -278,10 +283,11 @@ def write_result(res: dict[str, Any]) -> int:
                 raise RuntimeError(f"урок по треду {tid} не сохранён (см. лог llm_memory)")
             written += 1
     db.upsert_client_dossier(
-        person["account_id"], person["name"] or person["emails"][0],
-        res["data"]["dossier_ru"].strip(),
-        json.dumps(res["data"].get("facts") or {}, ensure_ascii=False),
-        [tid for tid, _ in res["by_ref"].values()], person["emails"], res["model"],
+        account_id=person["account_id"], display_name=person["name"],
+        summary_md=res["data"]["dossier_ru"].strip(),
+        facts_json=res["data"].get("facts") or {},
+        thread_ids=[tid for tid, _ in res["by_ref"].values()], emails=person["emails"],
+        model=res["model"], max_msg_id=res["max_id"],
     )
     return written
 
