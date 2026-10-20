@@ -4,10 +4,11 @@
 import concurrent.futures
 import hashlib
 import logging
-import subprocess
+import re
 import threading
 import time
 import zoneinfo
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -440,11 +441,11 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # Hourly мониторинг логов — alert в Telegram-группу если найдены ERROR/Traceback
+    # Мониторинг ошибок процесса — alert в Telegram если были ERROR/Traceback
     sched.add_job(
         monitor_errors_job,
         trigger="interval",
-        hours=1,
+        minutes=MONITOR_ERRORS_MINUTES,
         id="monitor_errors",
         replace_existing=True,
         max_instances=1,
@@ -536,6 +537,7 @@ _active_sched: BackgroundScheduler | None = None
 def start() -> BackgroundScheduler:
     """Поднять scheduler в фоне. Возвращает экземпляр для shutdown()."""
     global _active_sched
+    install_error_collector()
     # До старта джобов: строки, упавшие посреди SMTP, — в error_send_failed
     # (без переотправки — письмо могло уйти). Иначе висят в 'sending' вечно.
     try:
@@ -566,86 +568,111 @@ def start() -> BackgroundScheduler:
     return sched
 
 
-_REPORTED_ERROR_HASHES: set[str] = set()  # in-memory dedup; resets on restart
+# ---- Мониторинг ошибок -------------------------------------------------------
+# Раньше job читал `journalctl -p warning`, а Python-логи идут в журнал с
+# приоритетом info — фильтр отрезал всё, алерт не сработал ни разу. Теперь
+# ERROR/CRITICAL ловит свой logging-handler прямо в процессе (не зависит ни от
+# journald, ни от кольцевого log_buffer, который за час вытесняется INFO-шумом).
+
+ERROR_REALERT_SEC = 24 * 3600  # тот же тип ошибки — повторно не чаще раза в сутки
+MONITOR_ERRORS_MINUTES = 10
+_ERROR_SKIP_SUBSTRINGS = (
+    "Execution of job",  # apscheduler «уже бежит»
+    "Too many simultaneous connections",  # IMAP rate-limit, recovers автоматом
+)
+_ERRORS: "deque[tuple[float, str, str]]" = deque(maxlen=1000)  # (ts, сигнатура, пример)
+_ERRORS_LOCK = threading.Lock()
+_REPORTED_ERROR_HASHES: dict[str, float] = {}  # hash → когда алертили; in-memory
+
+
+def _error_signature(record: logging.LogRecord) -> tuple[str, str]:
+    """(сигнатура для дедупа, текст для алерта). Цифры в сигнатуре схлопнуты —
+    «msg=123» и «msg=456» один тип ошибки."""
+    try:
+        msg = record.getMessage()
+    except Exception:
+        msg = str(record.msg)
+    first = (msg.splitlines() or [""])[0][:200]
+    exc = ""
+    if record.exc_info and record.exc_info[0] is not None:
+        exc = f"{record.exc_info[0].__name__}: {str(record.exc_info[1])[:150]}"
+    text = f"{record.name}: {first}" + (f" — {exc}" if exc else "")
+    sig = re.sub(r"\d+", "N", f"{record.name}|{first[:120]}|{exc.split(':')[0]}")
+    return sig, text
+
+
+class _ErrorCollector(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            sig, text = _error_signature(record)
+            if any(skip in text for skip in _ERROR_SKIP_SUBSTRINGS):
+                return
+            with _ERRORS_LOCK:
+                _ERRORS.append((record.created, sig, text))
+        except Exception:
+            pass
+
+
+def install_error_collector() -> None:
+    """Повесить сборщик ERROR на root logger (идемпотентно) + логировать
+    необработанные исключения потоков (иначе Traceback уходит только в stderr)."""
+    root = logging.getLogger()
+    if not any(isinstance(h, _ErrorCollector) for h in root.handlers):
+        h = _ErrorCollector(level=logging.ERROR)
+        root.addHandler(h)
+
+    def _thread_hook(args: threading.ExceptHookArgs) -> None:
+        logging.getLogger("threading").error(
+            "Необработанное исключение в потоке %s",
+            args.thread.name if args.thread else "?",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    threading.excepthook = _thread_hook
 
 
 def monitor_errors_job() -> str:
-    """Раз в час: сканировать journalctl за последний час, постить в Telegram digest
-    если есть новые ERROR / Traceback / Exception (с дедупликацией по hash).
-
-    Резет дедупа происходит при рестарте сервиса — не страшно: тот же баг
-    максимум раз в день alert-нётся снова, и оператор поймёт что он не уходит.
-    """
-    try:
-        proc = subprocess.run(
-            ["journalctl", "-u", "kleinanzeigen-bot", "--since", "1 hour ago",
-             "--no-pager", "-p", "warning"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except Exception as e:
-        logger.warning("monitor_errors: journalctl failed: %s", e)
-        return f"journalctl exception: {e}"
-    if proc.returncode != 0:
-        return f"journalctl rc={proc.returncode}: {proc.stderr[:200]}"
-
-    skip_substrings = (
-        "apscheduler.scheduler: Execution of job",  # «уже бежит» — норма при долгих POP-ах
-        "Не пометили письмо прочитанным",  # часто игнорируемая ошибка mark_seen
-        "Too many simultaneous connections",  # IMAP rate-limit, recovers автоматом
-    )
-
-    interesting: list[str] = []
-    for line in proc.stdout.splitlines():
-        if not any(token in line for token in (" ERROR ", "Traceback", "raise ", "Exception:")):
-            continue
-        if any(skip in line for skip in skip_substrings):
-            continue
-        interesting.append(line)
-
-    if not interesting:
+    """Каждые MONITOR_ERRORS_MINUTES: новые ERROR/Traceback из процесса → digest в
+    Telegram. Дедуп по сигнатуре: тот же тип ошибки — не чаще раза в сутки."""
+    with _ERRORS_LOCK:
+        items = list(_ERRORS)
+        _ERRORS.clear()
+    if not items:
         return "ok, no issues"
 
-    # Группируем по первым ~120 chars после "[<pid>]: " — это и есть «сигнатура» ошибки
-    groups: dict[str, tuple[str, int]] = {}
-    for line in interesting:
-        idx = line.find("]: ")
-        sig = line[idx + 3 : idx + 130] if idx >= 0 else line[:130]
-        sig = sig.strip()
+    groups: dict[str, list] = {}  # hash → [пример, счётчик]
+    for _ts, sig, text in items:
         h = hashlib.sha1(sig.encode("utf-8", errors="replace")).hexdigest()[:12]
-        prev = groups.get(h, (sig, 0))
-        groups[h] = (prev[0], prev[1] + 1)
+        g = groups.setdefault(h, [text, 0])
+        g[1] += 1
 
-    new_groups = {h: v for h, v in groups.items() if h not in _REPORTED_ERROR_HASHES}
+    now = time.time()
+    new_groups = {h: v for h, v in groups.items()
+                  if now - _REPORTED_ERROR_HASHES.get(h, 0) > ERROR_REALERT_SEC}
     if not new_groups:
-        return f"{len(interesting)} errors, all already reported"
+        return f"{len(items)} errors, all already reported"
 
-    _REPORTED_ERROR_HASHES.update(new_groups.keys())
-
-    # Telegram digest — только новые группы
+    h_ = telegram_bot._html
     lines_out: list[str] = [
-        f"<b>⚠️ Найдены ошибки за последний час</b>",
-        f"<i>Всего: {len(interesting)}, новых типов: {len(new_groups)}</i>",
+        "<b>⚠️ Ошибки в работе бота</b>",
+        f"<i>Всего: {len(items)}, новых типов: {len(new_groups)}</i>",
     ]
-    for h, (sig, cnt) in list(new_groups.items())[:5]:
-        # Telegram parse_mode=HTML — экранируем угловые скобки
-        sig_html = (sig.replace("&", "&amp;")
-                       .replace("<", "&lt;")
-                       .replace(">", "&gt;"))
-        lines_out.append(f"\n<code>×{cnt}</code> {sig_html}")
+    for _h, (text, cnt) in list(new_groups.items())[:5]:
+        lines_out.append(f"\n<code>×{cnt}</code> {h_(text[:300])}")
     if len(new_groups) > 5:
         lines_out.append(f"\n…и ещё {len(new_groups) - 5} типов в логах")
 
     try:
-        telegram_bot._http_post("sendMessage", {
-            "chat_id": config.telegram_chat_id(),
-            "text": "\n".join(lines_out),
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        })
+        telegram_bot.notify("\n".join(lines_out))
     except Exception as e:
-        logger.exception("monitor_errors: telegram send failed")
+        # Не помечаем отправленными — попробуем в следующий раз. warning, а не
+        # exception: ERROR отсюда снова попал бы в сборщик и зациклил алерт.
+        logger.warning("monitor_errors: telegram send failed: %s", e)
+        with _ERRORS_LOCK:
+            _ERRORS.extend(items)
         return f"telegram send failed: {e}"
-
+    for h in new_groups:
+        _REPORTED_ERROR_HASHES[h] = now
     return f"posted {len(new_groups)} new error groups"
 
 
