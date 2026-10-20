@@ -1443,10 +1443,42 @@ def ma_sales(
 
 # ──────────────────────── DETECTED SALES (LLM-сканер) ────────────────────────
 
+_EVIDENCE_RU: dict[int, str] = {}  # перевод цитаты не меняется — кэш на процесс
+_EVIDENCE_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="evidence-ru")
+
+
+def _evidence_ru(evidence: "dict[int, str | None]") -> "dict[int, str | None]":
+    """Цитаты-доказательства продаж по-русски (QA S-04). Кириллица — как есть; остальное —
+    translate_only (Haiku) параллельно, с кэшем. Сбой перевода — None для этой цитаты + лог."""
+    out: dict[int, "str | None"] = {}
+    todo: dict[int, str] = {}
+    for det_id, text in evidence.items():
+        if not text or _mostly_cyrillic(text):
+            out[det_id] = text
+        elif det_id in _EVIDENCE_RU:
+            out[det_id] = _EVIDENCE_RU[det_id]
+        else:
+            todo[det_id] = text
+
+    def _tr(text: str) -> str:
+        res = claude.translate_only(text, target_lang="ru", source_lang=None)
+        return (res.get("translation") if isinstance(res, dict) else str(res)) or ""
+
+    futures = {det_id: _EVIDENCE_POOL.submit(_tr, text) for det_id, text in todo.items()}
+    for det_id, fut in futures.items():
+        try:
+            out[det_id] = _EVIDENCE_RU[det_id] = fut.result(timeout=60)
+        except Exception:
+            logger.exception("перевод цитаты найденной продажи #%s не удался", det_id)
+            out[det_id] = None
+    return out
+
+
 @router.get("/detected-sales")
 def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Список pending detections для review-экрана."""
     rows = db.list_pending_detections()
+    ru = _evidence_ru({r["id"]: r["evidence"] for r in rows})
     items: list[dict[str, Any]] = []
     for r in rows:
         ad_price_raw = r["thread_ad_price"]
@@ -1461,6 +1493,7 @@ def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, A
             "detected_ad_title": r["detected_ad_title"],
             "detected_sold_at": r["detected_sold_at"],
             "evidence": r["evidence"],
+            "evidence_ru": ru.get(r["id"]),
             "thread_ad_title": r["thread_ad_title"] or "(без названия)",
             "thread_ad_price": ad_price_raw,
             "thread_ad_price_eur": listed,

@@ -98,3 +98,20 @@ def test_dashboard_sold_today_from_list_sales(client):
     assert body["today"]["sold"] == 2
     t0, t1 = api_ma.berlin_day_bounds()
     assert mdb.list_sales.call_args_list[0].kwargs["period_from"] == t0
+
+
+def test_detected_sales_evidence_translated_and_cached(client):
+    c, mdb = client
+    from web import api_ma
+    api_ma._EVIDENCE_RU.clear()
+    det = dict(id=11, gmail_thread_id="t", confidence="high", sold_price_eur=300, detected_ad_title="X",
+               detected_sold_at=None, evidence="Ich nehme es für 300", thread_ad_title="X",
+               thread_ad_price="350 €", buyer_display_name="B", buyer_name="b", account_name="a")
+    det_ru = dict(det, id=12, evidence="Беру за 300")
+    mdb.list_pending_detections.return_value = [_row(**det), _row(**det_ru)]
+    with patch("web.api_ma.claude") as mcl:
+        mcl.translate_only.return_value = {"translation": "Беру за 300"}
+        items = c.get("/api/ma/detected-sales", headers=H()).json()["items"]
+        c.get("/api/ma/detected-sales", headers=H())
+    assert [i["evidence_ru"] for i in items] == ["Беру за 300", "Беру за 300"]
+    assert mcl.translate_only.call_count == 1  # кириллица не переводится, повтор — из кэша
