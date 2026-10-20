@@ -21,18 +21,20 @@ const GROUPS = [
   ]],
   ["Почта", [
     ["polling_paused", "Принимать письма", "check-inv"],
-    ["gmail_poll_interval_sec", "Проверять почту каждые, сек", "number"],
     ["inquiry_max_age_days", "Не отвечать на письма старше, дней", "number"],
-    ["gmail_from_filter", "Фильтр отправителя (служебное)", "text"],
   ]],
   ["Напоминания и торг", [
     ["reminders_enabled", "Предлагать напомнить молчащим покупателям", "check"],
     ["reminder_after_days", "Напоминать через, дней (0.5 = 12 ч)", "number"],
     ["max_discount_percent", "Максимальная скидка ИИ, %", "number"],
   ]],
-  ["Telegram и служебное", [
+  ["Telegram", [
     ["telegram_operator_dm_ids", "Операторы (Telegram ID через запятую)", "text"],
     ["telegram_admin_chat_id", "Служебный чат (Telegram ID — сюда идут ошибки и поломки)", "text"],
+  ]],
+  ["Расширенное (служебное, обычно не трогать)", [
+    ["gmail_poll_interval_sec", "Проверять почту каждые, сек", "number"],
+    ["gmail_from_filter", "Фильтр отправителя", "text"],
     ["telegram_authorized", "Кому можно открывать MA (ID через запятую)", "text"],
     ["claude_model", "Модель ИИ для черновиков", "text"],
     ["chat_font_em", "Размер шрифта чата в веб-морде, em", "text"],
@@ -110,7 +112,13 @@ export async function render(mount) {
       inp.addEventListener("input", () => set(key, inp.value));
       sec.append(l, inp);
     });
-    groups.appendChild(sec);
+    if (title.startsWith("Расширенное")) {
+      const det = el(`<details class="set-adv"><summary></summary></details>`);
+      det.querySelector("summary").textContent = title;
+      sec.querySelector("h3").remove();
+      det.appendChild(sec);
+      groups.appendChild(det);
+    } else groups.appendChild(sec);
   });
 
   saveBtn.addEventListener("click", async () => {

@@ -38,6 +38,10 @@ export function setLoading(mount, message = "Загрузка…") {
 export function setError(mount, message) {
   const card = el(`<div class="alert alert-danger" role="alert"><strong>Ошибка:</strong> <span class="msg"></span></div>`);
   card.querySelector(".msg").textContent = String(message ?? "");
+  // «Повторить» — перерисовать текущий экран (роутер слушает hashchange)
+  const rb = el(`<button class="btn retry-btn" type="button">🔄 Повторить</button>`);
+  rb.addEventListener("click", () => window.dispatchEvent(new HashChangeEvent("hashchange")));
+  card.appendChild(el(`<div class="retry-row"></div>`)).appendChild(rb);
   mount.replaceChildren(card);
 }
 
