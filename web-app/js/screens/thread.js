@@ -190,18 +190,29 @@ function dealStrip(data) {
   return strip;
 }
 
-// Связанные треды / «возможно тот же покупатель»
+// Связанные треды: точно он (тот же email) и «возможно тот же покупатель»
+// (то же имя в том же аккаунте — у Kleinanzeigen relay-почта своя на каждое объявление)
 function relatedCard(related) {
-  if (!related?.matches?.length) return null;
-  const box = el(`<div class="maybe-same"><div class="ms-ic"></div><div class="ms-t"><b>Этот покупатель уже писал</b><div class="ms-list"></div></div></div>`);
+  const exact = related?.matches ?? [], maybe = related?.maybe_same ?? [];
+  if (!exact.length && !maybe.length) return null;
+  const box = el(`<div class="maybe-same"><div class="ms-ic"></div><div class="ms-t"></div></div>`);
   box.querySelector(".ms-ic").appendChild(icon("warn"));
-  const list = box.querySelector(".ms-list");
-  related.matches.forEach(m => {
-    const a = el(`<a></a>`);
-    a.href = `#/thread/${encodeURIComponent(m.thread_id)}`;
-    a.textContent = `${m.ad_title ?? "?"} · ${m.ad_price ?? "?"} · ${berlinTime(m.last_at)}`;
-    list.appendChild(a);
-  });
+  const t = box.querySelector(".ms-t");
+  const group = (title, list) => {
+    if (!list.length) return;
+    const b = el(`<b></b>`);
+    b.textContent = title;
+    const l = el(`<div class="ms-list"></div>`);
+    list.forEach(m => {
+      const a = el(`<a></a>`);
+      a.href = `#/thread/${encodeURIComponent(m.thread_id)}`;
+      a.textContent = `${m.ad_title ?? "?"} · ${m.ad_price ?? "?"} · ${berlinTime(m.last_at)}`;
+      l.appendChild(a);
+    });
+    t.append(b, l);
+  };
+  group("Этот покупатель уже писал", exact);
+  group("Возможно, тот же покупатель", maybe);
   return box;
 }
 
