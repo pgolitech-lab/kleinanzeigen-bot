@@ -18,7 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 import config
 import database as db
-from modules import gmail, mail_queue, scout, telegram_bot
+from modules import gmail, mail_queue, scout, sla, telegram_bot
 
 logger = logging.getLogger(__name__)
 from modules.incoming import (  # noqa: F401
@@ -482,6 +482,18 @@ def build_scheduler() -> BackgroundScheduler:
         trigger="interval",
         minutes=30,
         id="reclean_bodies",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # SLA: напоминание оператору, если входящее ждёт ответа дольше порога
+    # (обычное — днём 30 мин, горячее — круглосуточно 10 мин; одно на письмо).
+    sched.add_job(
+        sla.sla_reminders_job,
+        trigger="interval",
+        minutes=sla.CHECK_MINUTES,
+        id="sla_reminders",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import config
 import database as db
-from modules import ad_brief, claude, guardrails, llm, llm_memory, parser, telegram_bot
+from modules import ad_brief, claude, guardrails, hot_buyer, llm, llm_memory, parser, telegram_bot
 from modules.outgoing import _row_get, _send_reply
 
 logger = logging.getLogger(__name__)
@@ -612,6 +612,56 @@ def _email_age_days(email: dict[str, Any]) -> Optional[float]:
 _LLM_LIMIT_NOTIFIED: Optional[str] = None
 
 
+def _save_hot(message_id: int, reason: str) -> None:
+    """Пометка в messages (is_hot / hot_reason — если колонки уже добавила db)."""
+    fields: dict[str, Any] = {}
+    if _messages_has_column("is_hot"):
+        fields["is_hot"] = 1
+    if _messages_has_column("hot_reason"):
+        fields["hot_reason"] = reason[:200]
+    if fields:
+        db.update_message(message_id, **fields)
+
+
+def _hot_heuristic(message_id: int, body: str) -> tuple[str, str]:
+    """Бесплатная эвристика до карточки; 'hot' сразу сохраняется (карточка покажет 🔥)."""
+    try:
+        verdict, why = hot_buyer.heuristic(body)
+        if verdict == "hot":
+            logger.info("Горячий покупатель msg=%s: %s", message_id, why)
+            _save_hot(message_id, why)
+        return verdict, why
+    except Exception:
+        logger.exception("hot_buyer.heuristic упал msg=%s — считаю не горячим", message_id)
+        return "no", ""
+
+
+def _hot_followup(message_id: int, thread_id: str, verdict: str, why: str, body: str,
+                  allow_llm: bool = True) -> None:
+    """После карточки: досмотреть сомнительное письмо Haiku и сообщить про 🔥 отдельно,
+    если карточка про пометку не знала (Haiku после карточки / нет колонки is_hot).
+    Никогда не бросает — письмо уже у оператора."""
+    try:
+        if verdict == "unsure" and allow_llm:
+            hot, reason = hot_buyer.classify(body)  # эвристика повторно + Haiku
+            if hot:
+                logger.info("Горячий покупатель msg=%s (после карточки): %s", message_id, reason)
+                _save_hot(message_id, reason)
+                _notify_hot(message_id, thread_id, reason)
+        elif verdict == "hot" and not _messages_has_column("is_hot"):
+            _notify_hot(message_id, thread_id, why)
+    except Exception:
+        logger.exception("hot follow-up упал msg=%s", message_id)
+
+
+def _notify_hot(message_id: int, thread_id: str, reason: str) -> None:
+    text = f"🔥 <b>Горячий покупатель</b> · #{message_id}\n{telegram_bot._html(reason)}"
+    try:
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+    except Exception:
+        logger.exception("Уведомление о горячем покупателе не ушло msg=%s", message_id)
+
+
 def _notify_llm_limit(message_id: int, thread_id: str, err: Exception) -> None:
     global _LLM_LIMIT_NOTIFIED
     if str(err) == _LLM_LIMIT_NOTIFIED:
@@ -1077,6 +1127,12 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         logger.exception("lessons_for упал для msg=%s — генерим без уроков", inserted_id)
         lessons_payload = []
 
+    # «Горячий покупатель» (решил купить / договаривается о самовывозе и оплате).
+    # До карточки — только бесплатная эвристика (пометка успевает в карточку 🔥);
+    # сомнительные письма Haiku досматривает ПОСЛЕ карточки (_hot_followup), чтобы
+    # LLM не задерживал доставку.
+    hot_verdict, hot_why = _hot_heuristic(inserted_id, body)
+
     # Проверим autopilot для треда — если активен, генерим Sonnet-ответ автоматически.
     # Иначе (manual flow) — Sonnet НЕ дёргаем, дешёво переводим incoming на RU
     # для читабельности и показываем state-0 карточку с кнопкой «🤖 Предложить ответ».
@@ -1148,6 +1204,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             logger.exception("autopilot dispatch упал для msg=%s", inserted_id)
             # Карточка оператору; не дошла — пробрасываем, очередь повторит письмо.
             _deliver_review(inserted_id)
+        # Автопилот отвечает сам — Haiku на сомнительные не тратим.
+        _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body, allow_llm=False)
         return
 
     # ───── Manual flow: дешёвый Haiku-перевод incoming → ru_client (для оператора).
@@ -1178,6 +1236,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             "Deferred review-card for msg=%s — thread %s busy",
             inserted_id, thread_id,
         )
+        _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body)
         return
 
     try:
@@ -1189,6 +1248,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         raise
     if late:
         _notify_late(inserted_id, thread_id, age_days, bool(autopilot and autopilot["active"]))
+    _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body)
 
 
 # Публичный алиас для импорта из scheduler.py

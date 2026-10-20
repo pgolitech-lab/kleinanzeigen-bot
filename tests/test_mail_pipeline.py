@@ -239,6 +239,9 @@ def inc(tmp_db, monkeypatch):
     monkeypatch.setattr(incoming.telegram_bot, "thread_is_busy", lambda tid: False)
     monkeypatch.setattr(incoming.parser, "parse_ad", lambda url: calls["parse_ad"].append(url) or {
         "title": "Sitzbank", "price": "100 €", "description": "gut", "seller_name": "S"})
+    # «Горячий покупатель»: в тестах без Haiku (сомнительные — не горячие)
+    monkeypatch.setattr(incoming.hot_buyer, "_ask_haiku",
+                        lambda text: (_ for _ in ()).throw(RuntimeError("no llm in tests")))
     monkeypatch.setattr(incoming.ad_brief, "generate_brief", lambda **kw: (_ for _ in ()).throw(RuntimeError("no")))
 
     def fake_send(row):
