@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Optional
 
-import anthropic
+from modules import llm
 
 import config
 from modules.claude_utils import _calc_cost
@@ -72,9 +72,6 @@ def generate_brief(
     Возвращает dict: {brief_md, key_facts (dict), tokens_in, tokens_out, cost_usd}.
     Бросает RuntimeError если не задан API ключ или пустой ответ.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ в настройках")
 
     if not ad_title and not ad_description:
         raise RuntimeError("Нет данных объявления для брифа (title и description пусты)")
@@ -111,7 +108,7 @@ def generate_brief(
         f"brief_md: 3-5 предложений на русском, краткое резюме."
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     response = client.messages.create(
         model=config.claude_model(),
         max_tokens=1500,

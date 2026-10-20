@@ -23,6 +23,9 @@ def _calc_cost(model: str, usage: Any) -> tuple[int, int, float]:
     """Подсчёт стоимости USD по usage из Anthropic SDK.
     Возвращает (input_tokens, output_tokens, cost_usd)."""
     p = PRICING.get(model, _FALLBACK_PRICE)
+    if getattr(usage, "subscription", False):
+        # Вызов через подписку Claude (modules/llm.py) — денег не списывает
+        p = {"in": 0.0, "out": 0.0, "cache_w": 0.0, "cache_r": 0.0}
     in_t = getattr(usage, "input_tokens", 0) or 0
     out_t = getattr(usage, "output_tokens", 0) or 0
     cw = getattr(usage, "cache_creation_input_tokens", 0) or 0
