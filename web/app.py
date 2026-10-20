@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 
 from web.api_ma import invalidate_pipeline_cache, resume_send_queue, router as ma_router
 from web.api_stock import router as stock_router
+from web.api_market import router as market_router
 
 # Документация OpenAPI наружу не нужна (и через туннель её не видно); локально — тоже лишнее
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ app.add_middleware(
 )
 app.include_router(ma_router)
 app.include_router(stock_router)
+app.include_router(market_router)
 
 
 # Через cloudflared-туннель (публичный адрес) наружу видны только Mini App API и /health.

@@ -219,3 +219,156 @@ def stock_link_sale(thread_id: str, body: LinkSaleBody, user: dict = Depends(ver
         raise HTTPException(404, "товар не найден")
     return _call(inventory.record_sale, product_id=body.product_id, gmail_thread_id=thread_id,
                  price_eur=body.price_eur, qty=body.qty, source="thread", created_by=_actor(user))
+
+
+# ── типы, стандартные себестоимости, комплекты, партии, «не склад», приход строкой ──
+
+@router.get("/stock/types")
+def stock_types(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Очередь «какой тип?» + справочник типов со стандартной себестоимостью."""
+    return {"questions": inventory.list_type_questions(), "table": inventory.category_cost_table()}
+
+
+class TypeBody(BaseModel):
+    product_id: int
+    category: str = Field(..., min_length=1, max_length=100)
+    unit_cost_eur: Optional[float] = Field(None, ge=0, lt=1_000_000)
+
+
+@router.post("/stock/types")
+def stock_set_type(body: TypeBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    if inv_db.get_product(body.product_id) is None:
+        raise HTTPException(404, "товар не найден")
+    return _call(inventory.set_type, body.product_id, body.category, unit_cost_eur=body.unit_cost_eur)
+
+
+class CategoryCostBody(BaseModel):
+    category: str = Field(..., min_length=1, max_length=100)
+    unit_cost_eur: Optional[float] = Field(None, ge=0, lt=1_000_000)  # null = убрать стандарт
+
+
+@router.put("/stock/category-costs")
+def stock_category_cost(body: CategoryCostBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    _call(inv_db.set_category_cost, body.category.strip(), body.unit_cost_eur, _actor(user))
+    return {"table": inventory.category_cost_table()}
+
+
+class KitComponent(BaseModel):
+    product_id: int
+    qty: int = Field(..., ge=1, le=1000)
+
+
+class KitBody(BaseModel):
+    components: list[KitComponent] = Field(default_factory=list, max_length=30)  # пусто = не комплект
+
+
+@router.put("/stock/products/{product_id}/kit")
+def stock_kit(product_id: int, body: KitBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    if inv_db.get_product(product_id) is None:
+        raise HTTPException(404, "товар не найден")
+    comps = [(c.product_id, c.qty) for c in body.components]
+    missing = [pid for pid, _ in comps if inv_db.get_product(pid) is None]
+    if missing:
+        raise HTTPException(404, f"товар не найден: {missing[0]}")
+    return {"stock": _call(inventory.set_kit, product_id, comps)}
+
+
+class BatchItem(BaseModel):
+    product_id: int
+    qty: int = Field(..., ge=1, le=100_000)
+
+
+class BatchBody(BaseModel):
+    items: list[BatchItem] = Field(..., min_length=1, max_length=50)
+    total_cost_eur: Optional[float] = Field(None, ge=0, lt=10_000_000)  # null = себестоимость неизвестна
+    occurred_at: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=500)
+
+
+@router.post("/stock/batches")
+def stock_batch(body: BatchBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    missing = [i.product_id for i in body.items if inv_db.get_product(i.product_id) is None]
+    if missing:
+        raise HTTPException(404, f"товар не найден: {missing[0]}")
+    return _call(inventory.receive_batch, [(i.product_id, i.qty) for i in body.items], body.total_cost_eur,
+                 occurred_at=body.occurred_at, note=body.note, created_by=_actor(user))
+
+
+class NonStockBody(BaseModel):
+    non_stock: bool = True
+
+
+@router.post("/stock/products/{product_id}/non-stock")
+def stock_non_stock(product_id: int, body: Optional[NonStockBody] = None,
+                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    if inv_db.get_product(product_id) is None:
+        raise HTTPException(404, "товар не найден")
+    _call(inventory.set_non_stock, product_id, (body or NonStockBody()).non_stock)
+    return {"product": _row(inv_db.get_product(product_id))}
+
+
+class ReceiptParseBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000)
+
+
+_RECEIPT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "items": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "product_id": {"type": ["integer", "null"], "description": "id из списка товаров или null"},
+                "title": {"type": "string"},
+                "qty": {"type": "integer"},
+            },
+            "required": ["product_id", "title", "qty"],
+            "additionalProperties": False,
+        }},
+        "total_cost_eur": {"type": ["number", "null"], "description": "общая сумма в евро или null"},
+    },
+    "required": ["items", "total_cost_eur"],
+    "additionalProperties": False,
+}
+
+
+@router.post("/stock/receipt/parse")
+def stock_receipt_parse(body: ReceiptParseBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Приход одной строкой («сиденья пассат 2шт, фаркоп 1, всего 150 €») → предпросмотр партии.
+    Ничего не пишет: оператор подтверждает, фронт шлёт POST /stock/batches. Разбор — Haiku по списку товаров.
+    items[].product_id = null — товар не распознан (создать/выбрать вручную)."""
+    from modules import llm
+    from modules.claude_utils import call_json, fast_model
+    products = [{"id": r["id"], "title": r["title"]} for r in inv_db.list_products()][:300]
+    try:
+        data, _meta = call_json(
+            label="приход строкой", model=fast_model(),
+            system="Ты разбираешь строку прихода на склад автозапчастей. Отвечаешь строго по схеме.",
+            user=("Разбери строку прихода: позиции, количество (по умолчанию 1) и общую сумму в евро, если названа. "
+                  "Для каждой позиции укажи id товара из списка, если он явно тот же; иначе null. "
+                  "Ничего не выдумывай.\n\nТовары:\n"
+                  + "\n".join(f"{p['id']}: {p['title']}" for p in products)
+                  + f"\n\nСтрока:\n{body.text.strip()}"),
+            schema=_RECEIPT_SCHEMA, max_tokens=800, effort=None)
+    except llm.LLMLimitError as e:
+        raise HTTPException(503, str(e))
+    except llm.LLMError as e:
+        logger.warning("разбор прихода не удался: %s", e)
+        raise HTTPException(502, f"LLM не ответил: {e}")
+    known = {p["id"] for p in products}
+    items = []
+    for it in data.get("items", []):
+        try:
+            qty = int(it["qty"]) if it.get("qty") is not None else 1
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        pid = it.get("product_id")
+        items.append({"product_id": pid if pid in known else None, "title": (it.get("title") or "").strip(),
+                      "qty": qty})
+    if not items:
+        raise HTTPException(422, "в строке не нашлось позиций")
+    items = items[:50]  # как лимит POST /stock/batches
+    total = data.get("total_cost_eur")
+    return {"items": items, "total_cost_eur": total if isinstance(total, (int, float)) and total >= 0 else None,
+            "unmatched": sum(1 for i in items if i["product_id"] is None)}
