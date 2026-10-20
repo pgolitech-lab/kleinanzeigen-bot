@@ -795,7 +795,7 @@ function renderThread(mount, params, data, opts = {}) {
         try { sessionStorage.removeItem(`kab:draft:${msgId}`); } catch (e) { /* ignore */ }
         render(mount, {...params, focus_msg_id: null}, {sendResult: res ?? {}});
       } catch (e) {
-        if (e.status === 409 && /уже отправлено/i.test(e.message)) {
+        if (e.status === 409 && /уже (отправлено|в очереди)/i.test(e.message)) {
           closeSheet();
           render(mount, {...params, focus_msg_id: null}, {conflictText: e.message});
           return;
@@ -909,6 +909,7 @@ function renderThread(mount, params, data, opts = {}) {
       await api(`/api/ma/messages/${msgId}/skip`, {method: "POST"});
       render(mount, params);
     } catch (e) {
+      if (e.status === 409) { toast("Уже пропущено", { ms: 3000 }); render(mount, params); return; }  // повтор — не ошибка
       toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 5000 });
     }
   }
