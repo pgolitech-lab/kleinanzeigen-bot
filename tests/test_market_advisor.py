@@ -480,7 +480,8 @@ def test_rule_repost_does_not_invent_facts():
           "features": ma.regex_features("Tisch Traveller")}
     r = ma._rule_repost(it, ["Original", "Leder", "Spacetourer"])
     assert "Top Zustand" not in r["title"] and "Original" not in r["title"] and "Spacetourer" not in r["title"]
-    assert r["title"] != "Tisch Traveller" and "описания нет" in r["warning"]
+    # тот же набор слов в другом порядке = дубль для площадки: готовый заголовок не предлагаем
+    assert r["title"] == "" and "описания нет" in r["warning"] and "придумайте свой" in r["warning"]
     it2 = {"title": "Tisch Traveller Peugeot", "description": "Original Tisch", "category": "tisch",
            "features": ma.regex_features("Tisch Traveller Peugeot", "Original Tisch")}
     assert "Original" in ma._rule_repost(it2, ["Original"])["title"]
@@ -524,3 +525,114 @@ def test_data_health_flags_stale_market(env):
     h = ma.data_health()
     assert "не обновлялся 10 дн." in h and "ни одного живого" in h
     assert ma.summary_lines()[0].startswith("Рынок:")
+
+
+# --- жёсткий прогон 2026-10-20 -------------------------------------------------------
+
+def _item(ma, title="Sitzbank Peugeot Traveller 3er Leder", desc="Sitzbank aus Leder, guter Zustand."):
+    return {"item_id": "k:abc", "title": title, "description": desc, "category": "sitzbank",
+            "features": ma.regex_features(title, desc)}
+
+
+def test_repost_text_contract_changes_ru_is_list(env, monkeypatch):
+    """Контракт с экраном: changes_ru — список строк, warning/source есть при любом источнике."""
+    _db, dbm, ma, _now = env
+    from modules import claude_utils
+    it = _item(ma)
+    rules = ma.repost_text(it, price_eur=100.0, use_llm=False)  # без LLM
+    assert isinstance(rules["changes_ru"], list) and rules["source"] == "rules" and rules["warning"]
+    monkeypatch.setattr(claude_utils, "call_json", lambda **kw: (
+        {"title": "Leder Sitzbank 3er Traveller", "description": "Neu formuliert.", "changes_ru": "новый порядок"}, {}))
+    llm = ma.repost_text(it, price_eur=100.0)
+    assert llm["source"] == "llm" and llm["changes_ru"] == ["новый порядок"] and "warning" in llm
+    cached = ma.repost_text(it, price_eur=100.0)
+    assert cached["source"] == "cache" and isinstance(cached["changes_ru"], list)
+    # старый кэш со строкой тоже нормализуется
+    dbm.cache_set("rep:legacy", "repost", {"title": "x", "description": "y", "changes_ru": "строка"})
+    assert ma._norm_text({"changes_ru": "строка"})["changes_ru"] == ["строка"]
+
+
+def test_repost_text_llm_down_always_warns_and_no_near_duplicate_title(env, monkeypatch):
+    _db, _dbm, ma, _now = env
+    from modules import claude_utils
+
+    def boom(**kw):
+        raise RuntimeError("нет подписки")
+    monkeypatch.setattr(claude_utils, "call_json", boom)
+    it = _item(ma, title="Sitzbank Traveller", desc="Sitzbank.")
+    t = ma.repost_text(it, price_eur=None)
+    assert t["source"] == "rules" and "LLM недоступен" in t["warning"]
+    assert t["title"] == "" and "придумайте свой" in t["warning"]  # перестановка слов — не новый заголовок
+    assert not ma._same_words(t["title"] or "x", it["title"])
+
+
+def test_repost_cache_tied_to_description_hash(env, monkeypatch):
+    _db, _dbm, ma, _now = env
+    from modules import claude_utils
+    calls = []
+
+    def fake(**kw):
+        calls.append(1)
+        return {"title": f"T{len(calls)} Sitzbank Leder", "description": f"D{len(calls)}", "changes_ru": "x"}, {}
+    monkeypatch.setattr(claude_utils, "call_json", fake)
+    a = ma.repost_text(_item(ma), price_eur=1.0, missing_terms=["A"])
+    # те же заголовок/описание, но другие слова лидеров -> ключ rep: промах, rep_last по тексту — попадание
+    b = ma.repost_text(_item(ma), price_eur=1.0, missing_terms=["B"])
+    assert b["source"] == "cache" and b["title"] == a["title"]
+    # описание поправили -> старый текст не отдаём
+    c = ma.repost_text(_item(ma, desc="Совсем другое описание Sitzbank, Leder, Top."), price_eur=1.0, missing_terms=["C"])
+    assert c["source"] == "llm" and c["description"] == "D2"
+
+
+def test_health_info_and_stale_marks_price_advice(env):
+    db_mod, _dbm, ma, now = env
+    h = ma.health_info()
+    assert h["stale"] and h["age_days"] is None and h["reason"]
+    add_msg(db_mod, ad_id="9000000001", title="Sitzbank Traveller", price="100 €", created_at=_iso(now, 1))
+    _seed_market(env)
+    assert ma.health_info()["stale"] is False
+    with db_mod.get_conn() as conn:
+        conn.execute("UPDATE scout_listings SET last_seen_at=?", (_iso(now, 9),))
+    h = ma.health_info()
+    assert h["stale"] and h["age_days"] >= 9 and "не обновлялся" in h["reason"] and h["scout_last_run"]
+    adv = ma.advise_price(ad_id="9000000001")
+    assert adv["market_stale"] and "не обновлялся" in adv["verdict_ru"]
+    for k in ("duplicates_report", "rank_report"):
+        assert "data_health" in getattr(ma, k)()
+
+
+def test_min_price_note_explains_cost_floor_above_market(env, monkeypatch):
+    _db, _dbm, ma, _now = env
+    _seed_market(env)
+    orig = ma.own_items
+
+    def with_cost(ctx=None, include_gone=False):
+        items = orig(ctx, include_gone)
+        for it in items:
+            it["unit_cost_eur"] = 1500.0
+        return items
+    monkeypatch.setattr(ma, "own_items", with_cost)
+    r = ma.advise_price(ad_id="9000000001")
+    assert r["cost_floor_eur"] == 1800 and "себестоимость 1500" in r["min_note_ru"]
+    assert "выше рынка" in r["min_note_ru"] and r["recommended_note_ru"]
+
+
+def test_partial_rank_run_is_not_success_nor_missing(env, monkeypatch):
+    db_mod, dbm, ma, now = env
+    _seed_market(env)
+    dbm.upsert_market_query("sitzbank traveller")
+    from modules import scout
+    monkeypatch.setattr(ma.time, "sleep", lambda s: None)
+    monkeypatch.setattr(ma, "sync_market_queries", lambda: {"added": [], "untracked": []})
+
+    def fake_scrape(client, q, page_delay_sec=0, browser=None, stats=None):
+        stats["pages"] = 2
+        stats["partial_error"] = "стр. 3 не загрузилась"
+        return [dict(serp_row(f"71000{i:05d}", i, title="Sitzbank Traveller"), kind="part", query_id=5, url="u")
+                for i in range(1, 51)]
+    monkeypatch.setattr(scout, "scrape_query", fake_scrape)
+    r = ma.run_rank_check(force=True, page_delay=(0, 0))
+    assert r["ran"] == 0 and r["partial"] == 1 and any("стр. 3" in e for e in r["errors"])
+    # нашего объявления в частичной выдаче нет — «пропало» писать нельзя
+    rep = ma.rank_report(ad_id="9000000001")["items"][0]
+    assert rep["status"] != "missing"
