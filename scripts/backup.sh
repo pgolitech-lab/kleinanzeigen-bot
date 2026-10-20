@@ -10,7 +10,8 @@
 #      недельный, если последнему больше 6 дней). Имя = дата (kleinanzeigen-YYYYMMDD.db.zst),
 #      считаем по числу файлов, а не по mtime:
 #      если NUC неделю был выключен, старые снимки не исчезнут разом.
-#   5. rclone copy новых файлов в onedrive:kleinanzeigen-bot-backup/{daily,weekly}/ — только
+#   5. Шифрование age публичным ключом (~/.config/kab-backup/age.pub) + проверка расшифровкой;
+#      rclone copy .db.zst.age в onedrive:kleinanzeigen-bot-backup/{daily,weekly}/ — только
 #      добавление; старое на той стороне чистится по возрасту (--min-age), поэтому даже
 #      потеря локальной папки не сотрёт облачные копии.
 # Любой провал шага → exit 1 (юнит в failed) + уведомление в Telegram (scripts/notify.sh).
@@ -25,6 +26,10 @@ KEEP_WEEKLY="${KAB_BACKUP_KEEP_WEEKLY:-8}"
 # В облаке держим чуть дольше локального (запас на выключенный NUC)
 REMOTE_DAILY_AGE="${KAB_BACKUP_REMOTE_DAILY_AGE:-21d}"
 REMOTE_WEEKLY_AGE="${KAB_BACKUP_REMOTE_WEEKLY_AGE:-70d}"
+# Шифрование для облака (age): публичным ключом шифруем, приватным — проверяем расшифровку.
+# В облако НИКОГДА не уходит незашифрованный файл: нет ключа/age → бэкап в облако падает.
+AGE_RECIPIENTS="${KAB_BACKUP_AGE_RECIPIENTS:-/home/pg/.config/kab-backup/age.pub}"
+AGE_IDENTITY="${KAB_BACKUP_AGE_KEY:-/home/pg/.config/kab-backup/age.key}"
 NOTIFY="$(dirname "$(readlink -f "$0")")/notify.sh"
 # Метка последнего ПОЛНОГО успеха (снимок + облако): строка 1 — unix-время, 2 — имя файла,
 # 3 — remote. Читают /health (поле backup_age_sec, api) и bot_health.sh (алерт > 26 ч).
@@ -54,7 +59,25 @@ umask 077
 [ -r "$SRC" ] || fail "нет БД $SRC"
 for bin in sqlite3 zstd; do command -v "$bin" >/dev/null || fail "не установлен $bin"; done
 [ -n "$REMOTE" ] || log "WARN: KAB_BACKUP_REMOTE пуст — копии в облако не будет, только локально"
-[ -z "$REMOTE" ] || command -v rclone >/dev/null || fail "не установлен rclone (sudo apt install rclone)"
+if [ -n "$REMOTE" ]; then
+  command -v rclone >/dev/null || fail "не установлен rclone (sudo apt install rclone)"
+  command -v age >/dev/null || fail "не установлен age (sudo apt install age) — без шифрования в облако не шлю"
+  grep -qE '^age1[0-9a-z]+$' "$AGE_RECIPIENTS" 2>/dev/null \
+    || fail "нет публичного ключа age в $AGE_RECIPIENTS — без шифрования в облако не шлю"
+  [ -r "$AGE_IDENTITY" ] || fail "нет приватного ключа age $AGE_IDENTITY — не могу проверить, что бэкап расшифровывается"
+fi
+
+# Шифрует $1 → $2 и проверяет: расшифровка приватным ключом даёт целый zstd-архив
+# с тем же содержимым. Любая ошибка — fail (алерт), в облако ничего не уходит.
+encrypt_verify() {
+  local src="$1" dst="$2"
+  age -e -R "$AGE_RECIPIENTS" -o "$dst" "$src" 2>"$WORK/age_err" \
+    || fail "шифрование age упало: $(head -c 300 "$WORK/age_err")"
+  [ -s "$dst" ] || fail "шифрование age дало пустой файл"
+  if ! age -d -i "$AGE_IDENTITY" "$dst" 2>"$WORK/age_err" | cmp -s - "$src"; then
+    fail "зашифрованный бэкап не расшифровывается в исходный: $(head -c 300 "$WORK/age_err")"
+  fi
+}
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/kab-backup.XXXXXX") || fail "mktemp не удался"
 trap 'rm -rf "$WORK"' EXIT
@@ -89,6 +112,8 @@ fi
 if [ "$DRY" = 1 ]; then
   log "[dry-run] снимок ок: messages=$rows, $size → $DEST/daily/$NAME.zst$([ $need_weekly = 1 ] && echo " (+ weekly/)")"
   if [ -n "$REMOTE" ]; then
+    encrypt_verify "$SNAP.zst" "$WORK/$NAME.zst.age"
+    log "[dry-run] шифрование age ок ($(du -h "$WORK/$NAME.zst.age" | cut -f1)), расшифровка совпала"
     if timeout 120 rclone lsjson "$REMOTE" --max-depth 1 >/dev/null 2>"$WORK/rclone_err" \
        || grep -qi "directory not found" "$WORK/rclone_err"; then
       log "[dry-run] rclone: $REMOTE доступен, скопировал бы туда"
@@ -120,23 +145,46 @@ prune() {
 prune "$DEST/daily" "$KEEP_DAILY"
 prune "$DEST/weekly" "$KEEP_WEEKLY"
 
-# 5. Облако
+# 5. Облако — только зашифрованное (.db.zst.age). Локальные снимки остаются .db.zst:
+#    на NUC и так лежит открытая БД, шифрование локальных копий защиты не добавит.
+PURGE_ERR=""
 if [ -n "$REMOTE" ]; then
+  ENC="$WORK/enc"
+  mkdir -p "$ENC/daily" "$ENC/weekly" || fail "mktemp для шифрования не удался"
+  encrypt_verify "$OUT" "$ENC/daily/$NAME.zst.age"
+  # Недельный: самый свежий локальный weekly, если его зашифрованной копии в облаке ещё нет
+  # (так облако догоняет и после включения шифрования, и после сбоя прошлой выгрузки).
+  WEEKLY_LAST=$(find "$DEST/weekly" -maxdepth 1 -name 'kleinanzeigen-*.db.zst' -printf '%f\n' | sort -r | head -1)
+  if [ -n "$WEEKLY_LAST" ] && ! timeout 120 rclone lsf "$REMOTE/weekly" --include "$WEEKLY_LAST.age" 2>/dev/null \
+      | grep -qx "$WEEKLY_LAST.age"; then
+    if [ "$WEEKLY_LAST.age" = "$NAME.zst.age" ]; then
+      cp -p "$ENC/daily/$NAME.zst.age" "$ENC/weekly/"
+    else
+      encrypt_verify "$DEST/weekly/$WEEKLY_LAST" "$ENC/weekly/$WEEKLY_LAST.age"
+    fi
+  fi
   for kind in daily weekly; do
-    if ! timeout 900 rclone copy "$DEST/$kind" "$REMOTE/$kind" --include 'kleinanzeigen-*.db.zst' \
+    [ -n "$(ls -A "$ENC/$kind")" ] || continue
+    if ! timeout 900 rclone copy "$ENC/$kind" "$REMOTE/$kind" --include 'kleinanzeigen-*.db.zst.age' \
         --retries 3 --low-level-retries 10 2>"$WORK/rclone_err"; then
       fail "локально сохранён $OUT, но rclone copy в $REMOTE/$kind упал: $(tail -c 300 "$WORK/rclone_err")"
     fi
   done
   # Проверка, что сегодняшний файл реально лежит в облаке (rclone copy мог «успеть» не всё)
-  if ! timeout 120 rclone lsf "$REMOTE/daily" --include "$NAME.zst" 2>/dev/null | grep -qx "$NAME.zst"; then
-    fail "rclone copy вернул успех, но $NAME.zst в $REMOTE/daily не видно"
+  if ! timeout 120 rclone lsf "$REMOTE/daily" --include "$NAME.zst.age" 2>/dev/null | grep -qx "$NAME.zst.age"; then
+    fail "rclone copy вернул успех, но $NAME.zst.age в $REMOTE/daily не видно"
   fi
-  timeout 300 rclone delete "$REMOTE/daily" --min-age "$REMOTE_DAILY_AGE" --include 'kleinanzeigen-*.db.zst' 2>"$WORK/rclone_err" \
+  # Незашифрованные копии в облаке (бэкапы до включения шифрования) — удалить
+  if ! timeout 300 rclone delete "$REMOTE" --include 'kleinanzeigen-*.db.zst' 2>"$WORK/rclone_err"; then
+    PURGE_ERR="не удалось удалить незашифрованные копии в $REMOTE: $(tail -c 200 "$WORK/rclone_err")"
+  elif timeout 120 rclone lsf -R --files-only "$REMOTE" --include 'kleinanzeigen-*.db.zst' 2>/dev/null | grep -q .; then
+    PURGE_ERR="в $REMOTE остались незашифрованные копии *.db.zst"
+  fi
+  timeout 300 rclone delete "$REMOTE/daily" --min-age "$REMOTE_DAILY_AGE" --include 'kleinanzeigen-*.db.zst.age' 2>"$WORK/rclone_err" \
     || log "WARN: чистка старых в $REMOTE/daily не удалась: $(tail -c 200 "$WORK/rclone_err")"
-  timeout 300 rclone delete "$REMOTE/weekly" --min-age "$REMOTE_WEEKLY_AGE" --include 'kleinanzeigen-*.db.zst' 2>"$WORK/rclone_err" \
+  timeout 300 rclone delete "$REMOTE/weekly" --min-age "$REMOTE_WEEKLY_AGE" --include 'kleinanzeigen-*.db.zst.age' 2>"$WORK/rclone_err" \
     || log "WARN: чистка старых в $REMOTE/weekly не удалась: $(tail -c 200 "$WORK/rclone_err")"
-  log "OK: в облаке $REMOTE/daily/$NAME.zst"
+  log "OK: в облаке $REMOTE/daily/$NAME.zst.age (зашифрован age)"
 fi
 
 # 6. Метка успеха — атомарно (tmp + mv), чтобы читатель не увидел полстроки
@@ -147,4 +195,6 @@ if ! { printf '%s\n%s\n%s\n' "$(date +%s)" "$NAME.zst" "${REMOTE:-local-only}" >
   rm -f "$tmp"
   fail "бэкап сделан, но метка $MARKER не записана — /health будет считать бэкап старым"
 fi
+# Бэкап есть (метка записана), но открытые копии в облаке — повод для алерта
+[ -z "$PURGE_ERR" ] || fail "$PURGE_ERR"
 exit 0
