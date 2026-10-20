@@ -8,12 +8,15 @@ existing scheduler.* helpers — никакой бизнес-логики.
 from __future__ import annotations
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
+import hashlib
 import json
 import re
+import threading
+import time
 
 import database as db
 import config
@@ -42,58 +45,98 @@ def ma_health(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     }
 
 
-def _row_to_pipeline_item(row: Any, autopilot_row: Any) -> dict[str, Any]:
-    """Конвертация row из db.pipeline_threads + autopilot lookup в API-форму."""
-    is_autopilot = False
-    if autopilot_row is not None:
-        try:
-            is_autopilot = bool(autopilot_row["active"])
-        except (KeyError, IndexError):
-            is_autopilot = False
+# Превью письма в карточке инбокса — фронт показывает ~110 символов; полный текст — в треде
+_PIPELINE_PREVIEW_CHARS = 200
+
+# Короткий кэш pipeline_threads: дашборд MA параллельно грузит /dashboard и /pipeline —
+# один тяжёлый запрос на двоих. Любой POST /api/ma/* сбрасывает кэш (web/app.py).
+_PIPELINE_TTL_SEC = 3.0
+_pipeline_cache: dict[str, Any] = {"rows": None, "at": 0.0}
+_pipeline_lock = threading.Lock()
+
+
+def invalidate_pipeline_cache() -> None:
+    with _pipeline_lock:
+        _pipeline_cache["rows"] = None
+
+
+def _pipeline_rows() -> list:
+    with _pipeline_lock:
+        if _pipeline_cache["rows"] is None or time.monotonic() - _pipeline_cache["at"] > _PIPELINE_TTL_SEC:
+            _pipeline_cache["rows"] = db.pipeline_threads()
+            _pipeline_cache["at"] = time.monotonic()
+        return _pipeline_cache["rows"]
+
+
+def _active_autopilot_threads(rows: list) -> set[str]:
+    """Треды с активным автопилотом. Если db отдаёт колонку autopilot_active (JOIN) — берём её,
+    иначе один запрос на все треды (а не get_thread_autopilot на каждый)."""
+    if rows and "autopilot_active" in rows[0].keys():
+        return {r["gmail_thread_id"] for r in rows if r["autopilot_active"]}
+    with db.get_conn() as conn:
+        return {r["gmail_thread_id"] for r in conn.execute(
+            "SELECT gmail_thread_id FROM thread_autopilot WHERE active=1").fetchall()}
+
+
+def _preview(text: "str | None") -> "str | None":
+    if not text:
+        return text
+    t = " ".join(text.split())
+    return t if len(t) <= _PIPELINE_PREVIEW_CHARS else t[:_PIPELINE_PREVIEW_CHARS] + "…"
+
+
+def _row_to_pipeline_item(row: Any, is_autopilot: bool) -> dict[str, Any]:
+    """Конвертация row из db.pipeline_threads в API-форму."""
+    keys = row.keys()
     return {
         "thread_id": row["gmail_thread_id"],
         "msg_id": row["id"],
         "ad_title": row["ad_title"],
         "ad_price": row["ad_price"],
-        "ad_url": row["ad_url"] if "ad_url" in row.keys() else None,
+        "ad_url": row["ad_url"] if "ad_url" in keys else None,
         "buyer_display_name": row["buyer_display_name"],
-        "deal_brief_json": row["deal_brief_json"] if "deal_brief_json" in row.keys() else None,
+        "deal_brief_json": row["deal_brief_json"] if "deal_brief_json" in keys else None,
         "last_event_at": row["last_event_at"],
         "last_event_kind": row["last_event_kind"],
         "pending_drafts_count": row["pending_drafts_count"],
         "is_autopilot": is_autopilot,
-        "account_id": row["account_id"] if "account_id" in row.keys() else None,
-        "ru_client": row["ru_client"] if "ru_client" in row.keys() else None,
-        "is_pinned": bool(row["is_pinned"]) if "is_pinned" in row.keys() else False,
-        "operator_unread": bool(row["operator_unread"]) if "operator_unread" in row.keys() else False,
+        "account_id": row["account_id"] if "account_id" in keys else None,
+        "ru_client": _preview(row["ru_client"]) if "ru_client" in keys else None,
+        "is_pinned": bool(row["is_pinned"]) if "is_pinned" in keys else False,
+        "operator_unread": bool(row["operator_unread"]) if "operator_unread" in keys else False,
     }
 
 
 @router.get("/pipeline")
-def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, list]:
-    """Pipeline активных тредов: разделение на red (ждут нас) / green (ждём клиента).
+def ma_pipeline(request: Request, user: dict = Depends(verify_init_data_dep)) -> Response:
+    """Pipeline активных тредов: pinned / red (ждут нас) / green (ждём клиента).
 
     Сортировка внутри секции — DESC по last_event_at (новые сверху).
+    ETag: если ничего не изменилось — 304 без тела (экран опрашивается часто).
     """
-    rows = db.pipeline_threads()
+    rows = _pipeline_rows()
+    autopilot = _active_autopilot_threads(rows)
     pinned: list[dict[str, Any]] = []
     red: list[dict[str, Any]] = []
     green: list[dict[str, Any]] = []
     for row in rows:
-        thread_id = row["gmail_thread_id"]
-        autopilot_row = db.get_thread_autopilot(thread_id)
-        item = _row_to_pipeline_item(row, autopilot_row)
+        item = _row_to_pipeline_item(row, row["gmail_thread_id"] in autopilot)
         if item["is_pinned"]:
             pinned.append(item)
         elif item["last_event_kind"] == "in":
             red.append(item)
         else:
             green.append(item)
-    pinned.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
-    red.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
-    green.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
+    for section in (pinned, red, green):
+        section.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
     accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
-    return {"pinned": pinned, "red": red, "green": green, "accounts": accounts}
+    body = json.dumps({"pinned": pinned, "red": red, "green": green, "accounts": accounts},
+                      ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    etag = '"' + hashlib.sha1(body).hexdigest() + '"'
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if etag in (request.headers.get("if-none-match") or ""):
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
 
 
 from fastapi import HTTPException
@@ -1419,7 +1462,7 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     from datetime import datetime, timedelta
 
     # --- pipeline ---
-    rows = db.pipeline_threads()
+    rows = _pipeline_rows()
     red = green = drafts = 0
     for r in rows:
         keys = r.keys()
