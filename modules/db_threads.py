@@ -662,6 +662,8 @@ def pipeline_threads() -> list[sqlite3.Row]:
       - last_event_at: время последнего события (in.created_at или out.sent_at)
       - last_event_kind: 'in' или 'out' — кто говорил последним по времени
       - pending_drafts_count: сколько in-row ждут ревью оператора
+      - has_queued_send / queued_msg_id: ответ в отложенной отправке (status='send_queued');
+        это НЕ «отвечено» — last_event_kind остаётся 'in', last_event_state = 'queued'
 
     Сортировка по last_event_at ASC — самые старые наверху (дольше висят, выше срочность).
     """
@@ -704,7 +706,9 @@ def pipeline_threads() -> list[sqlite3.Row]:
                         THEN 1 ELSE 0 END) AS real_sent_count,
                SUM(CASE WHEN direction = 'in'
                          AND status IN ('pending', 'new', 'edited', 'approved')
-                        THEN 1 ELSE 0 END) AS pending_drafts_count
+                        THEN 1 ELSE 0 END) AS pending_drafts_count,
+               -- Отложенная отправка (MA «отправить через N с»): ещё НЕ ответ клиенту
+               MAX(CASE WHEN status = 'send_queued' THEN id END) AS queued_msg_id
         FROM messages
         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
         GROUP BY gmail_thread_id
@@ -737,6 +741,12 @@ def pipeline_threads() -> list[sqlite3.Row]:
            CASE WHEN COALESCE(c.any_sent_count, 0) > 0 THEN 1 ELSE 0 END   AS has_any_sent,
            CASE WHEN COALESCE(c.real_sent_count, 0) > 0 THEN 1 ELSE 0 END  AS has_real_reply,
            CASE WHEN COALESCE(c.pending_drafts_count, 0) > 0 THEN 1 ELSE 0 END AS has_pending_draft,
+           CASE WHEN c.queued_msg_id IS NOT NULL THEN 1 ELSE 0 END AS has_queued_send,
+           c.queued_msg_id                       AS queued_msg_id,
+           -- Состояние последнего события: 'queued' — наш ответ стоит в очереди
+           -- (last_event_kind при этом остаётся 'in': клиенту ещё не ответили).
+           CASE WHEN c.queued_msg_id IS NOT NULL THEN 'queued'
+                ELSE le.last_event_kind END      AS last_event_state,
            COALESCE(f.is_pinned, 0)       AS is_pinned,
            COALESCE(f.operator_unread, 0) AS operator_unread,
            -- Автопилот прямо в строке (раньше API делал get_thread_autopilot на тред).
@@ -751,7 +761,8 @@ def pipeline_threads() -> list[sqlite3.Row]:
     LEFT JOIN thread_autopilot ta ON ta.gmail_thread_id = li.gmail_thread_id
     WHERE (COALESCE(c.any_sent_count, 0) > 0
            OR COALESCE(c.pending_drafts_count, 0) > 0
-           OR li.status IN ('pending', 'new', 'edited', 'approved'))
+           OR c.queued_msg_id IS NOT NULL
+           OR li.status IN ('pending', 'new', 'edited', 'approved', 'send_queued'))
       -- Исключаем закрытые оператором треды (кнопка «🏁 Завершить беседу»)
       AND NOT EXISTS (
           SELECT 1 FROM closed_threads ct
