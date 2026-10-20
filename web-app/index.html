@@ -13,41 +13,48 @@
   {
     "imports": {
       "./js/api.js": "./js/api.js?v=14728329-15275226",
-      "./js/app.js": "./js/app.js?v=5747132-9650466",
+      "./js/app.js": "./js/app.js?v=16515698-9170748",
       "./js/components/autopilot-form.js": "./js/components/autopilot-form.js?v=9514691-2537828",
       "./js/components/backbar.js": "./js/components/backbar.js?v=10331458-8454477",
       "./js/components/compose-form.js": "./js/components/compose-form.js?v=8743720-13286399",
       "./js/components/edit-form.js": "./js/components/edit-form.js?v=917898-1439217",
       "./js/components/sheet.js": "./js/components/sheet.js?v=13318367-5329084",
-      "./js/components/tabbar.js": "./js/components/tabbar.js?v=11312638-15508709",
-      "./js/router.js": "./js/router.js?v=12603784-2510336",
+      "./js/components/tabbar.js": "./js/components/tabbar.js?v=1314091-15217084",
+      "./js/layout.js": "./js/layout.js?v=4314302-10110056",
+      "./js/router.js": "./js/router.js?v=13450148-5341006",
       "./js/screens/client.js": "./js/screens/client.js?v=8210613-15032216",
       "./js/screens/clients.js": "./js/screens/clients.js?v=16270049-7652819",
       "./js/screens/dashboard.js": "./js/screens/dashboard.js?v=14345810-12446414",
       "./js/screens/detected.js": "./js/screens/detected.js?v=8130881-5563827",
-      "./js/screens/pipeline.js": "./js/screens/pipeline.js?v=15721574-1183840",
+      "./js/screens/more.js": "./js/screens/more.js?v=16669754-12406467",
+      "./js/screens/pipeline.js": "./js/screens/pipeline.js?v=11976812-8746975",
       "./js/screens/review.js": "./js/screens/review.js?v=12795989-14958321",
       "./js/screens/sales.js": "./js/screens/sales.js?v=7023493-1517540",
       "./js/screens/scout.js": "./js/screens/scout.js?v=6949860-12582826",
-      "./js/screens/settings.js": "./js/screens/settings.js?v=364607-4193851",
+      "./js/screens/settings.js": "./js/screens/settings.js?v=15039419-10601025",
       "./js/screens/thread.js": "./js/screens/thread.js?v=6639969-8963931",
       "./js/tg.js": "./js/tg.js?v=12335388-12218859",
+      "./js/theme.js": "./js/theme.js?v=11779646-865610",
       "./js/utils.js": "./js/utils.js?v=14425686-7265429"
     }
   }
   </script>
 
-  <link rel="stylesheet" href="css/app.css?v=11203962-15603274">
+  <link rel="stylesheet" href="css/app.css?v=1985695-5297807">
 </head>
 <body>
-  <header id="hd">
-    <button class="hback d-none" aria-label="Назад">←</button>
-    <h1 id="htitle">Kleinanzeigen Bot</h1>
-  </header>
-  <main id="app">
-    <p class="muted">Загрузка...</p>
-  </main>
+  <div id="shell">
+    <header id="hd">
+      <button class="hback d-none" aria-label="Назад">←</button>
+      <h1 id="htitle">Kleinanzeigen Bot</h1>
+    </header>
+    <main id="app">
+      <section class="pane pane-list" aria-label="Список"></section>
+      <section class="pane pane-main"><p class="muted">Загрузка...</p></section>
+    </main>
+    <!-- таб-бар монтирует js/components/tabbar.js -->
+  </div>
 
-  <script type="module" src="js/app.js?v=5747132-9650466"></script>
+  <script type="module" src="js/app.js?v=16515698-9170748"></script>
 </body>
 </html>

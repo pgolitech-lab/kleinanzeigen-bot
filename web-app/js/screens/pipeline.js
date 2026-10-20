@@ -290,8 +290,11 @@ export async function render(mount, params) {
   _timer = setInterval(refresh, REFRESH_MS);
   _visHandler = refresh;
   document.addEventListener("visibilitychange", _visHandler);
+  // Ушли с экрана — стоп. На Fold список живёт в левой панели и при открытии
+  // треда остаётся в DOM: тогда опрос продолжается (роутер к этому моменту
+  // уже убрал старый контейнер, если экран действительно сменился).
   _hashHandler = () => {
-    if (!location.hash.startsWith("#/pipeline") && location.hash !== "#/" && location.hash !== "") teardown();
+    if (!mount.isConnected) teardown();
   };
   window.addEventListener("hashchange", _hashHandler);
 }

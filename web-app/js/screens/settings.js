@@ -19,9 +19,6 @@ const FIELDS = [
   ["max_discount_percent", "Max discount %", "number"],
   ["claude_model", "Claude model", "text"],
   ["chat_font_em", "Chat font em", "text"],
-  ["api_balance_snapshot_usd", "API balance snapshot $", "text"],
-  ["api_balance_snapshot_at", "API balance snapshot at (ISO)", "text"],
-  ["anthropic_api_key", "Anthropic API key", "secret"],
   ["telegram_bot_token", "Telegram bot token", "secret"],
 ];
 

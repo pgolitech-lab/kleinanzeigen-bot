@@ -1,79 +1,197 @@
 /* ============================================================
-   MA v2 — дизайн-токены и компоненты (редизайн 2026-07-15).
-   Bootstrap удалён; ниже собственные компоненты + компакт-слой
-   совместимости для экранов, ещё использующих bootstrap-классы.
-   Палитра утверждена оператором: тёмная, зелёный акцент, компакт.
+   MA v3 — «премиум-мессенджер» (редизайн 2026-10-20, гибрид A+B+C).
+   Цвета — из Telegram themeParams (--tg-theme-*, их ставит telegram-web-app.js)
+   с фолбэком на свои пресеты; тема (dark/light) — html[data-theme] из
+   tg.colorScheme (js/theme.js). Старые имена токенов (--sur, --mut, --red…)
+   оставлены алиасами: экраны, ещё не переведённые на v3, берут новую палитру.
+   Раскладка — html[data-layout]: phone | flex | split2 | split3 (js/layout.js).
    ============================================================ */
 
 :root {
-  --bg: #12160f;
-  --sur: #1a2018;
-  --sur2: #222a20;
-  --text: #e7ebe3;
-  --mut: #94a08f;
-  --line: #2c3529;
-  --accent: #48ba7a;
-  --accent-t: #0c130e;
-  --red: #e06c6c;
-  --grn: #4fc286;
-  --amb: #d9a94a;
-  --blu: #6ba3e8;
-  --r: 10px;          /* скругления: средние */
-  --sp: 5px;          /* плотность: компакт */
-  --tab-h: 58px;
+  --bg: var(--tg-theme-bg-color, #0b0f17);
+  --bg2: var(--tg-theme-secondary-bg-color, #161d2a);
+  --card: var(--tg-theme-section-bg-color, #131a26);
+  --text: var(--tg-theme-text-color, #eef2f8);
+  --hint: var(--tg-theme-hint-color, #8892a6);
+  --sub: var(--tg-theme-subtitle-text-color, #a5afc0);
+  --link: var(--tg-theme-link-color, #7aa7ff);
+  --accent: var(--tg-theme-button-color, #4f7cff);
+  --on-accent: var(--tg-theme-button-text-color, #ffffff);
+  --danger: var(--tg-theme-destructive-text-color, #ff5d6c);
+  --accent2: #9b6bff;
+  --good: #2fd38a;
+  --warn: #ffb547;
+  --line: color-mix(in srgb, var(--text) 10%, transparent);
+  --line2: color-mix(in srgb, var(--text) 16%, transparent);
+  --tonal: color-mix(in srgb, var(--text) 7%, transparent);
+  --glass: color-mix(in srgb, var(--bg) 72%, transparent);
+  --grad: linear-gradient(135deg, var(--accent), var(--accent2));
+  --shadow: 0 14px 34px -14px rgba(0, 0, 0, .7), 0 2px 8px -3px rgba(0, 0, 0, .45);
+  --shadow-sm: 0 4px 14px -6px rgba(0, 0, 0, .55);
+  --out-bg: linear-gradient(140deg, color-mix(in srgb, var(--accent) 86%, #000), color-mix(in srgb, var(--accent2) 76%, #000));
+  --out-text: #fff;
+  --out-sub: rgba(255, 255, 255, .74);
+  --r-lg: 22px;
+  --r: 14px;
+  --r-sm: 10px;
+  --sp: 5px;
+  --tab-h: 60px;
+  --hd-h: 52px;
   --mono: ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
+  --font: system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* безопасные зоны: системные + Telegram (fullscreen / контентная зона) */
+  --sat: max(env(safe-area-inset-top, 0px), calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)));
+  --sab: max(env(safe-area-inset-bottom, 0px), calc(var(--tg-safe-area-inset-bottom, 0px) + var(--tg-content-safe-area-inset-bottom, 0px)));
+  --sal: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px));
+  --sar: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px));
+  /* высота окна: Telegram обновляет --tg-viewport-height при клавиатуре/складывании */
+  --app-h: var(--tg-viewport-height, 100dvh);
+
+  /* алиасы токенов MA v2 — для ещё не переведённых экранов */
+  --sur: var(--card);
+  --sur2: var(--bg2);
+  --mut: var(--hint);
+  --accent-t: var(--on-accent);
+  --red: var(--danger);
+  --grn: var(--good);
+  --amb: var(--warn);
+  --blu: var(--link);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: var(--tg-theme-bg-color, #faf8f4);
+  --bg2: var(--tg-theme-secondary-bg-color, #f0ece4);
+  --card: var(--tg-theme-section-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #1d2230);
+  --hint: var(--tg-theme-hint-color, #7d8496);
+  --sub: var(--tg-theme-subtitle-text-color, #5d6577);
+  --link: var(--tg-theme-link-color, #2f62e6);
+  --accent: var(--tg-theme-button-color, #3b6cf0);
+  --danger: var(--tg-theme-destructive-text-color, #d9374a);
+  --accent2: #8a4dff;
+  --good: #0f9f62;
+  --warn: #c27a00;
+  --line: color-mix(in srgb, #3a3020 12%, transparent);
+  --line2: color-mix(in srgb, #3a3020 20%, transparent);
+  --tonal: color-mix(in srgb, #3a3020 7%, transparent);
+  --glass: color-mix(in srgb, var(--bg) 82%, transparent);
+  --shadow: 0 16px 34px -18px rgba(70, 50, 20, .30), 0 1px 3px rgba(70, 50, 20, .08);
+  --shadow-sm: 0 3px 10px -5px rgba(70, 50, 20, .22);
+  --out-bg: linear-gradient(140deg, #e3eaff, #ece4ff);
+  --out-text: #17203b;
+  --out-sub: #5a6585;
 }
 
 * { box-sizing: border-box; }
-html { font-size: 18px; }  /* под ~413 dpi (DPR≈2.6): 14px было мелко; всё остальное в em/rem и масштабируется */
+html { font-size: 18px; -webkit-text-size-adjust: 100%; }  /* 18px — решение оператора 20.10 */
+html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
-  margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  line-height: 1.45;
+  font: 400 1rem/1.42 var(--font);
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
-a { color: var(--accent); }
+a { color: var(--link); }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 
-/* ---------- шапка (единственный «Назад») ---------- */
+/* ---------- оболочка: шапка · контент · таб-бар (в потоке, не fixed) ---------- */
+#shell {
+  display: flex; flex-direction: column;
+  height: var(--app-h);
+  padding-left: var(--sal); padding-right: var(--sar);
+}
 #hd {
-  position: sticky; top: 0; z-index: 1040;
+  flex: none; position: relative; z-index: 20;
   display: flex; align-items: center; gap: 6px;
-  min-height: 50px; padding: 8px 12px;
-  background: color-mix(in srgb, var(--bg) 90%, transparent);
-  backdrop-filter: blur(10px);
+  min-height: calc(var(--hd-h) + var(--sat)); padding: var(--sat) 12px 0;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
   border-bottom: 1px solid var(--line);
 }
 #hd .hback {
-  border: 0; background: none; color: var(--accent);
-  font-size: 1.3em; padding: 4px 10px 4px 0; cursor: pointer;
+  border: 0; background: none; color: var(--link); cursor: pointer;
+  min-width: 44px; height: 44px; margin-left: -8px;
+  font-size: 1.35em; display: inline-flex; align-items: center; justify-content: center;
 }
 #hd .hback.d-none { display: none !important; }
 #hd h1 {
-  margin: 0; flex: 1; font-size: 1.08em; font-weight: 700;
+  margin: 0; flex: 1; min-width: 0; font-size: 1.05em; font-weight: 700;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-#app { padding: 12px 12px calc(var(--tab-h) + 24px) !important; }
+/* контент: одна или две панели, каждая со своей прокруткой */
+#app { flex: 1; min-height: 0; display: flex; position: relative; }
+.pane {
+  flex: 1; min-width: 0; min-height: 0;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px 20px;
+}
+.pane-list { display: none; }
+.pane-empty {
+  height: 100%; display: grid; place-content: center; text-align: center;
+  color: var(--hint); gap: 8px; padding: 24px;
+}
+.pane-empty .pe-ic { font-size: 2.4em; opacity: .5; }
+
+/* Fold внутренний: список слева, открытое — справа */
+:root[data-layout^="split"] .has-list .pane-list {
+  display: block; flex: 0 0 min(400px, 44%);
+  border-right: 1px solid var(--line);
+}
+:root[data-layout="split3"] .has-list .pane-list { flex-basis: min(360px, 38%); }
+.pane-list [data-key].sel {
+  background: color-mix(in srgb, var(--accent) 16%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
 
 /* ---------- нижний таб-бар ---------- */
 #tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 1030;
-  display: flex;
-  height: calc(var(--tab-h) + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  background: var(--sur);
+  flex: none; display: flex; z-index: 20;
+  height: calc(var(--tab-h) + var(--sab)); padding-bottom: var(--sab);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
   border-top: 1px solid var(--line);
 }
 #tabbar .tab {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 2px;
-  font-size: .68em; font-weight: 600; text-decoration: none;
-  color: var(--mut); white-space: nowrap;
+  flex: 1; min-width: 0; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: .64em; font-weight: 600; text-decoration: none; color: var(--hint);
+  white-space: nowrap; overflow: hidden;
 }
-#tabbar .tab .ti { font-size: 1.5rem; line-height: 1.1; }
-#tabbar .tab.active { color: var(--accent); }
+#tabbar .tab svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+#tabbar .tab.active { color: var(--link); }
+#tabbar .tab.active::before {
+  content: ""; position: absolute; top: 6px; width: 48px; height: 30px; border-radius: 15px;
+  background: color-mix(in srgb, var(--link) 14%, transparent);
+}
+#tabbar .tab .tb {
+  position: absolute; top: 4px; left: calc(50% + 6px);
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--danger); color: #fff; font-size: 11px; line-height: 18px; text-align: center;
+}
+/* клавиатура открыта — таб-бар не отнимает место у поля ввода */
+body.kb #tabbar { display: none; }
+
+/* узкие экраны (Fold внешний 280, Flip Flex 306): подписи вкладок мельче */
+@media (max-width: 340px) {
+  /* на 280–340 px подпись только у активной вкладки — иначе «Объявлени…» */
+  #tabbar .tab { font-size: .6em; }
+  #tabbar .tab:not(.active) .tl { display: none; }
+  .pane { padding: 10px 8px 16px; }
+  #hd { padding-left: 8px; padding-right: 8px; }
+}
+/* Flex Window (Flip 5 внешний): «карман» — без таб-бара, шапка тоньше */
+:root[data-layout="flex"] { --hd-h: 40px; }
+:root[data-layout="flex"] #tabbar { display: none; }
+:root[data-layout="flex"] #hd h1 { font-size: .9em; }
+:root[data-layout="flex"] .pane { padding: 6px 8px 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 
 /* ---------- карточка треда (полоска аккаунта слева) ---------- */
 .tcard {
@@ -202,7 +320,7 @@ a { color: var(--accent); }
 
 /* ---------- док действий (sticky над таб-баром) ---------- */
 .dock {
-  position: sticky; bottom: calc(var(--tab-h) + 10px); z-index: 1020;
+  position: sticky; bottom: 8px; z-index: 15;
   display: flex; gap: 8px;
   background: var(--sur); border: 1px solid var(--line);
   border-radius: calc(var(--r) + 2px); padding: 9px;
@@ -225,8 +343,8 @@ a { color: var(--accent); }
   background: var(--sur);
   border: 1px solid var(--line); border-bottom: 0;
   border-radius: 18px 18px 0 0;
-  max-height: 88dvh; overflow-y: auto;
-  padding: 8px 16px calc(18px + env(safe-area-inset-bottom));
+  max-height: calc(var(--app-h) * .9); overflow-y: auto; overscroll-behavior: contain;
+  padding: 8px 16px calc(18px + var(--sab));
 }
 #sheet.on { transform: translateY(0); }
 #sheet .grab {
@@ -246,7 +364,7 @@ a { color: var(--accent); }
 
 /* ---------- bulk-панель (тёмная, вместо белой) ---------- */
 .bulkbar {
-  position: fixed; bottom: calc(var(--tab-h) + env(safe-area-inset-bottom));
+  position: fixed; bottom: calc(var(--tab-h) + var(--sab));
   left: 0; right: 0; z-index: 1045;
   background: var(--sur2); border-top: 1px solid var(--line);
   padding: 10px 12px;
@@ -518,3 +636,17 @@ pre.payload {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- «Ещё» ---------- */
+.more-list { display: flex; flex-direction: column; gap: 8px; }
+.more-row {
+  display: flex; align-items: center; gap: 14px; min-height: 64px;
+  padding: 10px 14px; border-radius: var(--r);
+  background: var(--card); border: 1px solid var(--line);
+  color: var(--text); text-decoration: none;
+}
+.more-row:active { background: var(--bg2); }
+.more-row .mi { font-size: 1.4em; width: 36px; text-align: center; flex: none; }
+.more-row .mt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.more-row .mt small { color: var(--hint); font-size: .78em; }
+.more-row .mc { color: var(--hint); font-size: 1.4em; }
