@@ -2,7 +2,7 @@
 // (красная/зелёная секции, карточки из pipeline). Клик по плитке → раздел.
 import { api } from "../api.js";
 import { el, setLoading, setError } from "../utils.js";
-import { threadCard } from "./pipeline.js";
+import { threadRow } from "../components/thread-row.js";
 
 function kpi(value, label, colorCls, href) {
   const tag = href ? "a" : "div";
@@ -57,7 +57,9 @@ function requestsBlock(title, cls, threads, accountsById) {
   if (!threads.length) {
     list.appendChild(el(`<div class="text-muted small fst-italic px-2 py-1">пусто</div>`));
   } else {
-    threads.forEach(t => list.appendChild(threadCard(t, accountsById)));
+    threads.forEach(t => list.appendChild(threadRow(t, {
+      onOpen: th => { location.hash = `#/thread/${encodeURIComponent(th.thread_id)}`; },
+    })));
   }
   return sec;
 }

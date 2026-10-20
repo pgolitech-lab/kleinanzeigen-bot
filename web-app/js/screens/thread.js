@@ -3,7 +3,8 @@
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
 import { api, API_BASE, LLM_TIMEOUT_MS } from "../api.js";
-import { el, berlinTime, setLoading, setError, accountColor, sendOutcome } from "../utils.js";
+import { el, berlinTime, setLoading, setError, accountColor, sendOutcome, parseEur } from "../utils.js";
+import { openSoldSheet } from "../components/sold-sheet.js";
 import { setTitle } from "../components/backbar.js";
 import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js";
 import { buildEditForm } from "../components/edit-form.js";
@@ -205,56 +206,6 @@ function lockedByOtherBanner(lock, onRetry, msgId) {
 }
 
 // Форма «Продано» в bottom-sheet (цена + закрыть остальные переговоры).
-function openSoldSheet(msgId, onDone) {
-  const form = el(`
-    <div>
-      <label class="form-label small text-muted">Цена продажи (€)</label>
-      <input type="number" inputmode="decimal" min="0" step="0.01"
-             class="form-control sold-price mb-2" placeholder="напр. 1300">
-      <div class="form-check mb-3">
-        <input type="checkbox" class="form-check-input close-other" id="sold-close-other">
-        <label class="form-check-label small" for="sold-close-other">
-          Закрыть остальные переговоры по этому объявлению
-        </label>
-      </div>
-      <div class="form-error text-danger small mb-2 d-none"></div>
-      <div class="d-flex gap-2">
-        <button class="btn cancel-btn" style="flex:1">Отмена</button>
-        <button class="btn btn-primary save-btn" style="flex:1">✅ Сохранить</button>
-      </div>
-    </div>
-  `);
-  const errEl = form.querySelector(".form-error");
-  form.querySelector(".cancel-btn").addEventListener("click", () => closeSheet());
-  form.querySelector(".save-btn").addEventListener("click", async () => {
-    const priceStr = form.querySelector(".sold-price").value.trim();
-    const price = Number(priceStr.replace(",", "."));
-    if (!priceStr || Number.isNaN(price) || price < 0) {
-      form.querySelector(".sold-price").classList.add("is-invalid");
-      return;
-    }
-    const closeOther = form.querySelector(".close-other").checked;
-    const saveBtn = form.querySelector(".save-btn");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "⏳ Сохраняю…";
-    try {
-      await api(`/api/ma/messages/${msgId}/sold`, {
-        method: "POST",
-        body: { price_eur: price, close_other_threads_for_ad: closeOther },
-      });
-      closeSheet();
-      onDone();
-    } catch (err) {
-      errEl.textContent = err.message ?? String(err);
-      errEl.classList.remove("d-none");
-      saveBtn.disabled = false;
-      saveBtn.textContent = "✅ Сохранить";
-    }
-  });
-  openSheet(form, "💰 Зафиксировать продажу");
-  form.querySelector(".sold-price").focus();
-}
-
 async function tryReleaseLock(msgId) {
   if (msgId === null) return;
   try {
@@ -902,7 +853,10 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
           : "🚀 Автопилот…",
         onClick: autopilotHandler,
       },
-      canAct ? { label: "💰 Продано…", onClick: () => openSoldSheet(latestPendingMsgId, () => render(mount, params)) } : null,
+      canAct ? { label: "💰 Продано…", onClick: () => openSoldSheet({
+        threadId: params.thread_id, msgId: latestPendingMsgId, title: data.header?.ad_title,
+        price: parseEur(data.header?.ad_price), prices: [parseEur(data.header?.ad_price)],
+        onDone: () => render(mount, params) }) } : null,
       canAct ? { label: "❌ Пропустить", danger: true, onClick: skipHandler } : null,
     ], "Действия");
   }

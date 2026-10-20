@@ -93,3 +93,16 @@ export function sendOutcome(res) {
   }
   return { level: "bad", text: `⚠️ Отправка не подтверждена (статус: ${st ?? kind}) — проверьте ленту` };
 }
+
+// «1.200 €», «1 200,50 €», «VB 950» → число евро; не разобрать → null
+export function parseEur(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (v == null) return null;
+  let s = String(v).replace(/[^\d.,]/g, "");
+  if (!s) return null;
+  // немецкий формат: точка — тысячи, запятая — дробь
+  if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  else s = s.replace(/[.,](?=\d{3}(\D|$))/g, "").replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
