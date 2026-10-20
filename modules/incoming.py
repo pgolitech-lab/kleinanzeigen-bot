@@ -311,7 +311,7 @@ def _autopilot_held_notification(msg_id: int, thread_id: str, guard: str, floor:
         logger.exception("autopilot held notification fail msg=%s", msg_id)
 
 
-_SENT_STATUSES = ("sent", "sent_debug")
+_SENT_STATUSES = db.SENT_STATUSES
 
 
 def _thread_has_open_draft(thread_id: str, exclude_id: int, since: Optional[str]) -> bool:
@@ -911,9 +911,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     )
     if real_created_at:
         add_kwargs["created_at"] = real_created_at
-    conv_id = (email.get("kz_conversation_id") or "").strip()
-    if conv_id and _messages_has_column("kz_conversation_id"):
-        add_kwargs["kz_conversation_id"] = conv_id
+    conv_id = (email.get("ka_conversation_id") or "").strip()
+    if conv_id and _messages_has_column("ka_conversation_id"):
+        add_kwargs["ka_conversation_id"] = conv_id
     inserted_id = db.add_message(
         account_id=account["id"],
         direction="in",

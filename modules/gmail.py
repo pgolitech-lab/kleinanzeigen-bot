@@ -281,7 +281,7 @@ def _parse_message(uid: str, head: bytes, raw: bytes) -> dict[str, Any]:
         # id переписки на сайте Kleinanzeigen (вид «49sml:2cxlxdm:2pxg5bw9w») —
         # одинаков для всех писем одного диалога; по нему kab-site сопоставит тред
         # с перепиской на сайте (ответы владельца из приложения в почту не попадают).
-        "kz_conversation_id": (msg.get("X-Conversation-ID") or "").strip(),
+        "ka_conversation_id": (msg.get("X-Conversation-ID") or "").strip(),
         "uid": uid,
     }
 

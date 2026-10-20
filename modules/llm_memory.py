@@ -172,7 +172,7 @@ def _thread_outcome(rows: list[Any]) -> str:
     if "skipped_sold" in statuses:
         return "закрыт: товар продан (другому или ему — цена не записана)"
     last = rows[-1]
-    if _rget(last, "direction") == "out" or _rget(last, "status") in ("sent", "sent_debug"):
+    if _rget(last, "direction") == "out" or _rget(last, "status") in ("sent", "sent_debug", "sent_external"):
         return "последним писали мы — клиент не ответил"
     if _rget(last, "status") == "skipped":
         return "оператор пропустил"

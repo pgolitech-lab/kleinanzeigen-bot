@@ -131,7 +131,7 @@ def is_empty_directive(operator_text: str) -> bool:
 
 # Наши реплики попадают в историю только если реально ушли клиенту
 # (sent_debug — режим redirect: для бота это тоже часть переписки).
-SENT_STATUSES = ("sent", "sent_debug")
+SENT_STATUSES = ("sent", "sent_debug", "sent_external")
 HISTORY_MAX_CHARS = 6000      # весь блок истории
 HISTORY_MSG_MAX_CHARS = 1200  # одна реплика
 

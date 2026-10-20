@@ -18,7 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 import config
 import database as db
-from modules import backup, gmail, mail_queue, scout, telegram_bot
+from modules import gmail, mail_queue, scout, telegram_bot
 
 logger = logging.getLogger(__name__)
 from modules.incoming import (  # noqa: F401
@@ -286,25 +286,6 @@ def check_reminders() -> str:
     return f"Предложено пингов: {sent}, ошибок: {failed} (порог {after_days} дн.)"
 
 
-def run_backup() -> str:
-    """Job: бекап SQLite в Google Drive + ротация старых."""
-    # Ключ сервис-аккаунта не задан → бекап просто выключен. Раньше job падал с
-    # ERROR каждый день, и hourly-мониторинг слал алерт в Telegram (2026-07-21).
-    if not backup.is_configured():
-        logger.info("Бекап пропущен: Google Drive не настроен "
-                    "(settings → google_drive_credentials_json)")
-        return "backup: not configured, skipped"
-    try:
-        result = backup.backup_and_rotate(keep=14)
-        msg = f"OK: {result['backup'].get('name')}, удалено старых: {result['deleted_old']}"
-        logger.info("Бекап %s", msg)
-        return msg
-    except Exception as e:
-        logger.error("Бекап упал: %s", e)
-        raise  # пусть слушатель event-а зафиксирует error
-
-
-SCOUT_NOTIFY_MAX_PER_KIND = 8  # кап на кажд. секцию — чтобы машины не вытесняли запчасти (сиденья)
 
 
 def _fmt_scout_listing(item: dict) -> str:
@@ -407,15 +388,6 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    sched.add_job(
-        run_backup,
-        trigger="interval",
-        hours=config.backup_interval_hours(),
-        id="drive_backup",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
 
     # Напоминалки — раз в час проверяем (само правило по дням внутри),
     # но реальный effect только если включено в настройках.
@@ -549,8 +521,8 @@ def start() -> BackgroundScheduler:
     sched.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     sched.start()
     _active_sched = sched
-    logger.info("Scheduler запущен: poll=%ds, send=60s, backup=%dh",
-                config.gmail_poll_interval_sec(), config.backup_interval_hours())
+    logger.info("Scheduler запущен: poll=%ds, send=60s (бэкап — kab-backup.timer)",
+                config.gmail_poll_interval_sec())
     # Поднимаем deferred-rows которые могли остаться от прошлого процесса —
     # in-memory busy-флаги теряются при рестарте, но БД помнит.
     try:
@@ -676,6 +648,12 @@ def monitor_errors_job() -> str:
     return f"posted {len(new_groups)} new error groups"
 
 
+def _day_after(day: str) -> str:
+    """'YYYY-MM-DD' → следующий день (верхняя граница диапазона по created_at, по индексу)."""
+    from datetime import date, timedelta
+    return (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+
+
 def daily_summary() -> Optional[str]:
     """Отправить вчерашнюю сводку в Telegram если были движения.
 
@@ -699,13 +677,13 @@ def daily_summary() -> Optional[str]:
                 SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) AS skipped,
                 COALESCE(SUM(cost_usd), 0) AS total_cost
             FROM messages
-            WHERE direction='in' AND substr(created_at, 1, 10) = ?
+            WHERE direction='in' AND created_at >= ? AND created_at < ?
             """,
-            (yesterday,),
+            (yesterday, _day_after(yesterday)),
         ).fetchone()
         lessons_yday = conn.execute(
-            "SELECT COUNT(*) AS c FROM lessons WHERE substr(created_at, 1, 10) = ?",
-            (yesterday,),
+            "SELECT COUNT(*) AS c FROM lessons WHERE created_at >= ? AND created_at < ?",
+            (yesterday, _day_after(yesterday)),
         ).fetchone()
 
     scout_stats = db.scout_daily_stats(yesterday)
