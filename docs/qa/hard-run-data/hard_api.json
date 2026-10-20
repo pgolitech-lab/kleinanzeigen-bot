@@ -1,0 +1,859 @@
+[
+ {
+  "case": "товар: пустое имя",
+  "req": "POST /api/ma/stock/products",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 73,
+  "resp": "{\"detail\":\"название товара обязательно\"}",
+  "note": ""
+ },
+ {
+  "case": "товар: имя 301 симв.",
+  "req": "POST /api/ma/stock/products",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"string_too_long\",\"loc\":[\"body\",\"title\"],\"msg\":\"String should have at most 300 characters\",\"input\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "note": ""
+ },
+ {
+  "case": "товар: цена −5",
+  "req": "POST /api/ma/stock/products",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"list_price_eur\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-5,\"ctx\":{\"ge\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "товар: цена 1e9",
+  "req": "POST /api/ma/stock/products",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"less_than\",\"loc\":[\"body\",\"list_price_eur\"],\"msg\":\"Input should be less than 1000000\",\"input\":1000000000.0,\"ctx\":{\"lt\":1000000.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "товар: цена строкой",
+  "req": "POST /api/ma/stock/products",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"float_parsing\",\"loc\":[\"body\",\"list_price_eur\"],\"msg\":\"Input should be a valid number, unable to parse string as a number\",\"input\":\"abc\"}]}",
+  "note": ""
+ },
+ {
+  "case": "товар: цена NaN-литерал",
+  "req": "POST /api/ma/stock/products",
+  "status": 500,
+  "verdict": "5XX",
+  "ms": 11,
+  "resp": "Internal Server Error",
+  "note": ""
+ },
+ {
+  "case": "товар: тело не JSON",
+  "req": "POST /api/ma/stock/products",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"json_invalid\",\"loc\":[\"body\",1],\"msg\":\"JSON decode error\",\"input\":{},\"ctx\":{\"error\":\"Expecting property name enclosed in double quotes\"}}]}",
+  "note": ""
+ },
+ {
+  "case": "товар: XSS в названии (создаётся)",
+  "req": "POST /api/ma/stock/products",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 7,
+  "resp": "{\"id\":11,\"product\":{\"id\":11,\"title\":\"<script>alert(1)</script>Тест\",\"category\":\"tisch\",\"condition\":null,\"unit_cost_eur\":null,\"list_price_eur\":null,\"min_price_eu",
+  "note": ""
+ },
+ {
+  "case": "товар: min > list",
+  "req": "POST /api/ma/stock/products",
+  "status": 200,
+  "verdict": "UNEXPECTED",
+  "ms": 7,
+  "resp": "{\"id\":12,\"product\":{\"id\":12,\"title\":\"min>list\",\"category\":null,\"condition\":null,\"unit_cost_eur\":null,\"list_price_eur\":100.0,\"min_price_eur\":500.0,\"note\":null,\"m",
+  "note": "логическая ошибка: минимум выше цены"
+ },
+ {
+  "case": "товар: PATCH пусто",
+  "req": "PATCH /api/ma/stock/products/1",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"нечего менять\"}",
+  "note": ""
+ },
+ {
+  "case": "товар: PATCH 404",
+  "req": "PATCH /api/ma/stock/products/99999",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "товар: GET id=abc",
+  "req": "GET /api/ma/stock/products/abc",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"int_parsing\",\"loc\":[\"path\",\"product_id\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"abc\"}]}",
+  "note": ""
+ },
+ {
+  "case": "товар: GET id=-1",
+  "req": "GET /api/ma/stock/products/-1",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "товар: GET id=9e18",
+  "req": "GET /api/ma/stock/products/99999999999999999999",
+  "status": 500,
+  "verdict": "5XX",
+  "ms": 10,
+  "resp": "Internal Server Error",
+  "note": ""
+ },
+ {
+  "case": "приход: qty=0",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"количество должно быть больше 0\"}",
+  "note": ""
+ },
+ {
+  "case": "приход: qty=−3",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"qty\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-3,\"ctx\":{\"ge\":0}}]}",
+  "note": ""
+ },
+ {
+  "case": "приход: qty=1e9",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"less_than_equal\",\"loc\":[\"body\",\"qty\"],\"msg\":\"Input should be less than or equal to 100000\",\"input\":1000000000,\"ctx\":{\"le\":100000}}]}",
+  "note": ""
+ },
+ {
+  "case": "приход: qty='abc'",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"int_parsing\",\"loc\":[\"body\",\"qty\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"abc\"}]}",
+  "note": ""
+ },
+ {
+  "case": "приход: qty=2.5",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"int_from_float\",\"loc\":[\"body\",\"qty\"],\"msg\":\"Input should be a valid integer, got a number with a fractional part\",\"input\":2.5}]}",
+  "note": ""
+ },
+ {
+  "case": "приход: qty=null",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"int_type\",\"loc\":[\"body\",\"qty\"],\"msg\":\"Input should be a valid integer\",\"input\":null}]}",
+  "note": ""
+ },
+ {
+  "case": "приход: cost −1",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"unit_cost_eur\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-1,\"ctx\":{\"ge\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "приход: дата мусор",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"не понял дату: 'вчера-ish'\"}",
+  "note": "дата-мусор: ожидаем 400, а не молча сегодня"
+ },
+ {
+  "case": "приход: дата 2099",
+  "req": "POST /api/ma/stock/products/3/receipt",
+  "status": 200,
+  "verdict": "UNEXPECTED",
+  "ms": 8,
+  "resp": "{\"movement_id\":10,\"qty\":11}",
+  "note": "приход из будущего"
+ },
+ {
+  "case": "приход: товар 404",
+  "req": "POST /api/ma/stock/products/99999/receipt",
+  "status": 400,
+  "verdict": "UNEXPECTED",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар 99999 не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "приход в архивный/слитый",
+  "req": "POST /api/ma/stock/products/8/receipt",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 7,
+  "resp": "{\"movement_id\":11,\"qty\":2}",
+  "note": ""
+ },
+ {
+  "case": "списание больше остатка (стол 9 шт.→ 50)",
+  "req": "POST /api/ma/stock/products/3/writeoff",
+  "status": 200,
+  "verdict": "UNEXPECTED",
+  "ms": 8,
+  "resp": "{\"movement_id\":12,\"qty\":-39}",
+  "note": "не уходим в минус молча"
+ },
+ {
+  "case": "инвентаризация qty=0",
+  "req": "POST /api/ma/stock/products/7/count",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 10,
+  "resp": "{\"movement_id\":13,\"qty\":0}",
+  "note": ""
+ },
+ {
+  "case": "инвентаризация qty=−1",
+  "req": "POST /api/ma/stock/products/7/count",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"qty\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-1,\"ctx\":{\"ge\":0}}]}",
+  "note": ""
+ },
+ {
+  "case": "20 параллельных одинаковых приходов (двойной тап)",
+  "req": "POST receipt ×20",
+  "status": [
+   200
+  ],
+  "verdict": "INFO",
+  "ms": 0,
+  "resp": "записано движений: 20 из 20 (нет идемпотентности — каждый тап = новый приход)",
+  "note": ""
+ },
+ {
+  "case": "merge: товар сам в себя",
+  "req": "POST /api/ma/stock/merge",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"нельзя слить товар сам с собой\"}",
+  "note": ""
+ },
+ {
+  "case": "merge: 404",
+  "req": "POST /api/ma/stock/merge",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "merge: в архивный/комплект",
+  "req": "POST /api/ma/stock/merge",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 9,
+  "resp": "{\"ok\":true,\"listings\":1,\"movements\":0}",
+  "note": "слияние обычного товара в КОМПЛЕКТ"
+ },
+ {
+  "case": "archive: 404",
+  "req": "POST /api/ma/stock/products/99999/archive",
+  "status": 400,
+  "verdict": "UNEXPECTED",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар 99999 не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "relink: чужой ad",
+  "req": "POST /api/ma/stock/listings/00000/relink",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 8,
+  "resp": "{\"detail\":\"объявление 00000 не найдено на складе\"}",
+  "note": ""
+ },
+ {
+  "case": "kit: сам в себя",
+  "req": "PUT /api/ma/stock/products/4/kit",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 7,
+  "resp": "{\"detail\":\"комплект не может состоять из самого себя\"}",
+  "note": ""
+ },
+ {
+  "case": "kit: qty 0",
+  "req": "PUT /api/ma/stock/products/4/kit",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"components\",0,\"qty\"],\"msg\":\"Input should be greater than or equal to 1\",\"input\":0,\"ctx\":{\"ge\":1}}]}",
+  "note": ""
+ },
+ {
+  "case": "kit: дубль компонента",
+  "req": "PUT /api/ma/stock/products/4/kit",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"составляющая 1 указана дважды\"}",
+  "note": ""
+ },
+ {
+  "case": "kit: цикл (скамья ⊂ комплект ⊂ скамья)",
+  "req": "PUT /api/ma/stock/products/1/kit",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 7,
+  "resp": "{\"detail\":\"у товара есть свой приход/инвентаризация — оприходуйте составляющие и отмените эти движения, потом делайте его комплектом\"}",
+  "note": "цикл комплектов"
+ },
+ {
+  "case": "kit: >30 компонентов",
+  "req": "PUT /api/ma/stock/products/4/kit",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 9,
+  "resp": "{\"detail\":[{\"type\":\"too_long\",\"loc\":[\"body\",\"components\"],\"msg\":\"List should have at most 30 items after validation, not 31\",\"input\":[{\"product_id\":1,\"qty\":1},{",
+  "note": ""
+ },
+ {
+  "case": "batch: пустой",
+  "req": "POST /api/ma/stock/batches",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"too_short\",\"loc\":[\"body\",\"items\"],\"msg\":\"List should have at least 1 item after validation, not 0\",\"input\":[],\"ctx\":{\"field_type\":\"List\",\"mi",
+  "note": ""
+ },
+ {
+  "case": "batch: qty 0",
+  "req": "POST /api/ma/stock/batches",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"items\",0,\"qty\"],\"msg\":\"Input should be greater than or equal to 1\",\"input\":0,\"ctx\":{\"ge\":1}}]}",
+  "note": ""
+ },
+ {
+  "case": "batch: цена −1",
+  "req": "POST /api/ma/stock/batches",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"total_cost_eur\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-1,\"ctx\":{\"ge\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "batch: 404 товар",
+  "req": "POST /api/ma/stock/batches",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар не найден: 99999\"}",
+  "note": ""
+ },
+ {
+  "case": "batch: один товар дважды",
+  "req": "POST /api/ma/stock/batches",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар в партии указан дважды\"}",
+  "note": ""
+ },
+ {
+  "case": "batch: в комплект",
+  "req": "POST /api/ma/stock/batches",
+  "status": 400,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":\"товар 4 — комплект: приход, списание и пересчёт — по его составляющим\"}",
+  "note": "приход на комплект (у комплекта нет своего остатка)"
+ },
+ {
+  "case": "batch: себестоимость 0 при qty>0",
+  "req": "POST /api/ma/stock/batches",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 8,
+  "resp": "{\"batch_id\":2,\"movements\":[{\"product_id\":3,\"qty\":5,\"unit_cost_eur\":0.0,\"movement_id\":34}]}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: мусор «asdf»",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 3793,
+  "resp": "{\"detail\":\"в строке не нашлось позиций\"}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: пустое место",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5954,
+  "resp": "{\"detail\":\"в строке не нашлось позиций\"}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: 5 скамья по 500",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 4545,
+  "resp": "{\"items\":[{\"product_id\":null,\"title\":\"скамья Traveller\",\"qty\":5}],\"total_cost_eur\":2500,\"unmatched\":1}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: огромная qty",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 3377,
+  "resp": "{\"items\":[{\"product_id\":null,\"title\":\"скамья\",\"qty\":1}],\"total_cost_eur\":null,\"unmatched\":1}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: отрицательная",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 4925,
+  "resp": "{\"items\":[{\"product_id\":3,\"title\":\"Klapptisch Multivan\",\"qty\":3}],\"total_cost_eur\":null,\"unmatched\":0}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: XSS",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 4528,
+  "resp": "{\"items\":[{\"product_id\":null,\"title\":\"2 стол\",\"qty\":2}],\"total_cost_eur\":null,\"unmatched\":1}",
+  "note": ""
+ },
+ {
+  "case": "приход строкой: 1001 симв.",
+  "req": "POST /api/ma/stock/receipt/parse",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"string_too_long\",\"loc\":[\"body\",\"text\"],\"msg\":\"String should have at most 1000 characters\",\"input\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "note": ""
+ },
+ {
+  "case": "тип: себест. −1",
+  "req": "PUT /api/ma/stock/category-costs",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"unit_cost_eur\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-1,\"ctx\":{\"ge\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "тип: пустая категория",
+  "req": "PUT /api/ma/stock/category-costs",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"string_too_short\",\"loc\":[\"body\",\"category\"],\"msg\":\"String should have at least 1 character\",\"input\":\"\",\"ctx\":{\"min_length\":1}}]}",
+  "note": ""
+ },
+ {
+  "case": "тип: XSS-категория",
+  "req": "PUT /api/ma/stock/category-costs",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 10,
+  "resp": "{\"table\":[{\"category\":\"<b>x</b>\",\"label\":\"<b>x</b>\",\"standard_cost_eur\":5.0},{\"category\":\"einzelsitz\",\"label\":\"одиночное / VIP сиденье\",\"standard_cost_eur\":170.",
+  "note": ""
+ },
+ {
+  "case": "рынок: advice id=0",
+  "req": "GET /api/ma/market/advice/0",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 43,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "рынок: advice id=−1",
+  "req": "GET /api/ma/market/advice/-1",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 28,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "рынок: advice 404",
+  "req": "GET /api/ma/market/advice/99999",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 29,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "рынок: advice abc",
+  "req": "GET /api/ma/market/advice/abc",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 4,
+  "resp": "{\"detail\":[{\"type\":\"int_parsing\",\"loc\":[\"path\",\"product_id\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"abc\"}]}",
+  "note": ""
+ },
+ {
+  "case": "рынок: tips 404",
+  "req": "GET /api/ma/market/tips/99999",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 27,
+  "resp": "{\"detail\":\"товар не найден\"}",
+  "note": ""
+ },
+ {
+  "case": "рынок: repost limit=0",
+  "req": "GET /api/ma/market/repost?limit=0",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"query\",\"limit\"],\"msg\":\"Input should be greater than or equal to 1\",\"input\":\"0\",\"ctx\":{\"ge\":1}}]}",
+  "note": ""
+ },
+ {
+  "case": "рынок: repost limit=21",
+  "req": "GET /api/ma/market/repost?limit=21",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"less_than_equal\",\"loc\":[\"query\",\"limit\"],\"msg\":\"Input should be less than or equal to 20\",\"input\":\"21\",\"ctx\":{\"le\":20}}]}",
+  "note": ""
+ },
+ {
+  "case": "рынок: repost limit=abc",
+  "req": "GET /api/ma/market/repost?limit=abc",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 4,
+  "resp": "{\"detail\":[{\"type\":\"int_parsing\",\"loc\":[\"query\",\"limit\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"abc\"}]}",
+  "note": ""
+ },
+ {
+  "case": "рынок: advice для товара без цены/остатка (id=7)",
+  "req": "GET /api/ma/market/advice/7",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 34,
+  "resp": "{\"ok\":true,\"status\":\"few_data\",\"features\":{\"category\":\"other\",\"material\":null,\"vip\":false,\"seats\":null,\"condition\":null,\"models\":[],\"rails\":false,\"isofix\":false",
+  "note": ""
+ },
+ {
+  "case": "рынок: advice для XSS-товара",
+  "req": "GET /api/ma/market/advice/5",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 32,
+  "resp": "{\"ok\":true,\"status\":\"few_data\",\"features\":{\"category\":\"other\",\"material\":null,\"vip\":false,\"seats\":null,\"condition\":null,\"models\":[],\"rails\":false,\"isofix\":false",
+  "note": ""
+ },
+ {
+  "case": "рынок: tips для продукта без объявлений",
+  "req": "GET /api/ma/market/tips/7?use_llm=false",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 30,
+  "resp": "{\"ok\":true,\"item\":{\"item_id\":\"p:7\",\"product_id\":7,\"title\":\"Товар без цены и остатка\"},\"our_terms\":[],\"leaders\":{\"above\":[],\"fast\":[]},\"missing_terms\":[],\"title_",
+  "note": ""
+ },
+ {
+  "case": "рынок: repost with_text (LLM недоступен)",
+  "req": "GET /api/ma/market/repost?limit=20",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 58,
+  "resp": "{\"items\":[{\"item_id\":\"p:2\",\"product_id\":2,\"title\":\"Einzelsitz Fahrersitz VW T6 VIP\",\"priority\":5.2,\"action\":\"repost\",\"reasons_ru\":[\"опустилось: 55-е место, стр.",
+  "note": ""
+ },
+ {
+  "case": "рынок: thread/market 404",
+  "req": "GET /api/ma/threads/nope/market",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 8,
+  "resp": "{\"detail\":\"thread not found\"}",
+  "note": ""
+ },
+ {
+  "case": "продано: цена 0",
+  "req": "POST /api/ma/threads/qa-t1/sold",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 9,
+  "resp": "{\"detail\":[{\"type\":\"greater_than\",\"loc\":[\"body\",\"price_eur\"],\"msg\":\"Input should be greater than 0\",\"input\":0,\"ctx\":{\"gt\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "продано: цена −5",
+  "req": "POST /api/ma/threads/qa-t1/sold",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than\",\"loc\":[\"body\",\"price_eur\"],\"msg\":\"Input should be greater than 0\",\"input\":-5,\"ctx\":{\"gt\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "продано: цена 1e7",
+  "req": "POST /api/ma/threads/qa-t1/sold",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"less_than\",\"loc\":[\"body\",\"price_eur\"],\"msg\":\"Input should be less than 1000000\",\"input\":10000000.0,\"ctx\":{\"lt\":1000000.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "продано: цена 'abc'",
+  "req": "POST /api/ma/threads/qa-t1/sold",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"float_parsing\",\"loc\":[\"body\",\"price_eur\"],\"msg\":\"Input should be a valid number, unable to parse string as a number\",\"input\":\"abc\"}]}",
+  "note": ""
+ },
+ {
+  "case": "продано: тред 404",
+  "req": "POST /api/ma/threads/nope/sold",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":\"thread not found\"}",
+  "note": ""
+ },
+ {
+  "case": "правка DE: 4001 симв.",
+  "req": "POST /api/ma/messages/1/edit-de",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"string_too_long\",\"loc\":[\"body\",\"text\"],\"msg\":\"String should have at most 4000 characters\",\"input\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "note": ""
+ },
+ {
+  "case": "правка DE: пусто",
+  "req": "POST /api/ma/messages/1/edit-de",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"string_too_short\",\"loc\":[\"body\",\"text\"],\"msg\":\"String should have at least 1 character\",\"input\":\"\",\"ctx\":{\"min_length\":1}}]}",
+  "note": ""
+ },
+ {
+  "case": "правка DE: XSS",
+  "req": "POST /api/ma/messages/1/edit-de",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 11,
+  "resp": "{\"msg_id\":1,\"thread_id\":\"qa-t1\",\"status\":\"edited\",\"ad\":{\"title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"price\":\"450 €\",\"url\":\"https://",
+  "note": ""
+ },
+ {
+  "case": "цена: −5",
+  "req": "POST /api/ma/messages/1/price",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 7,
+  "resp": "{\"detail\":[{\"type\":\"greater_than\",\"loc\":[\"body\",\"eur\"],\"msg\":\"Input should be greater than 0\",\"input\":-5,\"ctx\":{\"gt\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "цена: 0",
+  "req": "POST /api/ma/messages/1/price",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than\",\"loc\":[\"body\",\"eur\"],\"msg\":\"Input should be greater than 0\",\"input\":0,\"ctx\":{\"gt\":0.0}}]}",
+  "note": ""
+ },
+ {
+  "case": "compose: пусто",
+  "req": "POST /api/ma/threads/qa-t1/compose",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"detail\":[{\"type\":\"string_too_short\",\"loc\":[\"body\",\"text\"],\"msg\":\"String should have at least 1 character\",\"input\":\"\",\"ctx\":{\"min_length\":1}},{\"type\":\"missing\"",
+  "note": ""
+ },
+ {
+  "case": "compose: 4001",
+  "req": "POST /api/ma/threads/qa-t1/compose",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"string_too_long\",\"loc\":[\"body\",\"text\"],\"msg\":\"String should have at most 4000 characters\",\"input\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "note": ""
+ },
+ {
+  "case": "send mode=bogus",
+  "req": "POST /api/ma/messages/1/send",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 8,
+  "resp": "{\"detail\":[{\"type\":\"value_error\",\"loc\":[\"body\",\"mode\"],\"msg\":\"Value error, mode must be 'as_is' or 'translate'\",\"input\":\"bogus\",\"ctx\":{\"error\":{}}}]}",
+  "note": ""
+ },
+ {
+  "case": "send delay_sec=61",
+  "req": "POST /api/ma/messages/1/send",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"less_than_equal\",\"loc\":[\"body\",\"delay_sec\"],\"msg\":\"Input should be less than or equal to 60\",\"input\":61,\"ctx\":{\"le\":60}}]}",
+  "note": ""
+ },
+ {
+  "case": "send delay_sec=−1",
+  "req": "POST /api/ma/messages/1/send",
+  "status": 422,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":[{\"type\":\"greater_than_equal\",\"loc\":[\"body\",\"delay_sec\"],\"msg\":\"Input should be greater than or equal to 0\",\"input\":-1,\"ctx\":{\"ge\":0}}]}",
+  "note": ""
+ },
+ {
+  "case": "send 404",
+  "req": "POST /api/ma/messages/99999/send",
+  "status": 404,
+  "verdict": "ok",
+  "ms": 5,
+  "resp": "{\"detail\":\"message not found\"}",
+  "note": ""
+ },
+ {
+  "case": "message 999999999999999999999",
+  "req": "GET /api/ma/messages/999999999999999999999",
+  "status": 500,
+  "verdict": "5XX",
+  "ms": 22,
+  "resp": "Internal Server Error",
+  "note": ""
+ },
+ {
+  "case": "отправка #1 msg 3",
+  "req": "POST /api/ma/messages/3/send",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 11,
+  "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[],\"kind\":\"skipped\",\"mode\":\"disabled\"}",
+  "note": ""
+ },
+ {
+  "case": "отправка #2 того же msg (повтор)",
+  "req": "POST /api/ma/messages/3/send",
+  "status": 200,
+  "verdict": "UNEXPECTED",
+  "ms": 8,
+  "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[],\"kind\":\"skipped\",\"mode\":\"disabled\"}",
+  "note": "повтор не должен уходить второй раз"
+ },
+ {
+  "case": "повторное «Продано» того же треда",
+  "req": "POST /api/ma/threads/qa-t4/sold",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 21,
+  "resp": "{\"ok\":true,\"status\":\"skipped_sold\",\"sold_price_eur\":300.0,\"msg_id\":4,\"closed_other_threads\":[],\"separate_sale\":{\"msg_id\":15,\"thread_id\":\"manual-f9d966bd70984bb3",
+  "note": ""
+ },
+ {
+  "case": "повторное «Продано» ещё раз",
+  "req": "POST /api/ma/threads/qa-t4/sold",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 17,
+  "resp": "{\"ok\":true,\"status\":\"skipped_sold\",\"sold_price_eur\":300.0,\"msg_id\":4,\"closed_other_threads\":[],\"separate_sale\":{\"msg_id\":16,\"thread_id\":\"manual-206216d71e5045a3",
+  "note": "не должно задвоить продажу/движение склада"
+ },
+ {
+  "case": "пропуск дважды 1",
+  "req": "POST /api/ma/messages/6/skip",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 8,
+  "resp": "{\"ok\":true,\"status\":\"skipped\"}",
+  "note": ""
+ },
+ {
+  "case": "пропуск дважды 2",
+  "req": "POST /api/ma/messages/6/skip",
+  "status": 200,
+  "verdict": "ok",
+  "ms": 6,
+  "resp": "{\"ok\":true,\"status\":\"skipped\"}",
+  "note": ""
+ },
+ {
+  "case": "авторизация: без initData",
+  "req": "GET /api/ma/stock/products",
+  "status": 422,
+  "verdict": "UNEXPECTED",
+  "ms": 0,
+  "resp": "",
+  "note": ""
+ },
+ {
+  "case": "авторизация: мусорный initData",
+  "req": "GET /api/ma/stock/products",
+  "status": 401,
+  "verdict": "ok",
+  "ms": 0,
+  "resp": "",
+  "note": ""
+ },
+ {
+  "case": "авторизация: пустой",
+  "req": "GET /api/ma/stock/products",
+  "status": 401,
+  "verdict": "ok",
+  "ms": 0,
+  "resp": "",
+  "note": ""
+ }
+]

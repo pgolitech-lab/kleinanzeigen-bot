@@ -1,0 +1,3048 @@
+{
+ "fold-cover-412": {
+  "screens": {
+   "inbox": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [
+     "div.row «AN Anna_K 13:22 Sitzbank Citroën Jumpy З» right=416",
+     "div.row «HO HotHans 15:16 Sitzbank Peugeot Travel» right=416",
+     "div.row «KM Klaus M. 15:04 Rückbank Peugeot Trave» right=416",
+     "div.row «JS John Smith 12:22 Einzelsitz Fahrersit» right=416",
+     "div.row «SX <script>window.__xss3=1</script>Mallo» right=416",
+     "div.row «WW Wolfeschlegelsteinhausenbergerdorff W» right=416",
+     "div.row «ZJ Zażółć Gęślą Jaźń 09:22 Klapptisch Mu» right=416",
+     "div.row «NN Neg Ned 08:22 Sitzbank Peugeot Travel» right=416",
+     "div.row «OO Overdue Olaf 17.10 Sitzbank Peugeot T» right=416",
+     "div.row «BS B.ST 18.10 Klappbank Renault Trafic М» right=416"
+    ],
+    "overflowN": 10,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\nПроверить ›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВс",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "triage": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "1 с готовым черновиком\n1 из 1\nKM\nKlaus M.\nнемецкий\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n300\n380\n450\nКЛИЕНТ · ПО-РУССКИ\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать ор",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-draft": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nЦЕНА\n450\nМИНИМУМ\n380\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\nВчера\nЗдравствуйте, скамья ещё доступн",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-hot": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "HotHans",
+    "text": "HO\nHotHans\nAutoteile Süd · Sitzbank Peugeot Traveller\n↗\nЦЕНА\n450\nМИНИМУМ\n380\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\nСегодня\nБеру. Сегодня заберу за 450 наличными, адрес?\nIch nehme sie. Kann heut",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-overdue": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Overdue Olaf",
+    "text": "OO\nOverdue Olaf\nErsatzteile Nord · Sitzbank Peugeot Traveller\n↗\nЦЕНА\n450\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\n17 октября\nАлло? Жду уже несколько дней.\nHallo? Bitte antworten, ich warte seit Ta",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-en": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · EN» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "John Smith",
+    "text": "JS\nJohn Smith\nGarage West · Einzelsitz Fahrersitz VW T6 VIP\n↗\nЦЕНА\n250\nМИНИМУМ\n200\n📈 мало данных: сопоставимых объявлений 0 — смотрите ссылки\nСегодня\nПривет, сиденье ещё есть? Доставка в UK?\nHi, is t",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-xss": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "h1. «<script>window.__xss3=1</script>Mallory»",
+     "b.th-name «<script>window.__xss3=1</script>Mallory»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "<script>window.__xss3=1</script>Mallory",
+    "text": "SX\n<script>window.__xss3=1</script>Mallory\nWerkstatt Ost · <img src=x onerror=\"window.__xss=1\">Hack\n↗\nЦЕНА\n10\nМИНИМУМ\n9\n📈 мало данных: сопоставимых объявлений 0 — смотрите ссылки\nСегодня\nXSS-тест\n<im",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-longname": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "h1. «Wolfeschlegelsteinhausenbergerdorff Wolf»",
+     "b.th-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff",
+    "text": "WW\nWolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff\nGarage West · Sitzbank Peugeot Traveller Rückbank Led",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-pl": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Zażółć Gęślą Jaźń",
+    "text": "ZJ\nZażółć Gęślą Jaźń\nErsatzteile Nord · Klapptisch Multivan\n↗\nЦЕНА\n80\nМИНИМУМ\n60\n📈 мало данных: сопоставимых объявлений 1 — смотрите ссылки\nСегодня\nПривет, сколько столик? Доставка?\nCześć, ile kosztu",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-negprice": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Neg Ned",
+    "text": "NN\nNeg Ned\nAutoteile Süd · Sitzbank Peugeot Traveller\n↗\nЦЕНА\n5\nМИНИМУМ\n380\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\nСегодня\nПредлагаю -50\nIch biete -50 Euro. 0 Euro. 99999999999 Euro\n20.10, 08:22\n",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "clients": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «<script>window.__xss3=1</script>Mallory»",
+     "b. «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "КЛИЕНТЫ\n13\nHO\nHotHans\n15:16\nждёт ответа\n1 обращение · 1 товар\nKM\nKlaus M.\n15:04\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n14:22\nзакрыто\n1 обращение · 1 товар\nAN\nAnna_K\n13:22\nждёт ответа\n1 обращение ·",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "sales": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "ЭТОТ МЕСЯЦ\n600 €\n2 продажи · в среднем 300 €\nНеделя\nМесяц\nГод\nВсё\n➕ Продажа\n🔍 Найденные продажи\nВсе аккаунты ▾\nпо дням ▾\nПРОДАЖИ\n2\nSitzbank 2er Mercedes Vito\n20.10 · Garage West · M.Yilmaz\n300 €\n−50 ",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 1,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "34\nна складе, шт.\n3.945 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n21\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-1": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "h1. «Sitzbank Peugeot Traveller 2+1 Leder sch»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Sitzbank Peugeot Traveller 2+1 Leder schwarz",
+    "text": "4 шт.\nSitzbank Peugeot Traveller 2+1 Leder schwarz\nsitzbank · gebraucht\n450 €\nцена\n380 €\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩 К",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-kit": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "h1. «Komplettsatz Traveller: Bank + 2 VIP + T»",
+     "b. «Sitzbank Peugeot Traveller Rückbank Lede»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Komplettsatz Traveller: Bank + 2 VIP + Tisch",
+    "text": "остаток не внесён\nKomplettsatz Traveller: Bank + 2 VIP + Tisch\nsitzbank\n1.100 €\nцена\n900 €\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-xss": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "h1. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "<img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>",
+    "text": "3 шт.\n<img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\ntisch\n10 €\nцена\n—\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать замет",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-zero": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Товар без цены и остатка",
+    "text": "0 шт.\nТовар без цены и остатка\ntisch\n—\nцена\n—\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩 Комплект…\n🙈 Не запчасть\n🗄 В архив\nОБЪЯВЛЕН",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-types": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «5» 90×44",
+     "button «💾» 50×42",
+     "input «170» 90×44",
+     "input «500» 90×44",
+     "input «50» 90×44",
+     "input «нет» 90×44"
+    ],
+    "smallN": 32,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Типы и себестоимость",
+    "text": "СТАНДАРТНАЯ СЕБЕСТОИМОСТЬ ЗА ШТУКУ\n<b>x</b>\n💾\nодиночное / VIP сиденье\n💾\nскамья (2+1 / 3er)\n💾\nстолик\n💾\nфаркоп\n💾\nрейлинги / багажник\n💾\nводитель + пассажир\n💾\nремни\n💾\nкузовные детали\n💾\nкомплект с",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-month": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Отчёт: октябрь 2026 г.",
+    "text": "‹\nОктябрь 2026 Г.\n›\nПРИБЫЛЬ ЗА МЕСЯЦ\n40 €\nвыручка 880 € · себестоимость 840 €\n1.265 €\nвложено\n3 шт.\nпродано\n34 шт.\nостаток\n3.630 €\nостаток по цене\nПАРТИИ\n17%\nSitzbank Peugeot Traveller 2+1 Leder schwa",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-questions": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Тот же товар?",
+    "text": "ЭТО ТОТ ЖЕ ТОВАР?\n0\n\nВопросов нет — склад разобран.\n\nПРОДАЖИ БЕЗ ТОВАРА\nSitzbank 2er Mercedes Vito\n300 €\nSitzbank 2er Mercedes Vito\n300 €\nПривяжите в карточке товара или через переписку.",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "market": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: (t.changes_ru ?? []).forEach is not a function",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "accounts": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Аккаунты",
+    "text": "Ersatzteile Nord\nнет пароля Gmail\nqa1@example.invalid\nПринимать письма\nАвто-приветствие новым покупателям\n⚠️ нет пароля Gmail · почта Kleinanzeigen не задана\nПроверить вход\n🔑 Доступы\n⚡ Быстрые ответы",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "settings": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «disabled» 20×20",
+     "input «redirect» 20×20",
+     "input «production» 20×20"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Настройки",
+    "text": "ОТПРАВКА\nВыключено\nничего не отправляется — безопасно\nНа тестовый адрес\nписьма уходят на адрес ниже, не покупателям\nПокупателям\nписьма уходят реальным покупателям\nТестовый адрес (для режима «на тестов",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "more": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Ещё",
+    "text": "📊\nОбзор\nсводка за сегодня и неделю\n›\n🔍\nНайденные продажи\nпроверить, что продано по переписке\n›\n🗺\nРынок\nпохожие объявления и цены\n›\n📮\nАккаунты\n5 почт Kleinanzeigen, проверка входа, бэкап\n›\n⚙️\nНастр",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "review": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nЦЕНА\n450\nМИНИМУМ\n380\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\nВчера\nЗдравствуйте, скамья ещё доступн",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "market@abort": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "stock@abort": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "inbox@abort": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "thread-hot@abort": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Переписка",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "market@500": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "stock@500": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "inbox@500": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "thread-hot@500": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Переписка",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "market@slow": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: (t.changes_ru ?? []).forEach is not a function",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: (t.changes_ru ?? []).forEach is not a function"
+   },
+   "stock@slow": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 1,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "34\nна складе, шт.\n3.945 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n21\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "34\nна складе, шт.\n3.945 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 "
+   },
+   "inbox@slow": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [
+     "div.row «AN Anna_K 13:22 Sitzbank Citroën Jumpy З» right=416",
+     "div.row «HO HotHans 15:16 Sitzbank Peugeot Travel» right=416",
+     "div.row «KM Klaus M. 15:04 Rückbank Peugeot Trave» right=416",
+     "div.row «JS John Smith 12:22 Einzelsitz Fahrersit» right=416",
+     "div.row «SX <script>window.__xss3=1</script>Mallo» right=416",
+     "div.row «WW Wolfeschlegelsteinhausenbergerdorff W» right=416",
+     "div.row «ZJ Zażółć Gęślą Jaźń 09:22 Klapptisch Mu» right=416",
+     "div.row «NN Neg Ned 08:22 Sitzbank Peugeot Travel» right=416",
+     "div.row «OO Overdue Olaf 17.10 Sitzbank Peugeot T» right=416",
+     "div.row «BS B.ST 18.10 Klappbank Renault Trafic М» right=416"
+    ],
+    "overflowN": 10,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\nПроверить ›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВс",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Н"
+   },
+   "thread-hot@slow": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "HotHans",
+    "text": "HO\nHotHans\nAutoteile Süd · Sitzbank Peugeot Traveller\n↗\nЦЕНА\n450\nМИНИМУМ\n380\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\nСегодня\nБеру. Сегодня заберу за 450 наличными, адрес?\nIch nehme sie. Kann heut",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "HO\nHotHans\nAutoteile Süd · Sitzbank Peugeot Traveller\n↗\nЦЕНА\n450\nМИНИМУМ\n380\n📈 рынок 370–552 €, медиана 435 · 12 объявл.\nСегодня\nБеру. Сегод"
+   },
+   "dbltap": {
+    "posts": [
+     {
+      "path": "/api/ma/stock/products/7/receipt",
+      "status": 200,
+      "screen": "dbltap"
+     }
+    ],
+    "text": "0 шт.\nТовар без цены и остатка\ntisch\n—\nцена\n—\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩 Комп"
+   }
+  },
+  "errors": [
+   {
+    "screen": "market",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "review",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "market@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "stock@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "inbox@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "market@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "stock@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "inbox@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@slow",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   }
+  ],
+  "http": [],
+  "posts": [
+   {
+    "path": "/api/ma/threads/qa-t1/open",
+    "status": 200,
+    "screen": "thread-draft"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "thread-hot"
+   },
+   {
+    "path": "/api/ma/threads/qa-h1/open",
+    "status": 200,
+    "screen": "thread-overdue"
+   },
+   {
+    "path": "/api/ma/messages/8/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-en"
+   },
+   {
+    "path": "/api/ma/threads/qa-h3/open",
+    "status": 200,
+    "screen": "thread-en"
+   },
+   {
+    "path": "/api/ma/threads/qa-h4/open",
+    "status": 200,
+    "screen": "thread-xss"
+   },
+   {
+    "path": "/api/ma/threads/qa-h5/open",
+    "status": 200,
+    "screen": "thread-longname"
+   },
+   {
+    "path": "/api/ma/threads/qa-h6/open",
+    "status": 200,
+    "screen": "thread-pl"
+   },
+   {
+    "path": "/api/ma/threads/qa-h7/open",
+    "status": 200,
+    "screen": "thread-negprice"
+   },
+   {
+    "path": "/api/ma/threads/qa-t1/open",
+    "status": 200,
+    "screen": "review"
+   },
+   {
+    "path": "/api/ma/messages/1/lock/release-beacon",
+    "status": 204,
+    "screen": "review"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@abort"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@500"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@slow"
+   },
+   {
+    "path": "/api/ma/messages/9/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-hot@slow"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "thread-hot@slow"
+   },
+   {
+    "path": "/api/ma/stock/products/7/receipt",
+    "status": 200,
+    "screen": "dbltap"
+   }
+  ]
+ },
+ "fold-inner-port": {
+  "screens": {
+   "inbox": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "triage": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "1 с готовым черновиком\n1 из 1\nKM\nKlaus M.\nнемецкий\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n300\n380\n450\nКЛИЕНТ · ПО-РУССКИ\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать ор",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-draft": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-hot": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "HotHans",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-overdue": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Overdue Olaf",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-en": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · EN» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "John Smith",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-xss": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 21,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "<script>window.__xss3=1</script>Mallory",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-longname": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "h1. «Wolfeschlegelsteinhausenbergerdorff Wolf»",
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»"
+    ],
+    "truncN": 22,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-pl": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Zażółć Gęślą Jaźń",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-negprice": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Neg Ned",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "clients": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «<script>window.__xss3=1</script>Mallory»",
+     "b. «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "КЛИЕНТЫ\n13\nHO\nHotHans\n15:16\nждёт ответа\n1 обращение · 1 товар\nKM\nKlaus M.\n15:04\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n14:22\nзакрыто\n1 обращение · 1 товар\nAN\nAnna_K\n13:22\nждёт ответа\n1 обращение ·",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "sales": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "ЭТОТ МЕСЯЦ\n600 €\n2 продажи · в среднем 300 €\nНеделя\nМесяц\nГод\nВсё\n➕ Продажа\n🔍 Найденные продажи\nВсе аккаунты ▾\nпо дням ▾\nПРОДАЖИ\n2\nSitzbank 2er Mercedes Vito\n20.10 · Garage West · M.Yilmaz\n300 €\n−50 ",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-1": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Sitzbank Peugeot Traveller 2+1 Leder schwarz",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-kit": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»",
+     "b. «Sitzbank Peugeot Traveller Rückbank Lede»"
+    ],
+    "truncN": 3,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Komplettsatz Traveller: Bank + 2 VIP + Tisch",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-xss": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "<img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-zero": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Товар без цены и остатка",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-types": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «5» 90×44",
+     "button «💾» 50×42",
+     "input «170» 90×44",
+     "input «500» 90×44",
+     "input «50» 90×44",
+     "input «нет» 90×44"
+    ],
+    "smallN": 32,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Типы и себестоимость",
+    "text": "СТАНДАРТНАЯ СЕБЕСТОИМОСТЬ ЗА ШТУКУ\n<b>x</b>\n💾\nодиночное / VIP сиденье\n💾\nскамья (2+1 / 3er)\n💾\nстолик\n💾\nфаркоп\n💾\nрейлинги / багажник\n💾\nводитель + пассажир\n💾\nремни\n💾\nкузовные детали\n💾\nкомплект с",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-month": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Отчёт: октябрь 2026 г.",
+    "text": "‹\nОктябрь 2026 Г.\n›\nПРИБЫЛЬ ЗА МЕСЯЦ\n40 €\nвыручка 880 € · себестоимость 840 €\n1.315 €\nвложено\n3 шт.\nпродано\n35 шт.\nостаток\n3.630 €\nостаток по цене\nПАРТИИ\n17%\nSitzbank Peugeot Traveller 2+1 Leder schwa",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-questions": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Тот же товар?",
+    "text": "ЭТО ТОТ ЖЕ ТОВАР?\n0\n\nВопросов нет — склад разобран.\n\nПРОДАЖИ БЕЗ ТОВАРА\nSitzbank 2er Mercedes Vito\n300 €\nSitzbank 2er Mercedes Vito\n300 €\nПривяжите в карточке товара или через переписку.",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "market": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: (t.changes_ru ?? []).forEach is not a function",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "accounts": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Аккаунты",
+    "text": "Ersatzteile Nord\nнет пароля Gmail\nqa1@example.invalid\nПринимать письма\nАвто-приветствие новым покупателям\n⚠️ нет пароля Gmail · почта Kleinanzeigen не задана\nПроверить вход\n🔑 Доступы\n⚡ Быстрые ответы",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "settings": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «disabled» 20×20",
+     "input «redirect» 20×20",
+     "input «production» 20×20"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Настройки",
+    "text": "ОТПРАВКА\nВыключено\nничего не отправляется — безопасно\nНа тестовый адрес\nписьма уходят на адрес ниже, не покупателям\nПокупателям\nписьма уходят реальным покупателям\nТестовый адрес (для режима «на тестов",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "more": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Ещё",
+    "text": "📊\nОбзор\nсводка за сегодня и неделю\n›\n🔍\nНайденные продажи\nпроверить, что продано по переписке\n›\n🗺\nРынок\nпохожие объявления и цены\n›\n📮\nАккаунты\n5 почт Kleinanzeigen, проверка входа, бэкап\n›\n⚙️\nНастр",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "review": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "market@abort": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "stock@abort": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)\n📦\nВыберите товар слева",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "inbox@abort": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)\n💬\nВыберите переписку слева",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "thread-hot@abort": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Переписка",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)\nОшибка: Адрес сервера сменился. Закройте мини-приложение и ",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "market@500": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "stock@500": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "Ошибка: HTTP 500: Internal Server Error\n📦\nВыберите товар слева",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error\n📦\nВыберите товар слева"
+   },
+   "inbox@500": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Ошибка: HTTP 500: Internal Server Error\n💬\nВыберите переписку слева",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error\n💬\nВыберите переписку слева"
+   },
+   "thread-hot@500": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Переписка",
+    "text": "Ошибка: HTTP 500: Internal Server Error\nОшибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error\nОшибка: HTTP 500: Internal Server Error"
+   },
+   "market@slow": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: (t.changes_ru ?? []).forEach is not a function",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: (t.changes_ru ?? []).forEach is not a function"
+   },
+   "stock@slow": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 2,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 "
+   },
+   "inbox@slow": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Н"
+   },
+   "thread-hot@slow": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 211×38",
+     "button «По-русски» 211×38"
+    ],
+    "smallN": 3,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 13:22 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано HO HotHans 15:16 Sitzbank Pe»",
+     "span.r-msg «Беру. Сегодня заберу за 450 наличными, а»",
+     "div.rw «Жду Продано KM Klaus M. 15:04 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JS John Smith 12:22 Einzelsi»",
+     "span.r-msg «Привет, сиденье ещё есть? Доставка в UK?»",
+     "div.rw «Жду Продано SX <script>window.__xss3=1</»",
+     "b.r-name «<script>window.__xss3=1</script>Mallory»",
+     "div.rw «Жду Продано WW Wolfeschlegelsteinhausenb»",
+     "b.r-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 20,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "HotHans",
+    "text": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Найдено продаж: 1\n›\nВсе\n10\nЖдут ответа\n9\nЖдём\n1\nВсе аккаунты",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "9 ждут ответа · самое старое — Overdue Olaf, 17.10\nОткрыть ›\n9\nждут ответа (в т.ч. 1 закреплён)\n1\nждём клиента\n2 · 600 €\nпродано сегодня\n💰 Н"
+   },
+   "dbltap": {
+    "err": "Locator.fill: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(\"input[type=number]\").first\n"
+   }
+  },
+  "errors": [
+   {
+    "screen": "market",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "review",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "market@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "stock@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "inbox@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "market@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "stock@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "inbox@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@slow",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   }
+  ],
+  "http": [],
+  "posts": [
+   {
+    "path": "/api/ma/threads/qa-t1/open",
+    "status": 200,
+    "screen": "thread-draft"
+   },
+   {
+    "path": "/api/ma/messages/1/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-hot"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "thread-hot"
+   },
+   {
+    "path": "/api/ma/messages/9/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-overdue"
+   },
+   {
+    "path": "/api/ma/threads/qa-h1/open",
+    "status": 200,
+    "screen": "thread-overdue"
+   },
+   {
+    "path": "/api/ma/messages/8/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-en"
+   },
+   {
+    "path": "/api/ma/threads/qa-h3/open",
+    "status": 200,
+    "screen": "thread-en"
+   },
+   {
+    "path": "/api/ma/messages/10/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-xss"
+   },
+   {
+    "path": "/api/ma/threads/qa-h4/open",
+    "status": 200,
+    "screen": "thread-xss"
+   },
+   {
+    "path": "/api/ma/threads/qa-h5/open",
+    "status": 200,
+    "screen": "thread-longname"
+   },
+   {
+    "path": "/api/ma/messages/12/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-pl"
+   },
+   {
+    "path": "/api/ma/threads/qa-h6/open",
+    "status": 200,
+    "screen": "thread-pl"
+   },
+   {
+    "path": "/api/ma/messages/13/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-negprice"
+   },
+   {
+    "path": "/api/ma/threads/qa-h7/open",
+    "status": 200,
+    "screen": "thread-negprice"
+   },
+   {
+    "path": "/api/ma/messages/14/lock/release-beacon",
+    "status": 204,
+    "screen": "clients"
+   },
+   {
+    "path": "/api/ma/threads/qa-t1/open",
+    "status": 200,
+    "screen": "review"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@abort"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@500"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@slow"
+   },
+   {
+    "path": "/api/ma/messages/9/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-hot@slow"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "thread-hot@slow"
+   },
+   {
+    "path": "/api/ma/messages/9/lock/release-beacon",
+    "status": 204,
+    "screen": "thread-hot@slow"
+   }
+  ]
+ },
+ "flip5-flex": {
+  "screens": {
+   "inbox": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "1 с готовым черновиком\n1 из 1\nKM\nKlaus M.\nнемецкий\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать оригинал\n<img src=x onerror=alert(1)> Hallo\nПозже\nОтправить",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "triage": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "1 с готовым черновиком\n1 из 1\nKM\nKlaus M.\nнемецкий\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать оригинал\n<img src=x onerror=alert(1)> Hallo\nПозже\nОтправить",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-draft": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «KM Klaus M.» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\n↗\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 13:22\nДа, доступна.\nHallo, ja, noch verfügbar.\nMit freundlichen Grüßen\n19.10, 14:22\nСегодня\nЗадняя ска",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-hot": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «HO HotHans» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "HotHans",
+    "text": "HO\nHotHans\n↗\nСегодня\nБеру. Сегодня заберу за 450 наличными, адрес?\nIch nehme sie. Kann heute 450 bar abholen, bitte Adresse.\n20.10, 15:16\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-overdue": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «OO Overdue Olaf» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Overdue Olaf",
+    "text": "OO\nOverdue Olaf\n↗\n17 октября\nАлло? Жду уже несколько дней.\nHallo? Bitte antworten, ich warte seit Tagen.\n17.10, 07:22\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-en": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «JS John Smith» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "John Smith",
+    "text": "JS\nJohn Smith\n↗\nСегодня\nПривет, сиденье ещё есть? Доставка в UK?\nHi, is the seat still available? Can you ship to the UK?\n20.10, 12:22\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-xss": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «SX <script>window.__xss3=1</script>Mallo» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "h1. «<script>window.__xss3=1</script>Mallory»",
+     "b.th-name «<script>window.__xss3=1</script>Mallory»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "<script>window.__xss3=1</script>Mallory",
+    "text": "SX\n<script>window.__xss3=1</script>Mallory\n↗\nСегодня\nXSS-тест\n<img src=x onerror=\"window.__xss=1\"> kaufen?\n20.10, 11:22\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-longname": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «WW Wolfeschlegelsteinhausenbergerdorff W» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "h1. «Wolfeschlegelsteinhausenbergerdorff Wolf»",
+     "b.th-name «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff",
+    "text": "WW\nWolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff Wolfeschlegelsteinhausenbergerdorff\n↗\nСегодня\nЦена? Цена? Цена? Цена? Цена? Цена? Цена? Ц",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-pl": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ZJ Zażółć Gęślą Jaźń» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Zażółć Gęślą Jaźń",
+    "text": "ZJ\nZażółć Gęślą Jaźń\n↗\nСегодня\nПривет, сколько столик? Доставка?\nCześć, ile kosztuje stolik? Wysyłka?\n20.10, 09:22\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "thread-negprice": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «NN Neg Ned» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Neg Ned",
+    "text": "NN\nNeg Ned\n↗\nСегодня\nПредлагаю -50\nIch biete -50 Euro. 0 Euro. 99999999999 Euro\n20.10, 08:22\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "clients": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [
+     "div.clist «HO HotHans 15:16 ждёт ответа 1 обращение» right=310",
+     "a.crow «HO HotHans 15:16 ждёт ответа 1 обращение» right=310",
+     "a.crow «KM Klaus M. 15:04 ждём клиента 1 обращен» right=310",
+     "a.crow «JE Jean 14:22 закрыто 1 обращение · 1 то» right=310",
+     "a.crow «AN Anna_K 13:22 ждёт ответа 1 обращение » right=310",
+     "a.crow «JS John Smith 12:22 ждёт ответа 1 обраще» right=310",
+     "a.crow «SX <script>window.__xss3=1</script>Mallo» right=310",
+     "a.crow «PI Piotr 10:22 1 обращение · 1 товар» right=310",
+     "a.crow «WW Wolfeschlegelsteinhausenbergerdorff W» right=310",
+     "a.crow «ZJ Zażółć Gęślą Jaźń 09:22 ждёт ответа 1» right=310",
+     "a.crow «NN Neg Ned 08:22 ждёт ответа 1 обращение» right=310",
+     "a.crow «MY M.Yilmaz вчера ждём клиента 1 обращен» right=310"
+    ],
+    "overflowN": 14,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "span.cr-meta «1 обращение · 1 товар»",
+     "b. «<script>window.__xss3=1</script>Mallory»",
+     "b. «Wolfeschlegelsteinhausenbergerdorff Wolf»"
+    ],
+    "truncN": 14,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "КЛИЕНТЫ\n13\nHO\nHotHans\n15:16\nждёт ответа\n1 обращение · 1 товар\nKM\nKlaus M.\n15:04\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n14:22\nзакрыто\n1 обращение · 1 товар\nAN\nAnna_K\n13:22\nждёт ответа\n1 обращение ·",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "sales": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [
+     "div.s-list «Sitzbank 2er Mercedes Vito 20.10 · Garag» right=310",
+     "a.srow «Sitzbank 2er Mercedes Vito 20.10 · Garag» right=310"
+    ],
+    "overflowN": 3,
+    "small": [
+     "input «Поиск продаж» 290×44"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "ЭТОТ МЕСЯЦ\n600 €\n2 продажи · в среднем 300 €\nНеделя\nМесяц\nГод\nВсё\n➕ Продажа\n🔍 Найденные продажи\nВсе аккаунты ▾\nпо дням ▾\nПРОДАЖИ\n2\nSitzbank 2er Mercedes Vito\n20.10 · Garage West · M.Yilmaz\n300 €\n−50 ",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [
+     "div.st-list «22 Товар без цены и остатка — 4 Einzelsi» right=310",
+     "a.prow «22 Товар без цены и остатка —» right=310",
+     "a.prow «4 Einzelsitz Fahrersitz VW T6 VIP объявл» right=310",
+     "a.prow «4 Sitzbank Peugeot Traveller 2+1 Leder s» right=310",
+     "a.prow «3 <img src=x onerror=\"window.__xss=1\">Ha» right=310",
+     "a.prow «2 Старый товар (устарел) Sitzbank Opel V» right=310",
+     "a.prow «? <script>alert(1)</script>Тест —» right=310",
+     "a.prow «! Komplettsatz Traveller: Bank + 2 VIP +» right=310",
+     "a.prow «? min>list 100 €» right=310",
+     "a.prow «! Klapptisch Multivan объявлений 1 · вис» right=310"
+    ],
+    "overflowN": 12,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Einzelsitz Fahrersitz VW T6 VIP»",
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»",
+     "b. «Старый товар (устарел) Sitzbank Opel Viv»",
+     "b. «Komplettsatz Traveller: Bank + 2 VIP + T»"
+    ],
+    "truncN": 5,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-1": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "h1. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 4,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Sitzbank Peugeot Traveller 2+1 Leder schwarz",
+    "text": "4 шт.\nSitzbank Peugeot Traveller 2+1 Leder schwarz\nsitzbank · gebraucht\n450 €\nцена\n380 €\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩 К",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-kit": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "h1. «Komplettsatz Traveller: Bank + 2 VIP + T»",
+     "b. «Sitzbank Peugeot Traveller Rückbank Lede»",
+     "b. «Komplettsatz Traveller Bank + 2 VIP + Ti»"
+    ],
+    "truncN": 3,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Komplettsatz Traveller: Bank + 2 VIP + Tisch",
+    "text": "остаток не внесён\nKomplettsatz Traveller: Bank + 2 VIP + Tisch\nsitzbank\n1.100 €\nцена\n900 €\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-xss": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "h1. «<img src=x onerror=\"window.__xss=1\">Hack»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "<img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>",
+    "text": "3 шт.\n<img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\ntisch\n10 €\nцена\n—\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать замет",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-zero": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Товар без цены и остатка",
+    "text": "0 шт.\nТовар без цены и остатка\ntisch\n—\nцена\n—\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩 Комплект…\n🙈 Не запчасть\n🗄 В архив\nОБЪЯВЛЕН",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-types": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «5» 90×44",
+     "button «💾» 50×42",
+     "input «170» 90×44",
+     "input «500» 90×44",
+     "input «50» 90×44",
+     "input «нет» 90×44"
+    ],
+    "smallN": 32,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Типы и себестоимость",
+    "text": "СТАНДАРТНАЯ СЕБЕСТОИМОСТЬ ЗА ШТУКУ\n<b>x</b>\n💾\nодиночное / VIP сиденье\n💾\nскамья (2+1 / 3er)\n💾\nстолик\n💾\nфаркоп\n💾\nрейлинги / багажник\n💾\nводитель + пассажир\n💾\nремни\n💾\nкузовные детали\n💾\nкомплект с",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-month": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Отчёт: октябрь 2026 г.",
+    "text": "‹\nОктябрь 2026 Г.\n›\nПРИБЫЛЬ ЗА МЕСЯЦ\n40 €\nвыручка 880 € · себестоимость 840 €\n1.315 €\nвложено\n3 шт.\nпродано\n35 шт.\nостаток\n3.630 €\nостаток по цене\nПАРТИИ\n17%\nSitzbank Peugeot Traveller 2+1 Leder schwa",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "stock-questions": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Тот же товар?",
+    "text": "ЭТО ТОТ ЖЕ ТОВАР?\n0\n\nВопросов нет — склад разобран.\n\nПРОДАЖИ БЕЗ ТОВАРА\nSitzbank 2er Mercedes Vito\n300 €\nSitzbank 2er Mercedes Vito\n300 €\nПривяжите в карточке товара или через переписку.",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "market": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: (t.changes_ru ?? []).forEach is not a function",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "accounts": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Аккаунты",
+    "text": "Ersatzteile Nord\nнет пароля Gmail\nqa1@example.invalid\nПринимать письма\nАвто-приветствие новым покупателям\n⚠️ нет пароля Gmail · почта Kleinanzeigen не задана\nПроверить вход\n🔑 Доступы\n⚡ Быстрые ответы",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "settings": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «disabled» 20×20",
+     "input «redirect» 20×20",
+     "input «production» 20×20"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Настройки",
+    "text": "ОТПРАВКА\nВыключено\nничего не отправляется — безопасно\nНа тестовый адрес\nписьма уходят на адрес ниже, не покупателям\nПокупателям\nписьма уходят реальным покупателям\nТестовый адрес (для режима «на тестов",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "more": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Ещё",
+    "text": "📊\nОбзор\nсводка за сегодня и неделю\n›\n🔍\nНайденные продажи\nпроверить, что продано по переписке\n›\n🗺\nРынок\nпохожие объявления и цены\n›\n📮\nАккаунты\n5 почт Kleinanzeigen, проверка входа, бэкап\n›\n⚙️\nНастр",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "review": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «KM Klaus M.» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\n↗\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 13:22\nДа, доступна.\nHallo, ja, noch verfügbar.\nMit freundlichen Grüßen\n19.10, 14:22\nСегодня\nЗадняя ска",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false
+   },
+   "market@abort": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "stock@abort": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "inbox@abort": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "thread-hot@abort": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Переписка",
+    "text": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: Адрес сервера сменился. Закройте мини-приложение и откройте его кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)"
+   },
+   "market@500": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "stock@500": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "inbox@500": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "thread-hot@500": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Переписка",
+    "text": "Ошибка: HTTP 500: Internal Server Error",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: HTTP 500: Internal Server Error"
+   },
+   "market@slow": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Дубли и перевыкладывание",
+    "text": "Ошибка: (t.changes_ru ?? []).forEach is not a function",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "Ошибка: (t.changes_ru ?? []).forEach is not a function"
+   },
+   "stock@slow": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [
+     "div.st-list «22 Товар без цены и остатка — 4 Einzelsi» right=310",
+     "a.prow «22 Товар без цены и остатка —» right=310",
+     "a.prow «4 Einzelsitz Fahrersitz VW T6 VIP объявл» right=310",
+     "a.prow «4 Sitzbank Peugeot Traveller 2+1 Leder s» right=310",
+     "a.prow «3 <img src=x onerror=\"window.__xss=1\">Ha» right=310",
+     "a.prow «2 Старый товар (устарел) Sitzbank Opel V» right=310",
+     "a.prow «? <script>alert(1)</script>Тест —» right=310",
+     "a.prow «! Komplettsatz Traveller: Bank + 2 VIP +» right=310",
+     "a.prow «? min>list 100 €» right=310",
+     "a.prow «! Klapptisch Multivan объявлений 1 · вис» right=310"
+    ],
+    "overflowN": 12,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "b. «Einzelsitz Fahrersitz VW T6 VIP»",
+     "b. «Sitzbank Peugeot Traveller 2+1 Leder sch»",
+     "b. «<img src=x onerror=\"window.__xss=1\">Hack»",
+     "b. «Старый товар (устарел) Sitzbank Opel Viv»",
+     "b. «Komplettsatz Traveller: Bank + 2 VIP + T»"
+    ],
+    "truncN": 5,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Склад",
+    "text": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 Типы и себестоимость\nТОВАРЫ\n11\n22\nТовар без цены и остат",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "35\nна складе, шт.\n3.995 €\nвложено\n3.630 €\nожидаемо\n—\nприбыль\n🧾 Продажи без товара: 2\n➕ Приход\n📊 Отчёт за месяц\n🧭 Дубли и перевыкладывание\n🏷 "
+   },
+   "inbox@slow": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "1 с готовым черновиком\n1 из 1\nKM\nKlaus M.\nнемецкий\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать оригинал\n<img src=x onerror=alert(1)> Hallo\nПозже\nОтправить",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "1 с готовым черновиком\n1 из 1\nKM\nKlaus M.\nнемецкий\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать оригинал\n<img src=x onerror=alert(1)"
+   },
+   "thread-hot@slow": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «HO HotHans» 242×35"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "HotHans",
+    "text": "HO\nHotHans\n↗\nСегодня\nБеру. Сегодня заберу за 450 наличными, адрес?\nIch nehme sie. Kann heute 450 bar abholen, bitte Adresse.\n20.10, 15:16\nОтправить\n⋯",
+    "xss": 0,
+    "rawtag": false,
+    "empty": false,
+    "txt_head": "HO\nHotHans\n↗\nСегодня\nБеру. Сегодня заберу за 450 наличными, адрес?\nIch nehme sie. Kann heute 450 bar abholen, bitte Adresse.\n20.10, 15:16\nОт"
+   },
+   "dbltap": {
+    "posts": [
+     {
+      "path": "/api/ma/stock/products/7/receipt",
+      "status": 200,
+      "screen": "dbltap"
+     }
+    ],
+    "text": "0 шт.\nТовар без цены и остатка\ntisch\n—\nцена\n—\nминимум\n—\nсебестоимость\n➕ Приход\n📋 Инвентаризация\n➖ Списать\n✏️ Цены\n💶 Цена и рынок\n👀 Как стать заметнее\n🧩 Комп"
+   }
+  },
+  "errors": [
+   {
+    "screen": "market",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "review",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "market@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "stock@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "inbox@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "Failed to load resource: net::ERR_FAILED"
+   },
+   {
+    "screen": "thread-hot@abort",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "market@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "stock@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "inbox@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+   },
+   {
+    "screen": "thread-hot@500",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   },
+   {
+    "screen": "market@slow",
+    "type": "console",
+    "msg": "[router] render failed: TypeError: (t.changes_ru ?? []).forEach is not a function\n    at repostCard (http://127.0.0.1:8822/js/screens/market.js?v=6394282-2495162:118:26)\n    at http://127.0.0.1:8822/j"
+   }
+  ],
+  "http": [],
+  "posts": [
+   {
+    "path": "/api/ma/threads/qa-t1/open",
+    "status": 200,
+    "screen": "thread-draft"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "thread-hot"
+   },
+   {
+    "path": "/api/ma/threads/qa-h1/open",
+    "status": 200,
+    "screen": "thread-overdue"
+   },
+   {
+    "path": "/api/ma/threads/qa-h3/open",
+    "status": 200,
+    "screen": "thread-en"
+   },
+   {
+    "path": "/api/ma/threads/qa-h4/open",
+    "status": 200,
+    "screen": "thread-xss"
+   },
+   {
+    "path": "/api/ma/threads/qa-h5/open",
+    "status": 200,
+    "screen": "thread-longname"
+   },
+   {
+    "path": "/api/ma/threads/qa-h6/open",
+    "status": 200,
+    "screen": "thread-pl"
+   },
+   {
+    "path": "/api/ma/threads/qa-h7/open",
+    "status": 200,
+    "screen": "thread-negprice"
+   },
+   {
+    "path": "/api/ma/threads/qa-t1/open",
+    "status": 200,
+    "screen": "review"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@abort"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@500"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "inbox@slow"
+   },
+   {
+    "path": "/api/ma/threads/qa-h2/open",
+    "status": 200,
+    "screen": "thread-hot@slow"
+   },
+   {
+    "path": "/api/ma/stock/products/7/receipt",
+    "status": 200,
+    "screen": "dbltap"
+   }
+  ]
+ }
+}
