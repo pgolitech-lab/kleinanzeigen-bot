@@ -3,9 +3,12 @@
 #   generate_scout_queries  — генерация поисковых запросов (Sonnet)
 #   classify_scout_listings — классификация объявлений car/part/other (Haiku)
 
+import logging
 from typing import Any, Optional
 
 from modules.claude_utils import call_json, fast_model, smart_model
+
+logger = logging.getLogger(__name__)
 
 # --- MARKET SCOUT: генерация поисковых запросов ---
 
@@ -116,6 +119,9 @@ def generate_scout_queries(
             "max_pages": max(1, min(10, mp)),
         })
 
+    if not queries:
+        raise RuntimeError(f"scout: модель не вернула ни одного валидного запроса "
+                           f"(сырых: {len(data.get('queries') or [])})")
     return {
         "queries": queries,
         "tokens_in": in_t,
@@ -216,4 +222,7 @@ def classify_scout_listings(
         rtype = r.get("type")
         if rid and rtype in ("car", "part", "other"):
             out_map[rid] = rtype
+    missing = len({str(it.get("ad_id")) for it in items} - set(out_map))
+    if missing:
+        logger.warning("scout classify: без валидного типа %d из %d объявлений", missing, len(items))
     return {"map": out_map, "tokens_in": in_t, "tokens_out": out_t, "cost_usd": cost}

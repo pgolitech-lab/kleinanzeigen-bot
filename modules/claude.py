@@ -154,18 +154,30 @@ def history_for(
     """История треда из БД (строки, по хронологии) для промпта.
 
     exclude_id — id текущего письма (отсекаем по id, а не по тексту);
-    before — created_at текущего письма: более поздние строки не берём
+    before — created_at текущего письма: более поздние ВХОДЯЩИЕ не берём
     (иначе при регенерации старого черновика в «историю» попадут будущие письма).
     Строка in хранит И вопрос клиента (de_client), И наш ответ (de_answer) —
     разворачивает их `format_history`.
     """
     if not gmail_thread_id:
         return []
+    return rows_to_history(db.thread_history(gmail_thread_id), exclude_id=exclude_id, before=before)
+
+
+def rows_to_history(
+    rows: list[Any],
+    exclude_id: Optional[int] = None,
+    before: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Строки messages → формат истории для format_history (см. history_for)."""
     out: list[dict[str, Any]] = []
-    for r in db.thread_history(gmail_thread_id):
+    for r in rows:
         if exclude_id is not None and r["id"] == exclude_id:
             continue
-        if before and (_rget(r, "created_at") or "") > before:
+        # Отсекаем только БОЛЕЕ ПОЗДНИЕ письма клиента. Наши out-строки (auto-ack,
+        # compose) создаются с utcnow() позже Date-заголовка текущего письма —
+        # их терять нельзя, иначе модель снова поздоровается.
+        if before and r["direction"] == "in" and (_rget(r, "created_at") or "") > before:
             continue
         out.append({
             "id": r["id"],
@@ -188,6 +200,7 @@ def _clip(text: str, limit: int) -> str:
 def format_history(
     history: Optional[list[dict[str, Any]]],
     max_chars: int = HISTORY_MAX_CHARS,
+    with_dates: bool = False,
 ) -> tuple[str, bool]:
     """Развернуть строки истории в реплики «[Клиент]/[Продавец]» по времени.
 
@@ -212,7 +225,10 @@ def format_history(
     if not turns:
         return "", False
     turns.sort(key=lambda t: (t[0], t[1], t[2]))
-    lines = [t[3] for t in turns]
+    if with_dates:
+        lines = [f"[{t[0][:16].replace('T', ' ')}] {t[3]}" if t[0] else t[3] for t in turns]
+    else:
+        lines = [t[3] for t in turns]
     has_ours = any(t[2] == 1 for t in turns)
 
     kept: list[str] = []
@@ -417,7 +433,7 @@ def generate_draft(
         label="черновик ответа",
         model=smart_model(), system=_system_prompt(), user="\n".join(parts),
         schema=DRAFT_SCHEMA, max_tokens=max_tokens,
-        nonempty=("ru_answer", "client_answer"),
+        nonempty=("client_lang", "ru_answer", "client_answer", "ru_translation"),
     )
     return _answer_result(data, meta, fallback_lang=client_lang or "de")
 
@@ -486,7 +502,7 @@ def generate_autopilot_reply(
         model=smart_model(), system=_system_prompt(), user="\n".join(parts),
         schema=_AUTOPILOT_SCHEMA, max_tokens=max_tokens, web_search=True,
         # Автопилот отправляет без ревью — пустой ответ клиенту недопустим
-        nonempty=("client_lang", "ru_client", "ru_answer", "client_answer"),
+        nonempty=("client_lang", "ru_client", "ru_answer", "client_answer", "ru_translation"),
     )
     result = _answer_result(data, meta)
     result.update({
@@ -559,6 +575,20 @@ def _lang_pair(direction: str, target_lang: Optional[str], source_lang: Optional
     return "немецкого", "русский", "ru"
 
 
+def _check_translation(label: str, src: str, translation: str, target: str,
+                       source_lang: Optional[str]) -> None:
+    """Перевод не должен быть эхом исходника и должен быть на целевом языке.
+
+    Ловит случай «модель вернула исходный русский текст» до того, как он уйдёт клиенту.
+    """
+    from modules.guardrails import language_verdict
+    same_lang = source_lang and source_lang.lower() == target
+    if not same_lang and len(src.strip()) > 20 and translation.strip() == src.strip():
+        raise LLMResponseError(f"{label}: модель вернула исходный текст без перевода")
+    if language_verdict(translation, target) == "mismatch":
+        raise LLMResponseError(f"{label}: результат не на языке «{target}»")
+
+
 def translate_only(
     text: str,
     direction: str = "ru_to_de",
@@ -584,6 +614,7 @@ def translate_only(
         user=(text or "").strip(),
         schema=_TRANSLATE_SCHEMA, max_tokens=1500, nonempty=("translation",),
     )
+    _check_translation("перевод", text or "", data["translation"], dst_code, source_lang)
     return {
         "translation": data["translation"].strip(),
         "target_lang": dst_code,
@@ -622,6 +653,7 @@ def translate_with_back(
         schema=_TRANSLATE_BACK_SCHEMA, max_tokens=2500,
         nonempty=("translation", "back_translation_ru"),
     )
+    _check_translation("перевод + обратный перевод", text or "", data["translation"], target, source_lang)
     return {
         "translation": data["translation"].strip(),
         "back_translation": data["back_translation_ru"].strip(),
@@ -631,6 +663,9 @@ def translate_with_back(
 
 
 # ─────────────────────────── Регенерация черновика ───────────────────────────
+
+# Письма в этих статусах уже ушли/закрыты — их черновик не перегенерируем
+FINAL_STATUSES = ("sent", "sent_debug", "skipped", "skipped_sold", "not_sent_disabled", "sending")
 
 # Пресеты, которые принимает api (/messages/{id}/regenerate, VALID_STRATEGIES)
 QUICK_STRATEGIES: dict[str, str] = {
@@ -664,6 +699,13 @@ def _regenerate_core(
 ) -> dict[str, Any]:
     """Регенерация с полным контекстом. Если вызывающий не передал history/brief
     (api_ma зовёт regenerate_with_* только с row) — подгружаем сами."""
+    status = _rget(msg_row, "status")
+    if status in FINAL_STATUSES:
+        # api зовёт regenerate_with_* напрямую — защищаем отправленные письма здесь
+        raise RuntimeError(
+            f"Письмо #{_rget(msg_row, 'id')} уже обработано ({status}) — черновик не перезаписываю. "
+            "Для нового сообщения клиенту используйте «✉️ Написать»."
+        )
     if history is None or brief_text is None:
         auto_hist, auto_brief = draft_context(msg_row)
         history = auto_hist if history is None else history
@@ -883,11 +925,13 @@ def generate_auto_ack(
             "Ты вежливый продавец на немецком сайте Kleinanzeigen.de. "
             "Пишешь короткое приветствие-заглушку покупателю когда не можешь ответить подробно сразу."
         ),
-        user=user_msg, schema=_AUTO_ACK_SCHEMA, max_tokens=400, nonempty=("ack_text",),
+        user=user_msg, schema=_AUTO_ACK_SCHEMA, max_tokens=400, nonempty=("client_lang", "ack_text"),
     )
-    lang = (data.get("client_lang") or "de").strip().lower()
+    lang = data["client_lang"].strip().lower()
     ack = data["ack_text"].strip()
     ack_ru = (data.get("ack_text_ru") or "").strip() or (ack if lang == "ru" else "")
+    if not ack_ru:
+        raise LLMResponseError("auto-ack: пустое RU-зеркало ack_text_ru")
     return {
         "client_lang": lang,
         "ack_text": ack,
@@ -924,7 +968,7 @@ def detect_and_translate_to_ru(text: str) -> dict[str, Any]:
                 "Переводи ВЕСЬ текст, ничего не отвечай на его содержание. Только перевод — без пояснений, "
                 "вариантов и скобок." + _TRADE_FRAME),
         user=f"Текст:\n«{text[:3000]}»",
-        schema=_DETECT_TRANSLATE_SCHEMA, max_tokens=1500,
+        schema=_DETECT_TRANSLATE_SCHEMA, max_tokens=1500, nonempty=("lang", "translation_ru"),
     )
     return {
         "lang": (data.get("lang") or "?").lower().strip(),

@@ -73,3 +73,50 @@ def test_extract_prefers_last_object_within_one_block():
     # must return the FINAL object, not the stale draft.
     block = 'draft: {"price": 900, "note": "stale"} final: {"price": 1500, "final": true}'
     assert g.extract_json_object([block]) == {"price": 1500, "final": True}
+
+
+# --- language_verdict: любые языки, не только ru ---
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("text,lang", [
+    ("Hallo, die Sitzbank ist noch da. Viele Grüße", "de"),
+    ("Hi, yes it is still available. Thanks", "en"),
+    ("Здравствуйте, да, сиденье ещё есть.", "ru"),
+    ("Добрий день, так, сидіння ще є. Дякую", "uk"),
+    ("Здравейте, да, седалката още я има. Благодаря", "bg"),
+    ("Merhaba, evet hâlâ satılık. Teşekkürler", "tr"),
+    ("Dzień dobry, tak, siedzenie jest nadal dostępne. Dziękuję", "pl"),
+])
+def test_language_verdict_ok(text, lang):
+    assert g.language_verdict(text, lang) == "ok"
+
+
+@_pytest.mark.parametrize("text,lang", [
+    ("Здравствуйте, да, сиденье ещё есть.", "de"),        # кириллица немцу
+    ("Hallo, die Sitzbank ist noch da. Viele Grüße", "ru"),
+    ("Здравствуйте, да, сиденье ещё есть, можно забрать.", "uk"),  # русский украинцу
+    ("Hi, yes it is still available, thanks for asking", "de"),   # английский немцу
+    ("Hallo, die Sitzbank ist noch da und gerne mit Lieferung", "pl"),
+    ("Dzień dobry, tak, jest nadal dostępne. Dziękuję", "tr"),
+])
+def test_language_verdict_mismatch(text, lang):
+    assert g.language_verdict(text, lang) == "mismatch"
+    assert g.outgoing_language_ok(text, lang) is False
+
+
+def test_language_verdict_short_is_unsure_or_ok():
+    assert g.language_verdict("Ok, 1200 €", "de") in ("ok", "unsure")
+    assert g.language_verdict("1200", "tr") == "ok"
+
+
+def test_language_llm_fallback_used_only_when_unsure():
+    from unittest.mock import patch
+    with patch("modules.claude.detect_text_lang", return_value={"lang": "de"}) as m:
+        assert g.outgoing_language_ok_llm("Passt", "de") is True
+        m.assert_called_once()
+    with patch("modules.claude.detect_text_lang", side_effect=RuntimeError("down")):
+        assert g.outgoing_language_ok_llm("Passt", "de") is False
+    with patch("modules.claude.detect_text_lang") as m:
+        assert g.outgoing_language_ok_llm("Здравствуйте, сиденье ещё есть.", "de") is False
+        m.assert_not_called()
