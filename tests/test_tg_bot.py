@@ -210,9 +210,9 @@ def test_live_card_edits_in_place_and_resends_when_gone(tmp_path, monkeypatch):
     tb._card_record("T", "1", 404)  # карточку в чате удалили
     tb._card_put("T", "c", "thread_T", "x", kind="k")
     assert [m for m, _ in sent][-2:] == ["editMessageText", "sendMessage"]
-    # replace: старую удаляем, новая со звуком (urgent)
+    # replace: новая со звуком, старая удаляется после неё (urgent)
     tb._card_put("T", "d", "thread_T", "x", kind="k", urgent=True, replace=True)
-    assert [m for m, _ in sent][-2:] == ["deleteMessage", "sendMessage"]
+    assert [m for m, _ in sent][-2:] == ["sendMessage", "deleteMessage"]
 
 
 def test_live_card_all_failed_raises(tmp_path, monkeypatch):
@@ -233,7 +233,7 @@ def test_autopilot_one_card_and_batch_reminders_and_morning(tmp_path, monkeypatc
     assert [m for m, _ in sent] == ["sendMessage", "editMessageText", "editMessageText"]
     assert "Автопилот остановлен" in sent[-1][1]["text"]
     tb.send_autopilot_stop_notification(m1, "threat")       # срочная — новая со звуком
-    assert [m for m, _ in sent][-2:] == ["deleteMessage", "sendMessage"]
+    assert [m for m, _ in sent][-2:] == ["sendMessage", "deleteMessage"]
     assert sent[-1][1]["disable_notification"] is False
     sent.clear()
     m2 = database.add_message(acc, "in", gmail_thread_id="U", de_client="x", status="sent",

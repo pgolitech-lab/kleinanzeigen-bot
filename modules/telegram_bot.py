@@ -384,7 +384,7 @@ def send_for_review(message_id: int) -> Optional[int]:
     first_mid: Optional[int] = None
     for dm_id in dm_ids:
         try:
-            _card_drop(thread_id, str(dm_id))  # одна живая карточка на тред: прежняя не копится в чате
+            old_card = _card_get(thread_id, str(dm_id)) if thread_id else None
             r = _http_post_single("sendMessage", {
                 "chat_id": dm_id,
                 "text": text,
@@ -398,6 +398,7 @@ def send_for_review(message_id: int) -> Optional[int]:
             if tg_mid:
                 db.add_card_dispatch(message_id, str(dm_id), tg_mid)
                 _card_record(thread_id, str(dm_id), tg_mid)
+                _delete_old(str(dm_id), old_card)  # одна живая карточка на тред; старая уходит после новой
                 if first_mid is None:
                     first_mid = tg_mid
         except Exception:
@@ -491,6 +492,16 @@ def _card_drop(thread_id: str, chat: str) -> None:
         _cards_save(cards)
 
 
+def _delete_old(chat: str, ent: Optional[dict[str, Any]]) -> None:
+    """Удалить прежнюю карточку ПОСЛЕ того, как новая доставлена (иначе при сбое остаёмся без карточки)."""
+    if not ent:
+        return
+    try:
+        _http_post_single("deleteMessage", {"chat_id": chat, "message_id": ent["mid"], "_kind": "card_drop"})
+    except Exception as e:
+        logger.info("живая карточка: старую не удалить (chat=%s): %s", chat, e)
+
+
 def _operator_chats() -> list[str]:
     return [str(c) for c in (config.telegram_operator_dm_ids() or [config.telegram_chat_id()])]
 
@@ -513,13 +524,12 @@ def _card_put(thread_id: str, text: str, start_param: str, label: str, *, kind: 
                     "disable_web_page_preview": True, "reply_markup": kb, "_kind": kind, "_thread": thread_id})
                 first = first or ent["mid"]
                 continue
-            except RuntimeError as e:
+            except Exception as e:  # RuntimeError Telegram и сетевые URLError/таймаут
                 if "not modified" in str(e):
                     first = first or ent["mid"]
                     continue
                 logger.info("живая карточка: правка не вышла (%s) — шлём новую", e)
-        if replace:
-            _card_drop(thread_id, chat)
+        old = _card_get(thread_id, chat) if replace else None
         try:
             r = _http_post_single("sendMessage", {
                 "chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True,
@@ -532,6 +542,7 @@ def _card_put(thread_id: str, text: str, start_param: str, label: str, *, kind: 
         mid = r.get("message_id") if isinstance(r, dict) else None
         if mid:
             _card_record(thread_id, chat, mid)
+            _delete_old(chat, old)
             first = first or mid
     if failed == len(chats):
         raise RuntimeError(f"Telegram: карточка треда не доставлена ни одному оператору ({failed})")
@@ -551,8 +562,8 @@ def send_reminder_batch(out_message_ids: list[int], days_silent: float) -> Optio
         return None
     if len(rows) == 1:
         return send_reminder_offer(rows[0]["id"], days_silent)
-    days = int(days_silent) if float(days_silent) >= 1 else 1
-    lines = [f"⏰ <b>Пора напомнить: {len(rows)}</b> · молчат от {days} дн."]
+    silent_for = f"{days_silent:g} дн." if float(days_silent) >= 1 else f"{round(float(days_silent) * 24)} ч"
+    lines = [f"⏰ <b>Пора напомнить: {len(rows)}</b> · молчат от {silent_for}"]
     for m in rows[:REMINDER_BATCH_LIST]:
         buyer = _html(_safe(m, "buyer_display_name") or _safe(m, "buyer_name") or "клиент")
         lines.append(f"• {buyer} — {_html(_oneline(_safe(m, 'ad_title') or '—', 40))}")

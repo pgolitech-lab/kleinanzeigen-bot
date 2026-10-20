@@ -357,7 +357,10 @@ def stock_receipt_parse(body: ReceiptParseBody, user: dict = Depends(verify_init
     known = {p["id"] for p in products}
     items = []
     for it in data.get("items", []):
-        qty = int(it["qty"]) if it.get("qty") is not None else 1
+        try:
+            qty = int(it["qty"]) if it.get("qty") is not None else 1
+        except (TypeError, ValueError):
+            continue
         if qty <= 0:
             continue
         pid = it.get("product_id")
@@ -365,6 +368,7 @@ def stock_receipt_parse(body: ReceiptParseBody, user: dict = Depends(verify_init
                       "qty": qty})
     if not items:
         raise HTTPException(422, "в строке не нашлось позиций")
+    items = items[:50]  # как лимит POST /stock/batches
     total = data.get("total_cost_eur")
     return {"items": items, "total_cost_eur": total if isinstance(total, (int, float)) and total >= 0 else None,
             "unmatched": sum(1 for i in items if i["product_id"] is None)}
