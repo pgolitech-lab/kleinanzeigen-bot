@@ -6,9 +6,11 @@ import { initData } from "./tg.js";
 //      Menu Button и web_app-кнопки (свежий при каждом открытии);
 //   2. sessionStorage — тот же ?api= в рамках открытого окна;
 //   3. FALLBACK_API_BASE — зашитый URL (его правит tunnel-url-sync в режиме git).
-// Принимаем ТОЛЬКО https://<имя>.trycloudflare.com — ссылка с произвольным
-// ?api= не уведёт initData оператора на любой сервер. Полностью риск снимает
-// только named tunnel со своим доменом (тогда ?api= не нужен вовсе).
+// TUNNEL_RE (только https://<имя>.trycloudflare.com) — фильтр от мусора, НЕ
+// защита: такой поддомен анонимно получит кто угодно. Защищает то, что initData
+// подписана токеном нашего бота и выдаётся только его кнопками. Остаточный
+// риск — старый ?api= в старой кнопке, если имя туннеля достанется чужому;
+// полностью снимает named tunnel со своим доменом (тогда ?api= не нужен).
 //
 // NB: backend должен отдавать Access-Control-Allow-Origin для github.io
 // (CORSMiddleware). X-Telegram-Init-Data — non-simple header → всегда preflight.

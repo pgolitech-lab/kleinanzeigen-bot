@@ -20,12 +20,19 @@ import sys
 from pathlib import Path
 
 webapp = Path(sys.argv[1])
+if sys.argv[2] not in ("", "--check"):
+    sys.exit(f"неизвестный аргумент {sys.argv[2]!r} (допустимо: --check)")
 check = sys.argv[2] == "--check"
 index = webapp / "index.html"
 
 
 def ver(p: Path) -> str:
-    return hashlib.sha1(p.read_bytes()).hexdigest()[:10]
+    # Формат «цифры-цифры» (из sha1 содержимого) — совместим со старым
+    # update_tunnel_url.sh, который бампает только \?v=[0-9]+-[0-9]+: если он
+    # отработает раньше нового, все версии станут одной меткой времени, но
+    # останутся согласованными (кэш просто сбросится целиком).
+    h = hashlib.sha1(p.read_bytes()).hexdigest()
+    return f"{int(h[:6], 16)}-{int(h[6:12], 16)}"
 
 
 js_files = sorted((webapp / "js").rglob("*.js"))
@@ -34,7 +41,7 @@ if not js_files:
 
 # Версионированные импорты внутри модулей ломают схему (обходят import map)
 stale = [str(p.relative_to(webapp)) for p in js_files
-         if re.search(r"""from\s+["'][^"']+\?v=|import\(\s*["'][^"']+\?v=""", p.read_text())]
+         if re.search(r"""(?:from|import)\s*\(?\s*["'][^"']+\?v=""", p.read_text())]
 if stale:
     sys.exit("импорты с ?v= внутри модулей (уберите, версию даёт import map): " + ", ".join(stale))
 
