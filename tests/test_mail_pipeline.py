@@ -424,7 +424,8 @@ def test_autopilot_detector_failure_is_fail_closed(inc, tmp_db, monkeypatch):
     mid, ap = _ap_msg(tmp_db)
     monkeypatch.setattr(inc.claude, "detect_text_lang",
                         lambda t: (_ for _ in ()).throw(RuntimeError("cli down")))
-    inc._autopilot_dispatch(mid, ap, _reply())
+    # Короткий текст без явных признаков языка — эвристика не уверена, нужен детектор.
+    inc._autopilot_dispatch(mid, ap, _reply(de_answer="Okay, passt."))
     assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
 
 
