@@ -51,8 +51,10 @@ function openThread(t) {
 
 function summaryStrip(data, mount) {
   const s = data.summary ?? {};
-  const waiting = s.waiting ?? (data.red ?? []).length;
-  const waitingClient = s.waiting_client ?? (data.green ?? []).length;
+  // единый счёт для полосы, чипов и значка вкладки: «ждут» = красные + закреплённые, где последним писал клиент
+  const pinIn = (data.pinned ?? []).filter(t => t.last_event_kind === "in").length;
+  const waiting = (data.red ?? []).length + pinIn;
+  const waitingClient = (data.green ?? []).length + (data.pinned ?? []).length - pinIn;
   const strip = el(`<div class="sumstrip"></div>`);
   const cell = (n, label, cls, onClick) => {
     const c = el(`<button class="sc"><b></b><small></small></button>`);
@@ -62,7 +64,7 @@ function summaryStrip(data, mount) {
     c.addEventListener("click", onClick);
     strip.appendChild(c);
   };
-  cell(String(waiting), "ждут ответа", waiting ? "hot" : "", () => { state.status = "red"; renderWith(mount, data); });
+  cell(String(waiting), pinIn ? `ждут ответа (в т.ч. ${pinIn} закреплён)` : "ждут ответа", waiting ? "hot" : "", () => { state.status = "red"; renderWith(mount, data); });
   cell(String(waitingClient), "ждём клиента", "", () => { state.status = "green"; renderWith(mount, data); });
   const soldCell = (n, sumEur) => {
     const sum = sumEur ? ` · ${Math.round(sumEur).toLocaleString("de-DE")} €` : "";
@@ -100,7 +102,7 @@ async function refreshDetected(data, mount) {
 function toolbar(data, mount, counts) {
   const bar = el(`<div class="tbar"><div class="fchips"></div><div class="tbar-r"></div></div>`);
   const chips = bar.querySelector(".fchips");
-  [["all", "Все", counts.all], ["red", "Ждут", counts.red], ["green", "Ждём", counts.green], ["ap", "Авто", counts.ap]]
+  [["all", "Все", counts.all], ["red", "Ждут ответа", counts.red], ["green", "Ждём", counts.green], ["ap", "Авто", counts.ap]]
     .forEach(([k, label, n]) => {
       if (k === "ap" && !n && state.status !== "ap") return;
       const c = el(`<button class="fchip"><span></span><b></b></button>`);
