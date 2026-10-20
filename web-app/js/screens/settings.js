@@ -1,138 +1,138 @@
-// Settings screen — KV editor с per-field save.
-
+// ⚙️ Настройки (v3): группы с русскими подписями, одна кнопка «Сохранить»
+// для изменённых полей (POST /settings по ключу). Режим отправки «production»
+// — с явным подтверждением (письма пойдут реальным покупателям).
+// Секреты (токен бота) сервер отдаёт маской; пустое поле — не менять.
 import { api } from "../api.js";
-import { el, esc, setLoading, setError } from "../utils.js";
+import { el, setLoading, setError } from "../utils.js";
+import { confirmSheet } from "../components/sheet.js";
+import { toast } from "../components/kit.js";
 
-
-const FIELDS = [
-  // [key, label, kind, options?]
-  ["send_mode", "Send mode", "radio", ["disabled", "redirect", "production"]],
-  ["polling_paused", "Polling paused", "checkbox"],
-  ["debug_email", "Debug email (для redirect mode)", "text"],
-  ["gmail_poll_interval_sec", "Gmail poll interval (сек)", "number"],
-  ["gmail_from_filter", "Gmail from filter", "text"],
-  ["inquiry_max_age_days", "Inquiry max age (дней)", "number"],
-  ["reminders_enabled", "Reminders enabled", "checkbox"],
-  ["reminder_after_days", "Reminder after (дней)", "number"],
-  ["telegram_authorized", "Telegram authorized IDs (CSV)", "text"],
-  ["telegram_operator_dm_ids", "Telegram DM IDs (CSV)", "text"],
-  ["max_discount_percent", "Max discount %", "number"],
-  ["claude_model", "Claude model", "text"],
-  ["chat_font_em", "Chat font em", "text"],
-  ["api_balance_snapshot_usd", "API balance snapshot $", "text"],
-  ["api_balance_snapshot_at", "API balance snapshot at (ISO)", "text"],
-  ["anthropic_api_key", "Anthropic API key", "secret"],
-  ["telegram_bot_token", "Telegram bot token", "secret"],
+const SEND_MODES = [
+  ["disabled", "Выключено", "ничего не отправляется — безопасно"],
+  ["redirect", "На тестовый адрес", "письма уходят на адрес ниже, не покупателям"],
+  ["production", "Покупателям", "письма уходят реальным покупателям"],
 ];
 
+// [key, подпись, тип]
+const GROUPS = [
+  ["Отправка", [
+    ["send_mode", "Режим отправки", "mode"],
+    ["debug_email", "Тестовый адрес (для режима «на тестовый адрес»)", "text"],
+  ]],
+  ["Почта", [
+    ["polling_paused", "Пауза приёма писем", "check"],
+    ["gmail_poll_interval_sec", "Проверять почту каждые, сек", "number"],
+    ["inquiry_max_age_days", "Не отвечать на письма старше, дней", "number"],
+    ["gmail_from_filter", "Фильтр отправителя (служебное)", "text"],
+  ]],
+  ["Напоминания и торг", [
+    ["reminders_enabled", "Предлагать напомнить молчащим покупателям", "check"],
+    ["reminder_after_days", "Напоминать через, дней (0.5 = 12 ч)", "number"],
+    ["max_discount_percent", "Максимальная скидка ИИ, %", "number"],
+  ]],
+  ["Telegram и служебное", [
+    ["telegram_operator_dm_ids", "Операторы (Telegram ID через запятую)", "text"],
+    ["telegram_authorized", "Кому можно открывать MA (ID через запятую)", "text"],
+    ["claude_model", "Модель ИИ для черновиков", "text"],
+    ["chat_font_em", "Размер шрифта чата в веб-морде, em", "text"],
+    ["telegram_bot_token", "Токен бота", "secret"],
+  ]],
+];
 
-function fieldRow(key, label, kind, value, options) {
-  const wrap = el(`<div class="mb-3"></div>`);
-
-  const labelEl = el(`<label class="form-label small fw-semibold mb-1"></label>`);
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  let input;
-  if (kind === "radio") {
-    const group = el(`<div></div>`);
-    options.forEach(opt => {
-      const choice = el(`
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="radio" name="${key}" value="${opt}" id="${key}_${opt}">
-          <label class="form-check-label small" for="${key}_${opt}">${opt}</label>
-        </div>
-      `);
-      const radio = choice.querySelector("input");
-      if (value === opt) radio.checked = true;
-      group.appendChild(choice);
-    });
-    input = group;
-  } else if (kind === "checkbox") {
-    input = el(`<div class="form-check"><input class="form-check-input" type="checkbox" id="${key}"></div>`);
-    input.querySelector("input").checked = (value === "1");
-  } else if (kind === "secret") {
-    const masked = el(`
-      <div class="d-flex gap-2 align-items-center">
-        <span class="masked-display"></span>
-        <button type="button" class="btn btn-sm btn-outline-secondary replace-btn">Заменить</button>
-        <input type="password" class="form-control secret-input d-none" />
-      </div>
-    `);
-    masked.querySelector(".masked-display").textContent = value || "(не задано)";
-    masked.querySelector(".replace-btn").addEventListener("click", () => {
-      masked.querySelector(".masked-display").classList.add("d-none");
-      masked.querySelector(".replace-btn").classList.add("d-none");
-      masked.querySelector(".secret-input").classList.remove("d-none");
-    });
-    input = masked;
-  } else {
-    input = el(`<input class="form-control" type="${kind === "number" ? "number" : "text"}" />`);
-    input.value = value || "";
+export async function render(mount) {
+  setLoading(mount, "Загружаю настройки…");
+  let data;
+  try {
+    data = await api("/api/ma/settings");
+  } catch (e) {
+    if (mount.isConnected) setError(mount, e.message ?? String(e));
+    return;
   }
-  wrap.appendChild(input);
+  if (!mount.isConnected) return;
+  const initial = {}, current = {};
+  const root = el(`<div class="settings"><div class="set-groups"></div>
+    <div class="set-save"><span class="set-n"></span><button class="btn btn-primary" type="button" disabled>💾 Сохранить изменения</button></div></div>`);
+  const groups = root.querySelector(".set-groups");
+  const saveBtn = root.querySelector(".set-save button"), nEl = root.querySelector(".set-n");
+  const changed = () => Object.keys(current).filter(k => current[k] !== initial[k]);
+  const sync = () => {
+    const n = changed().length;
+    saveBtn.disabled = !n;
+    nEl.textContent = n ? `изменено: ${n}` : "";
+    root.querySelector(".set-save").classList.toggle("on", !!n);
+  };
+  const set = (k, v) => { current[k] = v; sync(); };
 
-  const saveBar = el(`
-    <div class="d-flex gap-2 mt-1 align-items-center">
-      <button class="btn btn-sm btn-primary save-btn">💾 Сохранить</button>
-      <span class="status-text small text-muted"></span>
-    </div>
-  `);
-  wrap.appendChild(saveBar);
-
-  saveBar.querySelector(".save-btn").addEventListener("click", async () => {
-    const status = saveBar.querySelector(".status-text");
-    status.textContent = "Сохраняю…";
-    status.className = "status-text small text-muted";
-
-    let valueToSend;
-    if (kind === "radio") {
-      valueToSend = input.querySelector("input:checked")?.value || "";
-    } else if (kind === "checkbox") {
-      valueToSend = input.querySelector("input").checked ? "1" : "0";
-    } else if (kind === "secret") {
-      valueToSend = input.querySelector(".secret-input").value;
-      if (!valueToSend) {
-        status.textContent = "Поле пустое — пропустил";
-        status.className = "status-text small text-warning";
+  GROUPS.forEach(([title, fields]) => {
+    const sec = el(`<section class="c-sec"><h3></h3></section>`);
+    sec.querySelector("h3").textContent = title;
+    fields.forEach(([key, label, kind]) => {
+      const raw = data[key] ?? "";
+      initial[key] = kind === "secret" ? "" : String(raw);
+      current[key] = initial[key];
+      if (kind === "mode") {
+        const box = el(`<div class="set-mode" role="radiogroup"></div>`);
+        box.setAttribute("aria-label", label);
+        SEND_MODES.forEach(([v, name, hint]) => {
+          const opt = el(`<label class="sm-opt"><input type="radio" name="send_mode"><span class="sm-t"><b></b><small></small></span></label>`);
+          opt.classList.add(`sm-${v}`);
+          const r = opt.querySelector("input");
+          r.value = v;
+          r.checked = raw === v;
+          opt.querySelector("b").textContent = name;
+          opt.querySelector("small").textContent = hint;
+          r.addEventListener("change", () => set(key, v));
+          box.appendChild(opt);
+        });
+        sec.appendChild(box);
         return;
       }
-    } else {
-      valueToSend = input.value;
-    }
-
-    try {
-      await api("/api/ma/settings", {
-        method: "POST",
-        body: {key, value: valueToSend},
-      });
-      status.textContent = "✅ Сохранено";
-      status.className = "status-text small text-success";
-    } catch (e) {
-      status.textContent = `❌ ${e.message ?? "ошибка"}`;
-      status.className = "status-text small text-danger";
-    }
+      if (kind === "check") {
+        const t = el(`<label class="tgl"><span class="tgl-l"></span><input type="checkbox" role="switch"><span class="tgl-s"></span></label>`);
+        t.querySelector(".tgl-l").textContent = label;
+        const cb = t.querySelector("input");
+        cb.checked = raw === "1";
+        cb.addEventListener("change", () => set(key, cb.checked ? "1" : "0"));
+        sec.appendChild(t);
+        return;
+      }
+      const l = el(`<label class="form-label small"></label>`);
+      l.textContent = label;
+      const inp = el(`<input class="form-control">`);
+      inp.type = kind === "number" ? "number" : kind === "secret" ? "password" : "text";
+      if (kind === "number") inp.step = "any";
+      if (kind === "secret") {
+        inp.placeholder = raw ? "задан — оставьте пустым, чтобы не менять" : "не задан";
+        inp.autocomplete = "new-password";
+      } else inp.value = String(raw);
+      inp.addEventListener("input", () => set(key, inp.value));
+      sec.append(l, inp);
+    });
+    groups.appendChild(sec);
   });
 
-  return wrap;
-}
-
-
-export async function render(mount, params) {
-  setLoading(mount, "Загружаю настройки…");
-  try {
-    const data = await api("/api/ma/settings");
-    const container = el(`
-      <div>
-        <div class="fields-list"></div>
-      </div>
-    `);
-    const list = container.querySelector(".fields-list");
-    FIELDS.forEach(([key, label, kind, options]) => {
-      list.appendChild(fieldRow(key, label, kind, data[key] ?? "", options));
-    });
-    mount.replaceChildren(container);
-  } catch (e) {
-    setError(mount, e.message ?? String(e));
-  }
+  saveBtn.addEventListener("click", async () => {
+    const keys = changed();
+    if (current.send_mode === "production" && keys.includes("send_mode") &&
+        !(await confirmSheet("Включить отправку РЕАЛЬНЫМ покупателям?\nВсе одобренные ответы начнут уходить клиентам.", "Да, покупателям"))) return;
+    saveBtn.disabled = true;
+    let ok = 0;
+    const failed = [];
+    for (const k of keys) {
+      // пустой секрет = «не менять»
+      if (k === "telegram_bot_token" && !current[k]) { initial[k] = current[k]; continue; }
+      try {
+        await api("/api/ma/settings", { method: "POST", body: { key: k, value: current[k] } });
+        initial[k] = current[k];
+        ok++;
+      } catch (e) {
+        failed.push(`«${k}»: ${e.message ?? e}`);
+      }
+    }
+    if (failed.length) toast(`Сохранено ${ok}, не сохранилось: ${failed.join("; ")}`, { level: "bad", ms: 8000 });
+    else if (ok) toast(`✅ Сохранено: ${ok}`);
+    sync();
+  });
+  sync();
+  mount.replaceChildren(root);
 }

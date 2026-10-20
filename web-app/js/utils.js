@@ -93,3 +93,44 @@ export function sendOutcome(res) {
   }
   return { level: "bad", text: `⚠️ Отправка не подтверждена (статус: ${st ?? kind}) — проверьте ленту` };
 }
+
+// «1.200 €», «1 200,50 €», «VB 950» → число евро; не разобрать → null
+export function parseEur(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (v == null) return null;
+  let s = String(v).replace(/[^\d.,]/g, "");
+  if (!s) return null;
+  // немецкий формат: точка — тысячи, запятая — дробь
+  if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  else s = s.replace(/[.,](?=\d{3}(\D|$))/g, "").replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+// «Продано сегодня» — из того же /api/ma/sales, что и экран «Продажи»
+// (одно число на всех экранах, день по Берлину). Кэш 2 мин.
+let _soldToday = { at: 0, p: null, day: "" };
+// после записи продажи — следующий показ «продано сегодня» берёт свежие данные
+export function invalidateSoldToday() { _soldToday = { at: 0, p: null, day: "" }; }
+// сегодняшняя дата по Берлину в формате YYYY-MM-DD (для полей <input type=date>)
+export function berlinDateISO(d = new Date()) {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(d);
+}
+export function soldToday(api) {
+  const dayKey = berlinDateISO();
+  if (_soldToday.p && _soldToday.day === dayKey && Date.now() - _soldToday.at < 120000) return _soldToday.p;
+  const day = d => new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  const today = day(new Date());
+  _soldToday.at = Date.now();
+  _soldToday.day = dayKey;
+  _soldToday.p = api("/api/ma/sales?period=week&group_by=day").then(r => {
+    const sales = (r?.sales ?? []).filter(s => {
+      if (!s.sold_at) return false;
+      const iso = s.sold_at.length <= 10 ? `${s.sold_at}T12:00:00` : s.sold_at;
+      const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+      return !isNaN(d) && day(d) === today;
+    });
+    return { count: sales.length, eur: sales.reduce((a, s) => a + (Number(s.sold_price_eur) || 0), 0) };
+  }).catch(e => { _soldToday.at = 0; throw e; });
+  return _soldToday.p;
+}

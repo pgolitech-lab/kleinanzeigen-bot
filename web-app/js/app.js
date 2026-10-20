@@ -4,6 +4,8 @@ import { ready, startParam } from "./tg.js";
 import { start as startRouter } from "./router.js";
 import { mountTabbar } from "./components/tabbar.js";
 import { mountBackbar } from "./components/backbar.js";
+import { initTheme } from "./theme.js";
+import { initLayout } from "./layout.js";
 
 function applyStartParam() {
   // First try Telegram SDK (works for /start commands, startapp deep-links, etc.)
@@ -27,6 +29,8 @@ function applyStartParam() {
 
 function main() {
   ready();
+  initTheme();
+  initLayout();
   applyStartParam();
   const mount = document.getElementById("app");
   mountBackbar();

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Командный центр</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="app">
+  <!-- «Пульс»: метрики сверху (широкий режим — всегда; узкий — на экране очереди) -->
+  <header id="pulse" class="pulse" aria-label="Пульс"></header>
+
+  <div class="cols">
+    <section id="col-queue" class="col col-queue" aria-label="Очередь сделок"></section>
+    <section id="col-main" class="col col-main" aria-label="Рабочая область"></section>
+    <aside id="col-side" class="col col-side" aria-label="Сделка и клиент"></aside>
+  </div>
+
+  <nav id="tabbar" class="tabbar" aria-label="Разделы"></nav>
+
+  <!-- Пейджер для Flip Flex Window 306×340 -->
+  <section id="pager" class="pager" aria-label="Пейджер"></section>
+
+  <div id="sheet-bd" class="sheet-bd" hidden></div>
+  <section id="sheet" class="sheet" role="dialog" aria-modal="true" hidden></section>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</div>
+<script src="../_shared/mock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

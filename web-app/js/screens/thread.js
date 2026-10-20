@@ -1,258 +1,42 @@
-// Экран треда (редизайн 2026-07-15): чат + черновик одной карточкой с вкладками
-// (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
-// Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
-// Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
+// Экран треда (редизайн v3, вид A «премиум-мессенджер» + чипы цены из C).
+// Открытие — один запрос POST /threads/{id}/open (тред + черновик + лок).
+// Сверху полоса сделки (цена / минимум / клиент / мы + термометр), лента
+// двуязычных пузырей, внизу черновик ИИ у дока: «Клиенту · DE» / «По-русски»,
+// чипы цены (встречная, −5 %, без торга, короче, мягче, вариант) с кэшем.
+// Отправка — 3 тапа: «Отправить» → финальный лист → «✅» (B-05/U-20).
+// ИНВАРИАНТ: клиенту не уходит текст не на его языке без явной галочки
+// оператора — кириллическая эвристика + LLM lang-check, force только по галочке,
+// серверный 409-guard в /send — последняя линия.
 import { api, API_BASE, LLM_TIMEOUT_MS } from "../api.js";
-import { el, berlinTime, setLoading, setError, accountColor, sendOutcome } from "../utils.js";
+import { el, berlinTime, setLoading, setError, sendOutcome, parseEur, accountColor } from "../utils.js";
+import { openSoldSheet } from "../components/sold-sheet.js";
 import { setTitle } from "../components/backbar.js";
 import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js";
 import { buildEditForm } from "../components/edit-form.js";
 import { buildComposeForm } from "../components/compose-form.js";
 import { buildAutopilotForm } from "../components/autopilot-form.js";
+import { avatar, icon, langBadge, langName, toast } from "../components/kit.js";
+import { thermo, hasThermo } from "../components/thermo.js";
 import { initData } from "../tg.js";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
+const CYRILLIC_CLIENT_LANGS = new Set(["ru", "uk", "be", "bg", "sr", "mk"]);
 
 // Module-state для lock release at unmount.
 let _heldMsgId = null;
+// Кэш вариантов черновика по чипам: `${msgId}:${chip}` → {from, text}; вариант
+// возвращается без LLM, только если черновик не меняли с момента его генерации
+const _variants = new Map();
 
-function findLatestPending(events) {
-  let candidate = null;
-  for (const ev of events) {
-    if (ev.kind === "in" && ev.status && PENDING_STATUSES.has(ev.status) && ev.msg_id) {
-      candidate = ev.msg_id;
-    }
-  }
-  return candidate;
-}
-
-function threadHeader(header, lock, ourActor) {
-  const card = el(`
-    <div class="tcard" style="cursor:default">
-      <div class="tc-m">
-        <div class="tc-t">
-          <span class="acct acct-name"></span>
-          <b class="ad-title"></b>
-          <span class="price ad-price"></span>
-        </div>
-        <div class="tc-sub buyer-line" style="white-space:normal"></div>
-        <div class="d-flex gap-1 flex-wrap mt-1 chips-line"></div>
-      </div>
-      <div class="tc-side">
-        <a class="ad-link" target="_blank" rel="noopener">↗</a>
-      </div>
-    </div>
-  `);
-  card.querySelector(".ad-title").textContent = header.ad_title ?? "(без названия)";
-  card.querySelector(".ad-price").textContent = header.ad_price ?? "";
-
-  const acctEl = card.querySelector(".acct-name");
-  acctEl.textContent = header.account_name ?? "?";
-  acctEl.style.backgroundColor = header.account_id != null
-    ? accountColor(header.account_id) : "var(--mut)";
-  acctEl.title = header.account_email ?? "";
-
-  card.querySelector(".buyer-line").textContent =
-    `${header.buyer_display_name ?? "?"}${header.buyer_email ? ` · ${header.buyer_email}` : ""}`;
-
-  const chips = card.querySelector(".chips-line");
-  if (header.is_autopilot) chips.appendChild(el(`<span class="chip c-amb">автопилот</span>`));
-  if (lock?.holder && lock.holder !== ourActor) {
-    const b = el(`<span class="chip c-red"></span>`);
-    b.textContent = `в работе у ${lock.holder} · ${lock.remaining_min} мин`;
-    chips.appendChild(b);
-  }
-  if (!chips.children.length) chips.remove();
-
-  if (header.ad_url) {
-    card.querySelector(".ad-link").href = header.ad_url;
-  } else {
-    card.querySelector(".ad-link").remove();
-  }
-  return card;
-}
-
-function eventBubble(event, header, latestPendingMsgId) {
-  const isIn = event.kind === "in";
-  const isPending = isIn && event.msg_id === latestPendingMsgId &&
-                    PENDING_STATUSES.has(event.status);
-  const bubble = el(`
-    <div class="bub">
-      <div class="bw"><span class="who"></span><time class="when"></time></div>
-      <div class="text"></div>
-      <div class="ru"></div>
-    </div>
-  `);
-  if (!isIn) bubble.classList.add("out");
-  let who = isIn
-    ? (header.buyer_display_name ?? "клиент")
-    : `${header.account_name ?? "мы"}${event.is_auto_ack ? " · авто-привет" : ""}` +
-      // ответ, написанный на сайте/в приложении Kleinanzeigen (не через MA)
-      (event.status === "sent_external" ? " · из приложения" : "");
-  if (isPending) who += " · 📝";
-  bubble.querySelector(".who").textContent = who;
-  bubble.querySelector(".when").textContent = berlinTime(event.ts);
-  bubble.querySelector(".text").textContent = event.text ?? "";
-  if (event.ru_text && event.ru_text !== event.text) {
-    bubble.querySelector(".ru").textContent = event.ru_text;
-  } else {
-    bubble.querySelector(".ru").remove();
-  }
-  return bubble;
-}
-
-function relatedBlock(related) {
-  if (!related?.matches?.length) return null;
-  const block = el(`
-    <div class="alert alert-warning small">
-      <div class="mb-1"><strong>⚠️ Этот клиент уже писал по другим объявлениям:</strong></div>
-      <ul class="mb-0 ps-3 matches"></ul>
-    </div>
-  `);
-  const ul = block.querySelector(".matches");
-  related.matches.forEach(m => {
-    const li = el(`<li><a class="link"></a></li>`);
-    const a = li.querySelector(".link");
-    a.href = `#/thread/${encodeURIComponent(m.thread_id)}`;
-    a.textContent = `${m.ad_title ?? "?"} · ${m.ad_price ?? "?"} · ${berlinTime(m.last_at)}`;
-    ul.appendChild(li);
-  });
-  return block;
-}
-
-// Карточка черновика: вкладки DE/RU-идея/RU-перевод + бриф + строка ошибки.
-// Textareas редактируемые; отправка применяет edit-ru/edit-de только если менялось.
-function draftCard(review) {
-  const card = el(`
-    <div class="draft-card">
-      <div class="d-flex gap-2 align-items-center">
-        <b class="small dhead"></b>
-        <span class="chip c-amb">ждёт проверки</span>
-      </div>
-      <div class="dtabs">
-        <button type="button" data-dt="de" class="on">DE → клиенту</button>
-        <button type="button" data-dt="ru">RU идея</button>
-        <button type="button" data-dt="back">RU перевод</button>
-      </div>
-      <div class="dbody">
-        <textarea class="de-input" data-pane="de" rows="5"></textarea>
-        <textarea class="ru-input d-none" data-pane="ru" rows="5"></textarea>
-        <div class="ro back-text d-none" data-pane="back"></div>
-      </div>
-      <div class="brief"></div>
-      <div class="derr text-danger small mt-2 d-none"></div>
-    </div>
-  `);
-  card.querySelector(".dhead").textContent = `Черновик #${review.msg_id}`;
-  card.querySelector(".de-input").value = review.draft?.de_answer ?? "";
-  card.querySelector(".ru-input").value = review.draft?.ru_answer ?? "";
-  card.querySelector(".back-text").textContent = review.draft?.ru_translation ?? "(нет перевода)";
-
-  const brief = review.deal_brief;
-  const briefEl = card.querySelector(".brief");
-  if (brief) {
-    const parts = [];
-    if (brief.summary_ru) parts.push(`💬 ${brief.summary_ru}`);
-    if (brief.negotiated_price_eur) parts.push(`💰 ${brief.negotiated_price_eur} €`);
-    if (brief.client_assessment) parts.push(`🏷 ${brief.client_assessment}`);
-    if (brief.expected_next) parts.push(`⏳ ${brief.expected_next}`);
-    parts.forEach(p => {
-      const s = document.createElement("span");
-      s.textContent = p;
-      briefEl.appendChild(s);
-    });
-  } else {
-    briefEl.remove();
-  }
-
-  // Переключение вкладок — панели уже в DOM, значения textarea сохраняются
-  card.querySelectorAll("[data-dt]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      card.querySelectorAll("[data-dt]").forEach(b => b.classList.toggle("on", b === btn));
-      card.querySelectorAll("[data-pane]").forEach(p =>
-        p.classList.toggle("d-none", p.dataset.pane !== btn.dataset.dt));
-    });
-  });
-  return card;
-}
-
-function lockedByOtherBanner(lock, onRetry, msgId) {
-  const block = el(`
-    <div class="alert alert-warning">
-      <div class="mb-1"><strong>⚠️ Карточка занята оператором <span class="holder"></span></strong>
-        <span class="small text-muted">(~<span class="mins"></span> мин)</span></div>
-      <div class="small text-muted mb-2">Если оператор уже закрыл MA — заберите карточку, чтобы ответить клиенту.</div>
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm retry-btn">↻ Проверить снова</button>
-        <button class="btn btn-sm btn-warning takeover-btn">🔓 Забрать карточку</button>
-      </div>
-    </div>
-  `);
-  block.querySelector(".holder").textContent = lock.holder ?? "?";
-  block.querySelector(".mins").textContent = String(lock.remaining_min ?? 0);
-  block.querySelector(".retry-btn").addEventListener("click", onRetry);
-  // Снимаем чужой лок (release permissive) и сразу переоткрываем тред —
-  // render() заберёт лок на текущего оператора. Для случая «narcissk закрыл
-  // MA, но лок висит»: не ждём 5-минутный auto-expire.
-  block.querySelector(".takeover-btn").addEventListener("click", async (ev) => {
-    const btn = ev.currentTarget;
-    btn.disabled = true;
-    btn.textContent = "⏳ Забираю…";
-    if (msgId != null) await tryReleaseLock(msgId);
-    onRetry();
-  });
-  return block;
-}
-
-// Форма «Продано» в bottom-sheet (цена + закрыть остальные переговоры).
-function openSoldSheet(msgId, onDone) {
-  const form = el(`
-    <div>
-      <label class="form-label small text-muted">Цена продажи (€)</label>
-      <input type="number" inputmode="decimal" min="0" step="0.01"
-             class="form-control sold-price mb-2" placeholder="напр. 1300">
-      <div class="form-check mb-3">
-        <input type="checkbox" class="form-check-input close-other" id="sold-close-other">
-        <label class="form-check-label small" for="sold-close-other">
-          Закрыть остальные переговоры по этому объявлению
-        </label>
-      </div>
-      <div class="form-error text-danger small mb-2 d-none"></div>
-      <div class="d-flex gap-2">
-        <button class="btn cancel-btn" style="flex:1">Отмена</button>
-        <button class="btn btn-primary save-btn" style="flex:1">✅ Сохранить</button>
-      </div>
-    </div>
-  `);
-  const errEl = form.querySelector(".form-error");
-  form.querySelector(".cancel-btn").addEventListener("click", () => closeSheet());
-  form.querySelector(".save-btn").addEventListener("click", async () => {
-    const priceStr = form.querySelector(".sold-price").value.trim();
-    const price = Number(priceStr.replace(",", "."));
-    if (!priceStr || Number.isNaN(price) || price < 0) {
-      form.querySelector(".sold-price").classList.add("is-invalid");
-      return;
-    }
-    const closeOther = form.querySelector(".close-other").checked;
-    const saveBtn = form.querySelector(".save-btn");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "⏳ Сохраняю…";
-    try {
-      await api(`/api/ma/messages/${msgId}/sold`, {
-        method: "POST",
-        body: { price_eur: price, close_other_threads_for_ad: closeOther },
-      });
-      closeSheet();
-      onDone();
-    } catch (err) {
-      errEl.textContent = err.message ?? String(err);
-      errEl.classList.remove("d-none");
-      saveBtn.disabled = false;
-      saveBtn.textContent = "✅ Сохранить";
-    }
-  });
-  openSheet(form, "💰 Зафиксировать продажу");
-  form.querySelector(".sold-price").focus();
+// Кириллица при не-кириллическом языке клиента = почти наверняка ошибка.
+// Зеркало серверного guard'а.
+export function wrongLangForClient(text, clientLang) {
+  const lang = (clientLang || "de").toLowerCase();
+  if (CYRILLIC_CLIENT_LANGS.has(lang)) return false;
+  const letters = String(text ?? "").match(/\p{L}/gu) || [];
+  if (!letters.length) return false;
+  const cyr = letters.filter(ch => ch >= "Ѐ" && ch <= "ӿ").length;
+  return cyr / letters.length > 0.3;
 }
 
 async function tryReleaseLock(msgId) {
@@ -264,87 +48,48 @@ async function tryReleaseLock(msgId) {
   }
 }
 
+function openThreadReq(threadId, focus) {
+  return api(`/api/ma/threads/${encodeURIComponent(threadId)}/open`, {
+    method: "POST", body: {focus: focus ?? null, acquire: true},
+  });
+}
+
 export async function render(mount, params, opts = {}) {
   // Перерисовка из обработчика, завершившегося уже после ухода с экрана
-  // (mount отцеплен роутером) — ничего не делаем: иначе сняли бы лок
-  // текущего экрана и захватили новый, которого никто не отпустит.
+  // (mount отцеплен роутером) — ничего не делаем.
   if (!mount.isConnected) return;
-  // Cleanup: release предыдущий lock (если был на другом thread)
   if (_heldMsgId !== null) {
     await tryReleaseLock(_heldMsgId);
     _heldMsgId = null;
   }
-
-  setLoading(mount, "Загружаю тред…");
+  setLoading(mount, "Открываю переписку…");
   try {
-    const data = await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}`);
-    // If deep-linked via /thread/{id}/msg/{N} — focus on that msg_id, else find latest pending
-    let latestPendingMsgId = params.focus_msg_id ? Number(params.focus_msg_id) : findLatestPending(data.events);
-
-    let review = null;
-    let acquired = false;
-    let acquireError = null;
-    let ourActor = null;
-
-    if (latestPendingMsgId !== null) {
-      try {
-        review = await api(`/api/ma/messages/${latestPendingMsgId}`);
-      } catch (e) {
-        console.warn("[thread] review fetch failed:", e);
-      }
-      // Deep-link форсирует msg_id независимо от статуса: после отправки этот же
-      // черновик рисовался как «ждёт проверки» с активной кнопкой «Отправить» —
-      // оператор не видел, что письмо ушло, и жал ещё раз (спасал duplicate-guard).
-      // Не-pending draft показываем как историю: ищем другой pending в треде.
-      if (review && !PENDING_STATUSES.has(review.status)) {
-        review = null;
-        const fallback = findLatestPending(data.events);
-        latestPendingMsgId = fallback !== latestPendingMsgId ? fallback : null;
-        if (latestPendingMsgId !== null) {
-          try {
-            review = await api(`/api/ma/messages/${latestPendingMsgId}`);
-          } catch (e) {
-            console.warn("[thread] fallback review fetch failed:", e);
-          }
-        }
-      }
+    let data = await openThreadReq(params.thread_id, params.focus_msg_id ? Number(params.focus_msg_id) : null);
+    // Deep-link на уже отправленный черновик: показываем как историю и берём
+    // актуальный неотправленный черновик треда (если есть).
+    if (data.review && !PENDING_STATUSES.has(data.review.status)) {
+      if (data.lock?.acquired) tryReleaseLock(data.review.msg_id);
+      data = await openThreadReq(params.thread_id, null);
+      if (data.review && !PENDING_STATUSES.has(data.review.status)) { data.review = null; data.lock = null; }
     }
-
-    if (latestPendingMsgId !== null) {
-      try {
-        const lockRes = await api(`/api/ma/messages/${latestPendingMsgId}/lock/acquire`, {method: "POST"});
-        if (!mount.isConnected) {
-          // Оператор ушёл, пока брали лок, — сразу отдаём, чтобы не висел 5 мин.
-          // Но не если новый экран уже держит тот же msg (повторное открытие
-          // того же треда): иначе сняли бы лок у активного экрана.
-          if (_heldMsgId !== latestPendingMsgId) tryReleaseLock(latestPendingMsgId);
-          return;
-        }
-        acquired = true;
-        _heldMsgId = latestPendingMsgId;
-        ourActor = lockRes.holder;
-        if (review) {
-          review.lock = lockRes;
-        }
-      } catch (e) {
-        if (e.status === 409) {
-          acquireError = "locked";
-        } else {
-          acquireError = "network";
-          console.warn("[thread] lock acquire failed:", e);
-        }
+    const review = data.review;
+    if (review && data.lock?.acquired) {
+      if (!mount.isConnected) {
+        // Ушли, пока открывали, — сразу отдаём лок (если его не держит новый экран)
+        if (_heldMsgId !== review.msg_id) tryReleaseLock(review.msg_id);
+        return;
       }
+      _heldMsgId = review.msg_id;
     }
-
     if (!mount.isConnected) return;
-    renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor, opts);
-
+    renderThread(mount, params, data, opts);
   } catch (e) {
     if (mount.isConnected) setError(mount, e.message ?? String(e));
   }
 }
 
-// Итог «Отправить» — строго по ответу сервера (sendOutcome), а не «всегда успех».
+// ---------- кусочки разметки ----------
+
 function sendResultBanner(res) {
   const o = sendOutcome(res);
   const b = el(`<div class="alert small py-2"></div>`);
@@ -353,466 +98,671 @@ function sendResultBanner(res) {
   return b;
 }
 
-function renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor, opts = {}) {
-  const container = el(`<div></div>`);
-  if (data.header?.ad_title) setTitle(data.header.ad_title);
+// Числа сделки: поля api (offer/floor/our_last) + бриф + автопилот
+function dealNumbers(data) {
+  const r = data.review, h = data.header ?? {};
+  const brief = r?.deal_brief ?? {};
+  return {
+    price: r?.ad_price_eur ?? h.ad_price_eur ?? parseEur(r?.ad?.price ?? h.ad_price),
+    floor: r?.floor_eur ?? h.floor_eur ?? r?.autopilot?.floor_eur ?? null,
+    offer: r?.offer_eur ?? h.offer_eur ?? null,
+    ours: r?.our_last_eur ?? h.our_last_eur ?? null,
+    sugg: brief.negotiated_price_eur != null ? Number(brief.negotiated_price_eur) : null,
+  };
+}
 
-  container.appendChild(threadHeader(data.header, review?.lock ?? null, ourActor));
+const fmtEur = n => (n == null ? "—" : `${Math.round(n).toLocaleString("de-DE")} €`);
+
+function threadHead(data, onClient) {
+  const h = data.header ?? {};
+  const lang = data.review?.client_lang;
+  const head = el(`
+    <div class="th-head">
+      <button class="th-who" type="button">
+        <span class="th-av"></span>
+        <span class="th-txt"><b class="th-name"></b><small class="th-sub"><i class="dot"></i><span class="th-acc"></span> · <span class="th-ad"></span></small></span>
+      </button>
+      <a class="ibtn th-link" target="_blank" rel="noopener" aria-label="Объявление на Kleinanzeigen">↗</a>
+    </div>`);
+  head.querySelector(".th-av").appendChild(avatar(h.buyer_display_name, h.account_id, lang, "md"));
+  head.querySelector(".th-name").textContent = h.buyer_display_name || "Покупатель";
+  head.querySelector(".dot").style.background = h.account_id != null ? accountColor(h.account_id) : "var(--line2)";
+  head.querySelector(".th-acc").textContent = h.account_name ?? "аккаунт";
+  head.querySelector(".th-ad").textContent = h.ad_title ?? "(без названия)";
+  head.querySelector(".th-who").addEventListener("click", onClient);
+  const link = head.querySelector(".th-link");
+  if (h.ad_url) link.href = h.ad_url; else link.remove();
+  return head;
+}
+
+function chipsLine(data) {
+  const h = data.header ?? {};
+  const line = el(`<div class="th-chips"></div>`);
+  const add = (cls, text) => { const c = el(`<span class="tchip"></span>`); c.classList.add(cls); c.textContent = text; line.appendChild(c); };
+  if ((h.tags ?? data.review?.tags ?? []).some(t => /мошенник/i.test(t))) add("bad", "⚠️ отмечен как мошенник — не высылать товар до оплаты");
+  if (h.is_autopilot) add("warn", "🤖 автопилот");
+  if (data.lock && !data.lock.acquired && data.lock.holder) add("bad", `в работе у ${data.lock.holder} · ${data.lock.remaining_min ?? "?"} мин`);
+  return line.children.length ? line : null;
+}
+
+// Полоса сделки (A): цифры + термометр; тап — бриф ИИ
+function dealStrip(data) {
+  const d = dealNumbers(data);
+  if (d.price == null && d.offer == null) return null;
+  const strip = el(`
+    <div class="deal-strip" role="button" tabindex="0" aria-expanded="false">
+      <div class="ds-nums"></div>
+      <div class="ds-scale"></div>
+      <div class="ds-more"></div>
+    </div>`);
+  const nums = strip.querySelector(".ds-nums");
+  const cell = (label, v, cls) => {
+    if (v == null) return;
+    const c = el(`<div class="dn"><small></small><b></b></div>`);
+    if (cls) c.classList.add(cls);
+    c.querySelector("small").textContent = label;
+    c.querySelector("b").textContent = Math.round(v).toLocaleString("de-DE");
+    nums.appendChild(c);
+  };
+  cell("цена", d.price, "");
+  cell("минимум", d.floor, "floor");
+  cell("клиент", d.offer, d.floor != null && d.offer != null && d.offer < d.floor ? "bad" : "offer");
+  cell("мы", d.ours, "ours");
+  if (hasThermo(d)) strip.querySelector(".ds-scale").appendChild(thermo(d, "lg"));
+  else strip.querySelector(".ds-scale").remove();
+
+  const more = strip.querySelector(".ds-more");
+  const brief = data.review?.deal_brief;
+  const lines = [];
+  if (d.offer != null && d.floor != null && d.offer < d.floor) lines.push(["bad", `Клиент ниже минимума на ${fmtEur(d.floor - d.offer)}`]);
+  if (brief?.summary_ru) lines.push(["", brief.summary_ru]);
+  if (brief?.expected_next) lines.push(["", `Дальше: ${brief.expected_next}`]);
+  if (brief?.client_assessment) lines.push(["", `Клиент: ${brief.client_assessment}`]);
+  lines.forEach(([cls, t]) => { const p = el(`<p></p>`); if (cls) p.classList.add(cls); p.textContent = t; more.appendChild(p); });
+  if (!lines.length) more.remove();
+  else {
+    const toggle = () => {
+      const open = strip.classList.toggle("open");
+      strip.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+    strip.addEventListener("click", toggle);
+    strip.addEventListener("keydown", e => { if (e.key === "Enter") toggle(); });
+  }
+  return strip;
+}
+
+// Связанные треды: точно он (тот же email) и «возможно тот же покупатель»
+// (то же имя в том же аккаунте — у Kleinanzeigen relay-почта своя на каждое объявление)
+function relatedCard(related) {
+  const exact = related?.matches ?? [], maybe = related?.maybe_same ?? [];
+  if (!exact.length && !maybe.length) return null;
+  const box = el(`<div class="maybe-same"><div class="ms-ic"></div><div class="ms-t"></div></div>`);
+  box.querySelector(".ms-ic").appendChild(icon("warn"));
+  const t = box.querySelector(".ms-t");
+  const group = (title, list) => {
+    if (!list.length) return;
+    const b = el(`<b></b>`);
+    b.textContent = title;
+    const l = el(`<div class="ms-list"></div>`);
+    list.forEach(m => {
+      const a = el(`<a></a>`);
+      a.href = `#/thread/${encodeURIComponent(m.thread_id)}`;
+      a.textContent = `${m.ad_title ?? "?"} · ${m.ad_price ?? "?"} · ${berlinTime(m.last_at)}`;
+      l.appendChild(a);
+    });
+    t.append(b, l);
+  };
+  group("Этот покупатель уже писал", exact);
+  group("Возможно, тот же покупатель", maybe);
+  return box;
+}
+
+// Язык пузырей: по-русски крупно (оператор не читает по-немецки) или оригинал
+function bubbleMainRu() {
+  try { return localStorage.getItem("kab_bub_main") !== "orig"; } catch (e) { return true; }
+}
+function setBubbleMainRu(v) {
+  try { localStorage.setItem("kab_bub_main", v ? "ru" : "orig"); } catch (e) { /* без запоминания */ }
+}
+
+function bubble(ev) {
+  const isIn = ev.kind === "in";
+  const b = el(`<div class="bub2"><div class="b-main"></div><div class="b-alt"></div><div class="b-meta"></div></div>`);
+  b.classList.add(isIn ? "in" : "out");
+  const orig = ev.text ?? "", ru = ev.ru_text && ev.ru_text !== ev.text ? ev.ru_text : null;
+  const paint = () => {
+    const ruMain = bubbleMainRu() && ru;
+    b.querySelector(".b-main").textContent = ruMain ? ru : orig;
+    const alt = b.querySelector(".b-alt");
+    alt.textContent = ru ? (ruMain ? orig : ru) : "";
+    alt.hidden = !ru;
+  };
+  paint();
+  if (ru) {
+    b.classList.add("bilingual");
+    b._paint = paint;
+    b.addEventListener("click", () => {
+      setBubbleMainRu(!bubbleMainRu());
+      // перекрасить все пузыри ленты разом
+      b.parentElement?.querySelectorAll(".bub2").forEach(x => x._paint?.());
+    });
+  }
+  const meta = b.querySelector(".b-meta");
+  const tags = [];
+  if (!isIn && ev.is_auto_ack) tags.push("авто-привет");
+  if (ev.status === "sent_external" || ev.from_app) tags.push("📱 из приложения");
+  if (ev.is_late) tags.push("⏰ запоздалое");
+  if (!isIn && ev.status === "sent_debug") tags.push("🧪 тестовый адрес");
+  tags.forEach(t => { const s = el(`<span class="b-tag"></span>`); s.textContent = t; meta.appendChild(s); });
+  const time = el(`<time></time>`);
+  time.textContent = berlinTime(ev.ts);
+  meta.appendChild(time);
+  return b;
+}
+
+function dayLabel(ts) {
+  if (!ts) return "";
+  const d = new Date(ts.endsWith("Z") || ts.includes("+") ? ts : ts + "Z");
+  if (isNaN(d)) return "";
+  const f = x => new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Berlin", day: "numeric", month: "long" }).format(x);
+  const today = f(new Date()), yest = f(new Date(Date.now() - 864e5)), day = f(d);
+  return day === today ? "Сегодня" : day === yest ? "Вчера" : day;
+}
+
+function feed(data) {
+  const box = el(`<div class="feed"></div>`);
+  // Исходящее с pending-статусом — черновик, а не отправленное письмо (B-02)
+  const events = (data.events ?? [])
+    .filter(e => !(e.kind === "out" && PENDING_STATUSES.has(e.status)))
+    .sort((a, b) => (a.ts || "") < (b.ts || "") ? -1 : (a.ts || "") > (b.ts || "") ? 1 : 0);
+  if (!events.length) {
+    box.appendChild(el(`<p class="muted-c">Событий пока нет.</p>`));
+    return box;
+  }
+  let lastDay = null;
+  events.forEach(ev => {
+    const day = dayLabel(ev.ts);
+    if (day && day !== lastDay) {
+      const s = el(`<div class="day-sep"><span></span></div>`);
+      s.querySelector("span").textContent = day;
+      box.appendChild(s);
+      lastDay = day;
+    }
+    box.appendChild(bubble(ev));
+  });
+  return box;
+}
+
+const LANG_PHRASE = { de: "по-немецки", pl: "по-польски", nl: "по-нидерландски", tr: "по-турецки", fr: "по-французски",
+  en: "по-английски", ru: "по-русски", uk: "по-украински", it: "по-итальянски", es: "по-испански" };
+const langPhrase = code => LANG_PHRASE[code] ?? `на ${code.toUpperCase()}`;
+
+// ---------- основной рендер ----------
+
+function renderThread(mount, params, data, opts = {}) {
+  const review = data.review;
+  const msgId = review?.msg_id ?? null;
+  const lockedByOther = !!(review && data.lock && !data.lock.acquired);
+  const canAct = !!review && !lockedByOther;
+  const h = data.header ?? {};
+  const clientLang = (review?.client_lang || "de").toLowerCase();
+  const LANG = clientLang.toUpperCase();
+  setTitle(h.buyer_display_name || h.ad_title || "Переписка");
+
+  const root = el(`<div class="th"><div class="th-main"></div><aside class="th-aside"></aside></div>`);
+  const main = root.querySelector(".th-main");
+
+  main.appendChild(threadHead(data, historyHandler));
+  const chips = chipsLine(data);
+  if (chips) main.appendChild(chips);
+  const strip = dealStrip(data);
+  if (strip) main.appendChild(strip);
+
   if (opts.conflictText) {
-    // 409 от /send: текст причины от сервера + переход в «Написать»
     const b = el(`<div class="alert alert-warning small py-2"><div class="t"></div>
       <button class="btn btn-sm btn-primary mt-2 compose-btn">✉️ Написать клиенту</button></div>`);
     b.querySelector(".t").textContent = opts.conflictText;
     b.querySelector(".compose-btn").addEventListener("click", () => composeHandler());
-    container.appendChild(b);
+    main.appendChild(b);
   } else if (opts.sendResult) {
-    container.appendChild(sendResultBanner(opts.sendResult));
+    main.appendChild(sendResultBanner(opts.sendResult));
   }
-  const related = relatedBlock(data.related);
-  if (related) container.appendChild(related);
+  const rel = relatedCard(data.related);
+  if (rel) main.appendChild(rel);
+  main.appendChild(feed(data));
 
-  if (data.events.length === 0) {
-    container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
-  } else {
-    // Sort events by ts ASC — newest at bottom (chat-style)
-    // Исходящее с pending-статусом — это НЕ отправленное письмо, а черновик
-    // (сервер кладёт его в ленту, thread_events SENT_LIKE). Отправленным пузырём
-    // его не рисуем: текущий черновик показан в карточке черновика (B-02).
-    const sortedEvents = data.events.filter(e => !(e.kind === "out" && PENDING_STATUSES.has(e.status))).sort((a, b) => {
-      const ta = a.ts || "";
-      const tb = b.ts || "";
-      if (ta < tb) return -1;
-      if (ta > tb) return 1;
-      return 0;
-    });
-    const chat = el(`<div class="mt-2"></div>`);
-    sortedEvents.forEach(e => chat.appendChild(eventBubble(e, data.header, latestPendingMsgId)));
-    container.appendChild(chat);
-  }
+  if (lockedByOther) main.appendChild(lockedBanner());
 
   // ---------- черновик ----------
-  let draft = null;
-  if (review) {
-    draft = draftCard(review);
-    container.appendChild(draft);
-    if (acquireError === "locked" && review.lock) {
-      container.appendChild(lockedByOtherBanner(review.lock, () => render(mount, params), latestPendingMsgId));
-    } else if (acquireError === "network") {
-      const warn = el(`<p class="text-warning small mt-2">⚠️ Не удалось взять lock — отправка может не пройти. <a href="#" class="reload-link">Перезагрузить</a></p>`);
-      warn.querySelector(".reload-link").addEventListener("click", (e) => {
-        e.preventDefault();
-        render(mount, params);
-      });
-      container.appendChild(warn);
+  let lastDe = review?.draft?.de_answer ?? "";
+  let lastRu = review?.draft?.ru_answer ?? "";
+  const draftBox = review ? draftCard() : null;
+  if (draftBox) main.appendChild(draftBox);
+
+  // ---------- док ----------
+  main.appendChild(dock());
+
+  // Fold ландшафт: справа панель сделки и клиента
+  fillAside(root.querySelector(".th-aside"));
+
+  mount.replaceChildren(root);
+  // к последнему письму (U-02)
+  requestAnimationFrame(() => {
+    // в самый низ: последнее письмо, черновик и чипы над доком
+    const pane = mount.closest(".pane");
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  });
+
+  // ===== черновик: «Клиенту · DE» / «По-русски» + чипы =====
+  function draftCard() {
+    const card = el(`
+      <section class="draft2">
+        <div class="d2-head">
+          <span class="d2-t"></span>
+          <span class="d2-badge"></span>
+          <span class="d2-sp"></span>
+          <button class="ibtn sm d2-lessons" type="button" hidden></button>
+        </div>
+        <div class="d2-tabs" role="tablist">
+          <button type="button" class="on" data-tab="client"></button>
+          <button type="button" data-tab="ru">По-русски</button>
+        </div>
+        <div class="d2-pane" data-pane="client">
+          <textarea class="d2-de" rows="3" aria-label="Текст клиенту"></textarea>
+          <div class="d2-mirror"></div>
+        </div>
+        <div class="d2-pane" data-pane="ru" hidden>
+          <textarea class="d2-ru" rows="3" aria-label="Идея по-русски"></textarea>
+          <div class="d2-hint"></div>
+        </div>
+        <div class="d2-err" hidden></div>
+        <div class="pult"></div>
+      </section>`);
+    const t = card.querySelector(".d2-t");
+    t.prepend(icon("spark"));
+    t.append(" Черновик ИИ");
+    card.querySelector('[data-tab="client"]').textContent = `Клиенту · ${LANG}`;
+    card.querySelector(".d2-hint").textContent = `Измените идею — при отправке ИИ переведёт её: ${langName(clientLang)}.`;
+    const de = card.querySelector(".d2-de"), ru = card.querySelector(".d2-ru");
+    de.value = lastDe;
+    ru.value = lastRu;
+    const badgeSlot = card.querySelector(".d2-badge");
+    const paintBadge = () => {
+      const bad = wrongLangForClient(de.value, clientLang);
+      badgeSlot.replaceChildren(langBadge(bad ? "RU" : LANG, !bad));
+    };
+    paintBadge();
+    de.addEventListener("input", () => { paintBadge(); autoGrow(de); });
+    ru.addEventListener("input", () => autoGrow(ru));
+    requestAnimationFrame(() => { autoGrow(de); autoGrow(ru); });
+    paintMirror(card);
+    card.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => {
+      card.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b === btn));
+      card.querySelectorAll("[data-pane]").forEach(p => { p.hidden = p.dataset.pane !== btn.dataset.tab; });
+      autoGrow(btn.dataset.tab === "ru" ? ru : de);
+    }));
+    // «уроки» — правки оператора, которые ИИ учитывает (если api отдаёт)
+    const lessons = review?.lessons ?? [];
+    const lb = card.querySelector(".d2-lessons");
+    if (lessons.length) {
+      lb.hidden = false;
+      lb.textContent = `🎓 ${lessons.length}`;
+      lb.setAttribute("aria-label", `Уроки: ${lessons.length}`);
+      lb.addEventListener("click", () => lessonsSheet(lessons));
     }
+    if (!canAct) { de.readOnly = true; ru.readOnly = true; }
+    else buildPult(card.querySelector(".pult"));
+    return card;
+  }
+
+  function paintMirror(card = draftBox) {
+    const m = card?.querySelector(".d2-mirror");
+    if (!m) return;
+    const tr = review?.draft?.ru_translation;
+    m.textContent = tr && tr !== lastDe ? `RU: ${tr}` : "";
+    m.hidden = !m.textContent;
+  }
+
+  function autoGrow(ta) {
+    if (!ta.isConnected || ta.offsetParent === null) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight + 2, Math.max(140, window.innerHeight * 0.4))}px`;
   }
 
   function draftError(msg) {
-    const errEl = draft?.querySelector(".derr");
-    if (!errEl) { alert(`Ошибка: ${msg}`); return; }
-    errEl.textContent = `Ошибка: ${msg}`;
-    errEl.classList.remove("d-none");
+    const e = draftBox?.querySelector(".d2-err");
+    if (!e) { if (msg) toast(`Ошибка: ${msg}`, { level: "bad", ms: 5000 }); return; }
+    e.textContent = msg;
+    e.hidden = !msg;
   }
 
-  // ---------- обработчики ----------
-  // Значения последнего sync с сервером — edit-ru/edit-de шлём только если менялось
-  let lastRu = review?.draft?.ru_answer ?? "";
-  let lastDe = review?.draft?.de_answer ?? "";
-
-  // Кириллица при не-кириллическом языке клиента = почти наверняка ошибка
-  // (оператор напечатал русский во вкладку «DE → клиенту»). Зеркало серверного guard'а.
-  const CYRILLIC_CLIENT_LANGS = new Set(["ru", "uk", "be", "bg", "sr", "mk"]);
-  function wrongLangForClient(text, clientLang) {
-    const lang = (clientLang || "de").toLowerCase();
-    if (CYRILLIC_CLIENT_LANGS.has(lang)) return false;
-    const letters = text.match(/\p{L}/gu) || [];
-    if (!letters.length) return false;
-    const cyr = letters.filter(ch => ch >= "Ѐ" && ch <= "ӿ").length;
-    return cyr / letters.length > 0.3;
-  }
-
-  // Синхронизация draft-карточки и локального state после серверных мутаций
-  // (translate-draft / instruction / edit-de / suggest-reply).
+  // Синхронизация после серверных мутаций (translate/instruction/edit/regenerate)
   function syncDraft(fresh) {
+    if (!fresh?.draft) return;
     review.draft = fresh.draft;
-    const de = fresh.draft?.de_answer ?? "";
-    const ru = fresh.draft?.ru_answer ?? "";
-    draft.querySelector(".de-input").value = de;
-    draft.querySelector(".ru-input").value = ru;
-    draft.querySelector(".back-text").textContent = fresh.draft?.ru_translation ?? "(нет перевода)";
-    lastDe = de;
-    lastRu = ru;
-  }
-
-  function curText() {
-    return (review?.draft?.de_answer ?? "").trim();
-  }
-
-  async function sendHandler(sendBtn) {
-    const ruNow = draft.querySelector(".ru-input").value.trim();
-    const deNow = draft.querySelector(".de-input").value.trim();
-    if (!deNow) {
-      draftError("Текст клиенту не может быть пустым");
-      return;
+    lastDe = fresh.draft.de_answer ?? "";
+    lastRu = fresh.draft.ru_answer ?? "";
+    if (draftBox) {
+      const de = draftBox.querySelector(".d2-de"), ru = draftBox.querySelector(".d2-ru");
+      de.value = lastDe;
+      ru.value = lastRu;
+      de.dispatchEvent(new Event("input"));
+      autoGrow(ru);
+      paintMirror();
     }
-    sendBtn.disabled = true;
-    sendBtn.textContent = "⏳ Готовлю…";
+  }
+
+  // Правки из полей — на сервер до отправки (edit-ru перегенерирует текст клиенту из идеи)
+  async function flushEdits() {
+    const deNow = draftBox.querySelector(".d2-de").value.trim();
+    const ruNow = draftBox.querySelector(".d2-ru").value.trim();
+    if (!deNow && !(ruNow && ruNow !== lastRu.trim())) throw new Error("Текст клиенту пуст — напишите его или измените идею по-русски");
+    const ruChanged = ruNow && ruNow !== lastRu.trim(), deChanged = deNow !== lastDe.trim();
+    let useRu = ruChanged;
+    if (ruChanged && deChanged) {
+      // правка текста клиенту при переводе идеи пропала бы молча
+      useRu = await confirmSheet("Изменены и текст клиенту, и идея по-русски.\n«Перевести идею» — ИИ заново переведёт идею (правка текста клиенту пропадёт).\n«Отмена» — оставить ваш текст клиенту.", "Перевести идею");
+    }
+    if (useRu) {
+      syncDraft(await api(`/api/ma/messages/${msgId}/edit-ru`, { method: "POST", body: {text: ruNow}, timeoutMs: LLM_TIMEOUT_MS }));
+    } else if (deChanged) {
+      syncDraft(await api(`/api/ma/messages/${msgId}/edit-de`, { method: "POST", body: {text: deNow} }));
+    }
+  }
+
+  // ===== пульт: чипы цены и тона (из концепции C) =====
+  function buildPult(pult) {
+    const d = dealNumbers(data);
+    const base = d.ours ?? d.price;
+    const list = [];
+    if (d.floor != null && (d.offer == null || d.offer < d.floor)) {
+      list.push({ key: `price:${d.floor}`, label: `🤝 Встречная ${fmtEur(d.floor)}`, price: d.floor });
+    } else if (d.offer != null && base != null && d.offer < base) {
+      const mid = Math.round((d.offer + base) / 2 / 5) * 5;
+      list.push({ key: `price:${mid}`, label: `🤝 Встречная ${fmtEur(mid)}`, price: mid });
+    }
+    if (base != null) {
+      const p5 = Math.round(base * 0.95 / 5) * 5;
+      if (!list.some(x => x.price === p5)) list.push({ key: `price:${p5}`, label: `−5 % · ${fmtEur(p5)}`, price: p5 });
+    }
+    list.push({ key: "s:fest", label: "🔒 Без торга", strategy: "fest" });
+    list.push({ key: "s:short", label: "Короче", strategy: "short" });
+    list.push({ key: "s:friend", label: "Мягче", strategy: "friend" });
+    list.push({ key: "s:regen", label: "🔁 Вариант", strategy: "regen" });
+    list.forEach(c => {
+      const b = el(`<button type="button" class="pchip"></button>`);
+      b.textContent = c.label;
+      if (c.price != null && d.floor != null && c.price < d.floor) b.classList.add("below");
+      b.addEventListener("click", () => applyChip(c, b, d));
+      pult.appendChild(b);
+    });
+  }
+
+  function draftDirty() {
+    if (!draftBox) return false;
+    return draftBox.querySelector(".d2-de").value.trim() !== lastDe.trim() ||
+           draftBox.querySelector(".d2-ru").value.trim() !== lastRu.trim();
+  }
+
+  async function applyChip(c, btn, d) {
+    if (c.price != null && d.floor != null && c.price < d.floor &&
+        !(await confirmSheet(`Ниже минимума ${fmtEur(d.floor)} — точно предложить ${fmtEur(c.price)}?`, "Да, предложить"))) return;
+    // вариант ИИ заменит текст в полях — несохранённую правку не теряем молча
+    if (draftDirty() && !(await confirmSheet("Ваша правка в черновике будет заменена вариантом ИИ. Продолжить?", "Заменить"))) return;
+    const pult = btn.parentElement;
+    pult.querySelectorAll(".pchip").forEach(x => { x.disabled = true; x.classList.remove("on"); });
+    btn.classList.add("busy");
+    draftError("");
+    const cacheKey = `${msgId}:${c.key}`;
     try {
-      // Правки из textarea применяем ДО флоу: превью в шитах должно показывать
-      // ровно то, что уйдёт клиенту (edit-ru перегенерирует DE из RU-идеи).
-      let fresh = null;
-      if (ruNow !== lastRu && ruNow) {
-        fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-ru`, {
-          method: "POST", body: {text: ruNow},
-        });
-        lastRu = ruNow;
+      const hit = _variants.get(cacheKey);
+      const cached = hit && hit.from === lastDe ? hit.text : null;
+      const from = lastDe;
+      let fresh;
+      if (cached) {
+        // вариант уже генерировали — возвращаем без LLM
+        fresh = await api(`/api/ma/messages/${msgId}/edit-de`, { method: "POST", body: {text: cached} });
+      } else if (c.price != null) {
+        fresh = await api(`/api/ma/messages/${msgId}/price`, { method: "POST", body: {eur: c.price}, timeoutMs: LLM_TIMEOUT_MS });
+      } else {
+        fresh = await api(`/api/ma/messages/${msgId}/regenerate`, { method: "POST", body: {strategy: c.strategy}, timeoutMs: LLM_TIMEOUT_MS });
       }
-      if (deNow !== lastDe) {
-        fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
-          method: "POST", body: {text: deNow},
-        });
-        lastDe = deNow;
-      }
-      if (fresh) syncDraft(fresh);
-      else if (review?.draft) review.draft.de_answer = deNow;
+      syncDraft(fresh);
+      if (c.strategy !== "regen" && review.draft?.de_answer && !cached) _variants.set(cacheKey, { from, text: review.draft.de_answer });
+      btn.classList.add("on");
     } catch (e) {
       draftError(e.message ?? String(e));
-      sendBtn.disabled = false;
-      sendBtn.textContent = "📨 Отправить";
-      return;
+    } finally {
+      btn.classList.remove("busy");
+      pult.querySelectorAll(".pchip").forEach(x => { x.disabled = false; });
     }
-    sendBtn.disabled = false;
-    sendBtn.textContent = "📨 Отправить";
-    openSendChoiceSheet();
   }
 
-  // ───── Send-флоу (2026-07-19): выбор → подготовка → финальный текст ─────
-  // Инвариант: клиенту НИКОГДА не уходит текст на чужом языке без явного
-  // разрешения оператора (галочка на финальном шаге + force для серверного guard).
-
-  function flowPreviewBlock(text) {
-    const p = el(`<div class="p-2 rounded mb-2"
-      style="white-space:pre-wrap; font-size:.92em; max-height:35vh; overflow-y:auto; background:rgba(128,128,128,.14)"></div>`);
-    p.textContent = text;
-    return p;
+  function lessonsSheet(lessons) {
+    const box = el(`<div class="lessons"></div>`);
+    lessons.forEach(l => {
+      const it = el(`<div class="lesson"><div class="l-bad"></div><div class="l-good"></div></div>`);
+      it.querySelector(".l-bad").textContent = l.bad ?? l.bot_draft ?? "";
+      it.querySelector(".l-good").textContent = l.good ?? l.operator_edit ?? "";
+      box.appendChild(it);
+    });
+    openSheet(box, "🎓 Уроки: так ИИ больше не пишет");
   }
 
-  function showFlowErr(box, e) {
-    const errEl = box.querySelector(".flow-err");
-    errEl.textContent = e.message ?? String(e);
-    errEl.classList.remove("d-none");
+  // ===== док =====
+  function dock() {
+    const dk = el(`<div class="tdock"></div>`);
+    const soldBtn = el(`<button class="ibtn tonal d-sold" type="button" aria-label="Продано"></button>`);
+    soldBtn.appendChild(icon("money"));
+    soldBtn.addEventListener("click", soldHandler);
+    dk.appendChild(soldBtn);
+    if (canAct) {
+      const send = el(`<button class="btn-send" type="button"><span class="bs-t"><b></b><small></small></span></button>`);
+      send.appendChild(icon("send"));
+      const bl = send.querySelector("b");
+      bl.append(el(`<span class="l-long"></span>`), el(`<span class="l-short">Отправить</span>`));
+      bl.querySelector(".l-long").textContent = `Отправить ${langPhrase(clientLang)}`;
+      send.querySelector("small").textContent = "язык проверю перед отправкой";
+      send.addEventListener("click", () => sendHandler(send));
+      dk.appendChild(send);
+    } else if (!review) {
+      const sug = el(`<button class="btn" type="button">🤖 Предложить</button>`);
+      sug.addEventListener("click", () => suggestHandler(sug));
+      const cmp = el(`<button class="btn btn-primary" type="button">✉️ Написать</button>`);
+      cmp.addEventListener("click", composeHandler);
+      dk.append(sug, cmp);
+    } else {
+      dk.appendChild(el(`<div class="dock-ro">Черновик занят другим оператором</div>`));
+    }
+    const more = el(`<button class="ibtn tonal" type="button" aria-label="Ещё действия">⋯</button>`);
+    more.addEventListener("click", moreMenu);
+    dk.appendChild(more);
+    return dk;
   }
 
-  // Универсальный текстовый под-шаг (правка текста / инструкции для ЛЛМ).
+  // ===== отправка: 3 тапа =====
+  async function sendHandler(btn) {
+    const deNow = draftBox.querySelector(".d2-de").value.trim();
+    if (!deNow && !draftBox.querySelector(".d2-ru").value.trim()) { draftError("Текст клиенту пуст"); return; }
+    btn.disabled = true;
+    btn.classList.add("busy");
+    try {
+      await flushEdits();
+    } catch (e) {
+      draftError(e.message ?? String(e));
+      return;
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("busy");
+    }
+    openFinalSheet();
+  }
+
+  // Финальный лист: ровно то, что уйдёт клиенту. Двухслойный языковой guard.
+  function openFinalSheet() {
+    const text = (review?.draft?.de_answer ?? "").trim();
+    const box = el(`
+      <div class="final">
+        <div class="f-head"><span class="f-l">Уйдёт клиенту</span><span class="f-badge"></span></div>
+        <div class="f-text"></div>
+        <div class="f-ru"></div>
+        <div class="f-status"></div>
+        <div class="mismatch" hidden>
+          <div class="alert alert-danger small py-2 mb-2 mm-text"></div>
+          <button class="btn btn-primary w-100 tr-btn mb-2" type="button"></button>
+          <label class="form-check"><input type="checkbox" class="form-check-input allow-lang">
+            <span class="form-check-label">Разрешаю отправить текст не на языке клиента</span></label>
+        </div>
+        <div class="flow-err text-danger small my-2" hidden></div>
+        <div class="sheet-actions">
+          <button class="btn edit-btn" type="button">✏️ Править</button>
+          <button class="btn btn-primary send-btn" type="button">✅ Отправить</button>
+        </div>
+      </div>`);
+    box.querySelector(".f-text").textContent = text || "(текст пуст)";
+    const mirror = review?.draft?.ru_translation;
+    const ruEl = box.querySelector(".f-ru");
+    if (mirror && mirror !== text) ruEl.textContent = `RU: ${mirror}`; else ruEl.remove();
+    const badge = box.querySelector(".f-badge");
+    const sendBtn = box.querySelector(".send-btn"), editBtn = box.querySelector(".edit-btn");
+    const allowCb = box.querySelector(".allow-lang"), statusEl = box.querySelector(".f-status");
+    const trBtn = box.querySelector(".tr-btn");
+    const trLabel = `🌐 Перевести: ${langName(clientLang)}`;
+    trBtn.textContent = trLabel;
+    let blocked = false, checking = false, sending = false;
+    const sync = () => { sendBtn.disabled = sending || checking || !text || (blocked && !allowCb.checked); };
+    const showErr = e => { const x = box.querySelector(".flow-err"); x.textContent = e.message ?? String(e); x.hidden = false; };
+    const block = msg => {
+      blocked = true;
+      badge.replaceChildren(langBadge(LANG, false));
+      box.querySelector(".mm-text").textContent = msg;
+      box.querySelector(".mismatch").hidden = false;
+      sync();
+    };
+    allowCb.addEventListener("change", sync);
+    trBtn.addEventListener("click", async () => {
+      trBtn.disabled = true;
+      trBtn.textContent = "⏳ Перевожу…";
+      try {
+        const fresh = await api(`/api/ma/messages/${msgId}/translate-draft`, { method: "POST", body: {text}, timeoutMs: LLM_TIMEOUT_MS });
+        syncDraft(fresh);
+        openFinalSheet();
+      } catch (e) {
+        showErr(e);
+        trBtn.disabled = false;
+        trBtn.textContent = trLabel;
+      }
+    });
+
+    if (wrongLangForClient(text, clientLang)) {
+      block(`Текст не на языке клиента (${langName(clientLang)}). Переведите или явно разрешите отправку.`);
+    } else {
+      checking = true;
+      badge.replaceChildren(langBadge(LANG, null));
+      statusEl.textContent = "Проверяю язык…";
+      sync();
+      api(`/api/ma/messages/${msgId}/lang-check`, { method: "POST", body: {text}, timeoutMs: LLM_TIMEOUT_MS }).then(r => {
+        checking = false;
+        if (r?.match) {
+          badge.replaceChildren(langBadge(LANG, true));
+          statusEl.textContent = `Проверено: язык клиента (${langName(clientLang)})`;
+        } else {
+          statusEl.textContent = "";
+          block(`ИИ определил язык текста: ${langName(r?.detected_lang || "?")}, а клиент пишет: ${langName(clientLang)}. Переведите или явно разрешите отправку.`);
+        }
+        sync();
+      }).catch(() => {
+        // ИИ-проверка недоступна: эвристика ловит только кириллицу, а серверный 409 —
+        // тоже. Английский/польский текст немецкому клиенту прошёл бы — поэтому
+        // отправка только с явной галочкой оператора (инвариант языка).
+        checking = false;
+        statusEl.textContent = "";
+        block(`ИИ-проверка языка сейчас недоступна. Убедитесь, что текст на языке клиента (${langName(clientLang)}), и отметьте галочку — или переведите.`);
+      });
+    }
+
+    sendBtn.addEventListener("click", async () => {
+      sending = true;
+      sendBtn.disabled = true;
+      editBtn.disabled = true;
+      sendBtn.textContent = "⏳ Отправляю…";
+      try {
+        // force=true только при явной галочке-разрешении оператора
+        const res = await api(`/api/ma/messages/${msgId}/send`, {
+          method: "POST", body: {mode: "as_is", force: blocked && allowCb.checked === true},
+        });
+        closeSheet();
+        const o = sendOutcome(res ?? {});
+        toast(o.text, { level: o.level === "bad" ? "bad" : "", ms: 4500 });
+        render(mount, {...params, focus_msg_id: null}, {sendResult: res ?? {}});
+      } catch (e) {
+        if (e.status === 409 && /уже отправлено/i.test(e.message)) {
+          closeSheet();
+          render(mount, {...params, focus_msg_id: null}, {conflictText: e.message});
+          return;
+        }
+        showErr(e);
+        sending = false;
+        editBtn.disabled = false;
+        sendBtn.textContent = "✅ Отправить";
+        sync();
+      }
+    });
+    editBtn.addEventListener("click", () => openTextSheet({
+      title: "✏️ Текст клиенту", initial: text, submitLabel: "💾 Сохранить", busyLabel: "⏳ Сохраняю…",
+      onSubmit: async value => {
+        syncDraft(await api(`/api/ma/messages/${msgId}/edit-de`, { method: "POST", body: {text: value} }));
+        openFinalSheet();
+      },
+      onBack: () => openFinalSheet(),
+    }));
+    openSheet(box, "Финальный текст");
+  }
+
   function openTextSheet({title, initial, placeholder, submitLabel, busyLabel, onSubmit, onBack}) {
     const box = el(`
       <div>
         <textarea class="form-control txt" rows="6"></textarea>
-        <div class="flow-err text-danger small my-2 d-none"></div>
-        <div class="d-flex gap-2 mt-2">
-          <button class="btn back-btn" style="flex:1">↩ Назад</button>
-          <button class="btn btn-primary ok-btn" style="flex:1"></button>
+        <div class="flow-err text-danger small my-2" hidden></div>
+        <div class="sheet-actions">
+          <button class="btn back-btn" type="button">↩ Назад</button>
+          <button class="btn btn-primary ok-btn" type="button"></button>
         </div>
-      </div>
-    `);
+      </div>`);
     const txt = box.querySelector(".txt");
     txt.value = initial ?? "";
     if (placeholder) txt.placeholder = placeholder;
-    const okBtn = box.querySelector(".ok-btn");
-    const backBtn = box.querySelector(".back-btn");
-    okBtn.textContent = submitLabel;
-    backBtn.addEventListener("click", onBack);
-    okBtn.addEventListener("click", async () => {
+    const ok = box.querySelector(".ok-btn"), back = box.querySelector(".back-btn");
+    ok.textContent = submitLabel;
+    back.addEventListener("click", onBack);
+    ok.addEventListener("click", async () => {
       const value = txt.value.trim();
       if (!value) { txt.classList.add("is-invalid"); return; }
-      okBtn.disabled = true;
-      backBtn.disabled = true;
-      okBtn.textContent = busyLabel;
+      ok.disabled = true;
+      back.disabled = true;
+      ok.textContent = busyLabel;
       try {
         await onSubmit(value);
       } catch (e) {
-        showFlowErr(box, e);
-        okBtn.disabled = false;
-        backBtn.disabled = false;
-        okBtn.textContent = submitLabel;
+        const x = box.querySelector(".flow-err");
+        x.textContent = e.message ?? String(e);
+        x.hidden = false;
+        ok.disabled = false;
+        back.disabled = false;
+        ok.textContent = submitLabel;
       }
     });
     openSheet(box, title);
     txt.focus();
   }
 
-  // Этап 1: выбор способа отправки.
-  function openSendChoiceSheet() {
-    const clientLang = (review?.client_lang || "de").toLowerCase();
-    const langUp = clientLang.toUpperCase();
-    const box = el(`
-      <div>
-        <div class="small text-muted mb-1">Язык клиента: <b class="lang"></b></div>
-        <div class="preview-slot"></div>
-        <div class="flow-err text-danger small mb-2 d-none"></div>
-        <div class="d-grid gap-2">
-          <button class="btn btn-primary tr-btn"></button>
-          <button class="btn asis-btn">📨 Отправить как есть</button>
-          <button class="btn llm-btn">🤖 Предложить текст от ЛЛМ</button>
-          <button class="btn cancel-btn">✕ Отменить</button>
-        </div>
-      </div>
-    `);
-    box.querySelector(".lang").textContent = langUp;
-    box.querySelector(".preview-slot").appendChild(flowPreviewBlock(curText() || "(черновик пуст)"));
-    const trBtn = box.querySelector(".tr-btn");
-    const asisBtn = box.querySelector(".asis-btn");
-    const llmBtn = box.querySelector(".llm-btn");
-    const cancelBtn = box.querySelector(".cancel-btn");
-    trBtn.textContent = `🌐 Перевести на ${langUp} и отправить`;
-    const allBtns = [trBtn, asisBtn, llmBtn, cancelBtn];
-
-    trBtn.addEventListener("click", async () => {
-      allBtns.forEach(b => b.disabled = true);
-      trBtn.textContent = "⏳ Перевожу…";
-      try {
-        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/translate-draft`, {
-          method: "POST", body: {text: curText()},
-        });
-        syncDraft(fresh);
-        openPrepareSheet();
-      } catch (e) {
-        showFlowErr(box, e);
-        allBtns.forEach(b => b.disabled = false);
-        trBtn.textContent = `🌐 Перевести на ${langUp} и отправить`;
-      }
-    });
-    asisBtn.addEventListener("click", () => openPrepareSheet());
-    llmBtn.addEventListener("click", async () => {
-      allBtns.forEach(b => b.disabled = true);
-      llmBtn.textContent = "⏳ Генерирую…";
-      try {
-        await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST", timeoutMs: LLM_TIMEOUT_MS});
-        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}`);
-        syncDraft(fresh);
-        openPrepareSheet();
-      } catch (e) {
-        showFlowErr(box, e);
-        allBtns.forEach(b => b.disabled = false);
-        llmBtn.textContent = "🤖 Предложить текст от ЛЛМ";
-      }
-    });
-    cancelBtn.addEventListener("click", () => closeSheet());
-    openSheet(box, "Отправка — что делаем?");
-  }
-
-  // Этап 2: подготовка текста перед отправкой.
-  function openPrepareSheet() {
-    const box = el(`
-      <div>
-        <div class="preview-slot"></div>
-        <div class="ru-mirror small text-muted mb-2" style="white-space:pre-wrap"></div>
-        <div class="flow-err text-danger small mb-2 d-none"></div>
-        <div class="d-grid gap-2">
-          <button class="btn btn-primary next-btn">📨 Отправить</button>
-          <button class="btn edit-btn">✏️ Редактировать</button>
-          <button class="btn rewrite-btn">🤖 Переписать идею ЛЛМ…</button>
-          <button class="btn cancel-btn">✕ Отменить</button>
-        </div>
-      </div>
-    `);
-    box.querySelector(".preview-slot").appendChild(flowPreviewBlock(curText() || "(черновик пуст)"));
-    const mirror = review?.draft?.ru_translation;
-    const mirrorEl = box.querySelector(".ru-mirror");
-    if (mirror && mirror !== curText()) mirrorEl.textContent = `RU: ${mirror}`;
-    else mirrorEl.remove();
-
-    box.querySelector(".next-btn").addEventListener("click", () => {
-      if (!curText()) { showFlowErr(box, new Error("черновик пуст")); return; }
-      openFinalSheet();
-    });
-    box.querySelector(".edit-btn").addEventListener("click", () => openTextSheet({
-      title: "✏️ Редактировать текст",
-      initial: curText(),
-      submitLabel: "💾 Сохранить",
-      busyLabel: "⏳ Сохраняю…",
-      onSubmit: async (value) => {
-        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
-          method: "POST", body: {text: value},
-        });
-        syncDraft(fresh);
-        openPrepareSheet();
-      },
-      onBack: () => openPrepareSheet(),
-    }));
-    box.querySelector(".rewrite-btn").addEventListener("click", () => openTextSheet({
-      title: "🤖 Переписать идею ЛЛМ",
-      initial: "",
-      placeholder: "Инструкции: что изменить, какой тон, какая цена…",
-      submitLabel: "🤖 Переписать",
-      busyLabel: "⏳ Генерирую…",
-      onSubmit: async (value) => {
-        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/instruction`, {
-          method: "POST", body: {text: value}, timeoutMs: LLM_TIMEOUT_MS,
-        });
-        syncDraft(fresh);
-        openPrepareSheet();
-      },
-      onBack: () => openPrepareSheet(),
-    }));
-    box.querySelector(".cancel-btn").addEventListener("click", () => closeSheet());
-    openSheet(box, "Подготовка к отправке");
-  }
-
-  // Этап 3: финальный текст к отправке. Двухслойный языковой guard:
-  // мгновенная кириллическая эвристика + LLM-проверка (Haiku) через /lang-check.
-  // Чужой язык — отправка ТОЛЬКО после явной галочки-разрешения (force для сервера).
-  function openFinalSheet() {
-    const clientLang = (review?.client_lang || "de").toLowerCase();
-    const langUp = clientLang.toUpperCase();
-    const text = curText();
-    const box = el(`
-      <div>
-        <div class="small text-muted mb-1">Уйдёт клиенту (язык: <b class="lang"></b>):</div>
-        <div class="preview-slot"></div>
-        <div class="lang-status small text-muted mb-2"></div>
-        <div class="mismatch d-none">
-          <div class="alert alert-danger small py-2 mb-2 mm-text"></div>
-          <div class="form-check mb-2">
-            <input type="checkbox" class="form-check-input allow-lang" id="allow-lang-cb">
-            <label class="form-check-label small" for="allow-lang-cb">
-              Разрешаю отправить текст не на языке клиента
-            </label>
-          </div>
-        </div>
-        <div class="flow-err text-danger small mb-2 d-none"></div>
-        <div class="d-grid gap-2">
-          <button class="btn btn-primary send-btn">✅ Отправить</button>
-          <button class="btn edit-btn">✏️ Изменить текст вручную</button>
-          <button class="btn cancel-btn">✕ Отменить</button>
-        </div>
-      </div>
-    `);
-    box.querySelector(".lang").textContent = langUp;
-    box.querySelector(".preview-slot").appendChild(flowPreviewBlock(text));
-    const sendBtn = box.querySelector(".send-btn");
-    const editBtn = box.querySelector(".edit-btn");
-    const cancelBtn = box.querySelector(".cancel-btn");
-    const allowCb = box.querySelector(".allow-lang");
-    const statusEl = box.querySelector(".lang-status");
-
-    let blocked = false;   // язык не совпал (эвристика или Haiku)
-    let checking = false;  // Haiku-проверка в полёте — send выключен
-    let sending = false;
-    function syncSendState() {
-      sendBtn.disabled = sending || checking || (blocked && !allowCb.checked);
-    }
-    function blockLang(msgText) {
-      blocked = true;
-      box.querySelector(".mm-text").textContent = msgText;
-      box.querySelector(".mismatch").classList.remove("d-none");
-      syncSendState();
-    }
-    allowCb.addEventListener("change", syncSendState);
-
-    if (wrongLangForClient(text, clientLang)) {
-      // Кириллица чужому клиенту — блок сразу, Haiku не нужен
-      blockLang("⚠️ Текст НЕ на языке клиента. Отправка заблокирована — " +
-                "вернитесь и переведите, либо явно разрешите ниже.");
-    } else {
-      // Haiku-проверка: до вердикта отправка выключена
-      checking = true;
-      statusEl.textContent = "⏳ Проверяю язык (Haiku)…";
-      syncSendState();
-      api(`/api/ma/messages/${latestPendingMsgId}/lang-check`, {
-        method: "POST", body: {text},
-      }).then(r => {
-        checking = false;
-        if (r.match) {
-          statusEl.textContent = `✓ Язык совпадает (${(r.detected_lang || "?").toUpperCase()})`;
-        } else {
-          statusEl.textContent = "";
-          blockLang(`⚠️ Haiku определил язык текста: ${(r.detected_lang || "?").toUpperCase()}, ` +
-                    `а язык клиента — ${langUp}. Отправка заблокирована — ` +
-                    "вернитесь и переведите, либо явно разрешите ниже.");
-        }
-        syncSendState();
-      }).catch(() => {
-        checking = false;
-        statusEl.textContent = "⚠️ LLM-проверка языка недоступна — сработала только быстрая эвристика";
-        syncSendState();
-      });
-    }
-
-    sendBtn.addEventListener("click", async () => {
-      sending = true;
-      [sendBtn, editBtn, cancelBtn].forEach(b => b.disabled = true);
-      sendBtn.textContent = "⏳ Отправляю…";
-      try {
-        // force=true только при явной галочке-разрешении оператора
-        const res = await api(`/api/ma/messages/${latestPendingMsgId}/send`, {
-          method: "POST",
-          body: {mode: "as_is", force: blocked && allowCb.checked === true},
-        });
-        closeSheet();
-        // focus_msg_id сбрасываем: иначе перерисовка вернёт только что отправленный
-        // черновик как «ждёт проверки» с активной отправкой
-        render(mount, {...params, focus_msg_id: null}, {sendResult: res ?? {}});
-      } catch (e) {
-        // 409 «уже отправлено» — этот черновик больше не отправить: показываем
-        // причину и предлагаем «Написать» новое сообщение.
-        if (e.status === 409 && /уже отправлено/i.test(e.message)) {
-          closeSheet();
-          render(mount, {...params, focus_msg_id: null},
-                 {conflictText: e.message});
-          return;
-        }
-        showFlowErr(box, e);
-        sending = false;
-        [editBtn, cancelBtn].forEach(b => b.disabled = false);
-        syncSendState();
-        sendBtn.textContent = "✅ Отправить";
-      }
-    });
-    editBtn.addEventListener("click", () => openTextSheet({
-      title: "✏️ Изменить текст вручную",
-      initial: text,
-      submitLabel: "💾 Сохранить",
-      busyLabel: "⏳ Сохраняю…",
-      onSubmit: async (value) => {
-        const fresh = await api(`/api/ma/messages/${latestPendingMsgId}/edit-de`, {
-          method: "POST", body: {text: value},
-        });
-        syncDraft(fresh);
-        openFinalSheet();
-      },
-      onBack: () => openFinalSheet(),
-    }));
-    cancelBtn.addEventListener("click", () => closeSheet());
-    openSheet(box, "Финальный текст");
-  }
-
-  async function regenHandler(btn) {
-    btn.disabled = true;
-    btn.textContent = "🔁 Генерирую…";
-    try {
-      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST", timeoutMs: LLM_TIMEOUT_MS});
-      // Fetch fresh review payload — новый вариант в textareas
-      const fresh = await api(`/api/ma/messages/${latestPendingMsgId}`);
-      review.draft = fresh.draft;
-      draft.querySelector(".ru-input").value = fresh.draft?.ru_answer ?? "";
-      draft.querySelector(".de-input").value = fresh.draft?.de_answer ?? "";
-      draft.querySelector(".back-text").textContent = fresh.draft?.ru_translation ?? "(нет перевода)";
-    } catch (e) {
-      draftError(e.message ?? String(e));
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "🔁 Вариант";
-    }
-  }
-
+  // ===== прочие действия =====
   function suggestHandler(btn) {
-    // Нет pending-черновика: suggest СОЗДАЁТ pending, затем re-render
     if (btn) { btn.disabled = true; btn.textContent = "🤖 Генерирую…"; }
     api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/suggest-reply`, {method: "POST", timeoutMs: LLM_TIMEOUT_MS})
       .then(() => render(mount, params))
       .catch(e => {
-        alert(`Ошибка: ${e.message ?? String(e)}`);
+        toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 5000 });
         if (btn) { btn.disabled = false; btn.textContent = "🤖 Предложить"; }
       });
   }
@@ -820,65 +770,71 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   function composeHandler() {
     const form = buildComposeForm({
       threadId: params.thread_id,
-      onSubmitComplete: (res) => { closeSheet(); render(mount, params, {sendResult: res ?? {}}); },
+      onSubmitComplete: res => { closeSheet(); render(mount, params, {sendResult: res ?? {}}); },
       onCancel: () => closeSheet(),
     });
     openSheet(form, "✉️ Написать клиенту");
   }
 
   function historyHandler() {
-    const email = data.header?.buyer_email;
-    if (!email) {
-      alert("Email клиента не известен");
-      return;
-    }
+    const email = h.buyer_email;
+    if (!email) { toast("Почта клиента неизвестна"); return; }
     location.hash = `#/client/${encodeURIComponent(email)}`;
   }
 
   async function waitHandler() {
     try {
-      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/wait`, {
-        method: "POST",
-      });
-      render(mount, params);
+      await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/wait`, {method: "POST"});
+      toast(`✋ Ждём ответа: ${h.buyer_display_name || "покупатель"}`);
+      // с телефона — обратно во Входящие (S-05); на Fold список и так слева
+      if (!document.querySelector("#app.has-list")) location.hash = "#/pipeline";
+      else render(mount, params);
     } catch (e) {
-      alert(`Ошибка: ${e.message ?? String(e)}`);
+      toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 5000 });
     }
   }
 
   function instructionHandler() {
     const form = buildEditForm({
-      msgId: latestPendingMsgId,
-      field: "instruction",
-      review,
+      msgId, field: "instruction", review,
       onSubmitComplete: () => { closeSheet(); render(mount, params); },
       onCancel: () => closeSheet(),
-      onError: (msg) => alert(`Ошибка: ${msg}`),
+      onError: msg => toast(`Ошибка: ${msg}`, { level: "bad", ms: 5000 }),
     });
-    openSheet(form, "📝 Своя инструкция");
+    openSheet(form, "📝 Своя инструкция для ИИ");
   }
 
   async function skipHandler() {
-    if (!(await confirmSheet("Пропустить это обращение?", "Пропустить"))) return;
+    if (!(await confirmSheet("Не отвечать на это письмо?", "Не отвечать"))) return;
     try {
-      await api(`/api/ma/messages/${latestPendingMsgId}/skip`, {method: "POST"});
+      await api(`/api/ma/messages/${msgId}/skip`, {method: "POST"});
       render(mount, params);
     } catch (e) {
-      alert(`Ошибка: ${e.message ?? String(e)}`);
+      toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 5000 });
     }
   }
 
-  const autopilotState = review?.autopilot ?? (data.header.is_autopilot ? {active: true} : null);
+  function soldHandler() {
+    const d = dealNumbers(data);
+    const lastMsg = msgId ?? [...(data.events ?? [])].reverse().find(e => e.msg_id)?.msg_id ?? null;
+    openSoldSheet({
+      threadId: params.thread_id, msgId: lastMsg, title: h.ad_title,
+      price: d.ours ?? d.offer ?? d.price, prices: [d.price, d.ours, d.offer, d.floor],
+      onDone: () => render(mount, params),
+    });
+  }
+
+  const autopilotState = review?.autopilot ?? (h.is_autopilot ? {active: true} : null);
 
   async function autopilotHandler() {
     if (autopilotState?.active) {
-      const info = `автопилот · ${autopilotState.messages_sent ?? "?"}/20 · floor ${autopilotState.floor_eur ?? "?"} €`;
+      const info = `${autopilotState.messages_sent ?? "?"} отправлено · минимум ${autopilotState.floor_eur ?? "?"} €`;
       if (!(await confirmSheet(`Остановить автопилот?\n(${info})`, "Остановить"))) return;
       try {
         await api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/autopilot/stop`, {method: "POST"});
         render(mount, params);
       } catch (e) {
-        alert(`Ошибка: ${e.message ?? String(e)}`);
+        toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 5000 });
       }
     } else {
       const form = buildAutopilotForm({
@@ -891,63 +847,99 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
   }
 
   function moreMenu() {
-    const canAct = review !== null && latestPendingMsgId !== null;
     menuSheet([
-      { label: "📋 История клиента", onClick: historyHandler },
-      canAct ? { label: "📝 Своя инструкция", onClick: instructionHandler } : null,
-      { label: "✋ Ждать клиента", onClick: waitHandler },
-      {
-        label: autopilotState?.active
-          ? `🛑 Остановить автопилот (${autopilotState.messages_sent ?? "?"}/20)`
-          : "🚀 Автопилот…",
-        onClick: autopilotHandler,
-      },
-      canAct ? { label: "💰 Продано…", onClick: () => openSoldSheet(latestPendingMsgId, () => render(mount, params)) } : null,
-      canAct ? { label: "❌ Пропустить", danger: true, onClick: skipHandler } : null,
+      { label: "👤 Клиент и история", onClick: historyHandler },
+      review ? null : { label: "🤖 Предложить ответ ИИ", onClick: () => suggestHandler(null) },
+      { label: "✉️ Написать своими словами", onClick: composeHandler },
+      canAct ? { label: "📝 Своя инструкция для ИИ", onClick: instructionHandler } : null,
+      { label: "✋ Жду ответа клиента", onClick: waitHandler },
+      { label: autopilotState?.active ? "🛑 Остановить автопилот" : "🚀 Автопилот…", onClick: autopilotHandler },
+      { label: "💰 Продано…", onClick: soldHandler },
+      canAct ? { label: "🙅 Не отвечать", danger: true, onClick: skipHandler } : null,
     ], "Действия");
   }
 
-  // ---------- док ----------
-  const dock = el(`<div class="dock"></div>`);
-  if (review) {
-    const regenBtn = el(`<button class="btn">🔁 Вариант</button>`);
-    const sendBtn = el(`<button class="btn btn-primary">📨 Отправить</button>`);
-    regenBtn.addEventListener("click", () => regenHandler(regenBtn));
-    sendBtn.addEventListener("click", () => sendHandler(sendBtn));
-    dock.appendChild(regenBtn);
-    dock.appendChild(sendBtn);
-  } else {
-    const suggestBtn = el(`<button class="btn">🤖 Предложить</button>`);
-    const composeBtn = el(`<button class="btn">✉️ Написать</button>`);
-    suggestBtn.addEventListener("click", () => suggestHandler(suggestBtn));
-    composeBtn.addEventListener("click", composeHandler);
-    dock.appendChild(suggestBtn);
-    dock.appendChild(composeBtn);
+  function lockedBanner() {
+    const lock = data.lock ?? {};
+    const box = el(`
+      <div class="alert alert-warning">
+        <div class="mb-1"><b>Черновик занят: <span class="holder"></span></b> <small>(~<span class="mins"></span> мин)</small></div>
+        <div class="small mb-2">Черновик освободится сам, когда оператор закончит или через несколько минут после закрытия MA.</div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm retry-btn" type="button">↻ Проверить снова</button>
+        </div>
+      </div>`);
+    box.querySelector(".holder").textContent = lock.holder ?? "?";
+    box.querySelector(".mins").textContent = String(lock.remaining_min ?? 0);
+    box.querySelector(".retry-btn").addEventListener("click", () => render(mount, params));
+    return box;
   }
-  const moreBtn = el(`<button class="btn more" aria-label="Ещё действия">⋯</button>`);
-  moreBtn.addEventListener("click", moreMenu);
-  dock.appendChild(moreBtn);
-  container.appendChild(dock);
 
-  mount.replaceChildren(container);
+  // Fold ландшафт (split3): сделка + клиент справа (на узких скрыто CSS)
+  function fillAside(aside) {
+    const d = dealNumbers(data);
+    const sec = title => {
+      const s = el(`<section class="as-card"><h3></h3></section>`);
+      s.querySelector("h3").textContent = title;
+      aside.appendChild(s);
+      return s;
+    };
+    const deal = sec("Сделка");
+    const grid = el(`<div class="as-grid"></div>`);
+    [["Цена", d.price, ""], ["Минимум", d.floor, "floor"], ["Клиент", d.offer, "offer"], ["Мы", d.ours, "ours"]].forEach(([l, v, cls]) => {
+      const c = el(`<div class="as-n"><small></small><b></b></div>`);
+      if (cls) c.classList.add(cls);
+      c.querySelector("small").textContent = l;
+      c.querySelector("b").textContent = fmtEur(v);
+      grid.appendChild(c);
+    });
+    deal.appendChild(grid);
+    if (hasThermo(d)) deal.appendChild(thermo(d, "lg"));
+    const brief = review?.deal_brief;
+    if (brief?.summary_ru) { const p = el(`<p class="as-p"></p>`); p.textContent = brief.summary_ru; deal.appendChild(p); }
+    const acts = el(`<div class="as-acts"></div>`);
+    [["✋ Жду", waitHandler], ["💰 Продано", soldHandler]].forEach(([l, fn]) => {
+      const b = el(`<button class="btn" type="button"></button>`);
+      b.textContent = l;
+      b.addEventListener("click", fn);
+      acts.appendChild(b);
+    });
+    deal.appendChild(acts);
+    const cl = sec("Клиент");
+    const who = el(`<button class="as-who" type="button"><span class="aw-av"></span><span class="aw-t"><b></b><small></small></span></button>`);
+    who.querySelector(".aw-av").appendChild(avatar(h.buyer_display_name, h.account_id, review?.client_lang, "md"));
+    who.querySelector("b").textContent = h.buyer_display_name || "Покупатель";
+    who.querySelector("small").textContent = h.buyer_email || "";
+    who.addEventListener("click", historyHandler);
+    cl.appendChild(who);
+    const note = review?.client_note ?? h.client_note;
+    if (note) { const p = el(`<p class="as-p"></p>`); p.textContent = note; cl.appendChild(p); }
+    const dossier = review?.dossier ?? h.dossier;
+    if (Array.isArray(dossier) && dossier.length) {
+      const ul = el(`<ul class="as-dossier"></ul>`);
+      dossier.slice(0, 5).forEach(x => {
+        const li = el(`<li></li>`);
+        li.textContent = typeof x === "string" ? x : `${x.date ?? ""} — ${x.text ?? ""}`;
+        ul.appendChild(li);
+      });
+      cl.appendChild(ul);
+    }
+  }
 }
 
-// Lock release on navigation away
+// Снятие лока при уходе с треда
 window.addEventListener("hashchange", () => {
   if (_heldMsgId !== null && !location.hash.startsWith("#/thread/")) {
-    const msgId = _heldMsgId;
+    const id = _heldMsgId;
     _heldMsgId = null;
-    tryReleaseLock(msgId);
+    tryReleaseLock(id);
   }
 });
 
-// Lock release on TG WebApp close / page hide.
-// sendBeacon не умеет ставить X-Telegram-Init-Data → шлём initData в теле
-// (text/plain, без preflight); backend валидирует её тем же HMAC. Раньше
-// beacon бил в /lock/release без заголовка, ловил 422 и лок висел до
-// auto-expire 5 мин — блокировал других операторов после закрытия MA.
-// URL обязательно абсолютный (${API_BASE}): страница живёт на github.io,
-// относительный путь уходил на Pages (404), а не на бэкенд.
+// Снятие лока при закрытии MA / уходе в фон.
+// sendBeacon не умеет ставить X-Telegram-Init-Data → initData в теле
+// (text/plain, без preflight), бэкенд валидирует тем же HMAC.
+// URL обязательно абсолютный (${API_BASE}): страница живёт на github.io.
 window.addEventListener("pagehide", () => {
   if (_heldMsgId !== null && navigator.sendBeacon) {
     const blob = new Blob([initData()], {type: "text/plain"});

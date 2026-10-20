@@ -1,43 +1,31 @@
-// 📥 Входящие — единый инбокс всех аккаунтов (редизайн 2026-07-15).
-// Карточки с цветной полоской аккаунта, чипы состояний вместо эмодзи,
-// фильтры-чипы, тёмная bulk-панель. Логика API/поллинга без изменений.
+// 📥 Входящие (редизайн v3, вид A «премиум-мессенджер»).
+// Сверху полоса-итог (бывший «Обзор»): ждут / ждём / продано сегодня, плашка
+// найденных продаж. Фильтры одним рядом: статус + аккаунт «Все ▾» (на Flex и
+// 280 px два ряда съедали пол-экрана). Строки — threadRow: термометр торга,
+// пометки (🔥, 📌, мошенник, похожий покупатель, запоздалое, из приложения),
+// свайп «Жду / Продано», долгое нажатие — выбор нескольких.
+// Опрос каждые 20 с, устаревшие ответы отбрасываются (см. paint).
 import { api } from "../api.js";
-import { el, berlinTime, setLoading, setError, accountColor, chip } from "../utils.js";
-import { confirmSheet } from "../components/sheet.js";
+import { el, setLoading, setError, soldToday } from "../utils.js";
+import { confirmSheet, menuSheet } from "../components/sheet.js";
+import { threadRow, dealOf } from "../components/thread-row.js";
+import { icon, toast } from "../components/kit.js";
+import { openSoldSheet } from "../components/sold-sheet.js";
+import { setTabBadge } from "../components/tabbar.js";
 
 const state = { account: "", status: "all" };
 const sel = { active: false, ids: new Set() };
-let _bulkBar = null;
-let _cachedData = null; // avoid re-fetch when toggling selection mode
-
-function removeBulkBar() {
-  if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
-}
-
-function updateBulkBar() {
-  if (!_bulkBar) return;
-  const count = sel.ids.size;
-  const countEl = _bulkBar.querySelector(".sel-count");
-  if (countEl) countEl.textContent = count > 0 ? `Выбрано: ${count}` : "Ничего не выбрано";
-  _bulkBar.querySelectorAll("button[data-action]").forEach(b => { b.disabled = count === 0; });
-}
+let _cachedData = null;   // последний ответ /pipeline (перерисовка без запроса)
+let _detected = { n: null, at: 0 };  // найденные продажи — не чаще раза в 5 мин
+let _soldToday = null;  // {count, eur} — из /sales, если api не прислал summary
 
 let _timer = null, _visHandler = null, _hashHandler = null;
 const REFRESH_MS = 20000;
 
 function teardown() {
-  removeBulkBar();
   if (_timer) { clearInterval(_timer); _timer = null; }
   if (_visHandler) { document.removeEventListener("visibilitychange", _visHandler); _visHandler = null; }
   if (_hashHandler) { window.removeEventListener("hashchange", _hashHandler); _hashHandler = null; }
-}
-
-function filterChip(label, active, onClick) {
-  const b = el(`<button type="button" class="fch"></button>`);
-  b.textContent = label;
-  if (active) b.classList.add("on");
-  b.addEventListener("click", onClick);
-  return b;
 }
 
 function matchFilter(t, kind) {
@@ -49,202 +37,230 @@ function matchFilter(t, kind) {
   return true;
 }
 
-export function threadCard(thread, accountsById = {}, selMode = false) {
-  const card = el(`
-    <article class="tcard">
-      <div class="tc-m">
-        <div class="tc-t">
-          <span class="acct-slot"></span>
-          <b class="title"></b>
-          <span class="price"></span>
-        </div>
-        <div class="tc-sub"></div>
-      </div>
-      <div class="tc-side">
-        <time class="when"></time>
-        <div class="badges d-flex gap-1 flex-wrap justify-content-end"></div>
-      </div>
-    </article>
-  `);
-  card.style.setProperty("--ac", accountColor(thread.account_id));
-
-  if (selMode) {
-    const chk = document.createElement("input");
-    chk.type = "checkbox";
-    chk.className = "form-check-input flex-shrink-0 mt-1";
-    chk.checked = sel.ids.has(thread.thread_id);
-    // stop propagation so checkbox click doesn't also fire card click
-    chk.addEventListener("click", e => e.stopPropagation());
-    chk.addEventListener("change", () => {
-      if (chk.checked) sel.ids.add(thread.thread_id);
-      else sel.ids.delete(thread.thread_id);
-      updateBulkBar();
-    });
-    card.prepend(chk);
-    card.addEventListener("click", () => {
-      chk.checked = !chk.checked;
-      if (chk.checked) sel.ids.add(thread.thread_id);
-      else sel.ids.delete(thread.thread_id);
-      updateBulkBar();
-    });
-  } else {
-    card.addEventListener("click", () => {
-      location.hash = `#/thread/${encodeURIComponent(thread.thread_id)}`;
-    });
-  }
-
-  const titleEl = card.querySelector(".title");
-  titleEl.textContent = thread.ad_title ?? "(без названия)";
-  if (thread.operator_unread) {
-    titleEl.style.fontWeight = "700";
-    titleEl.appendChild(el(`<span class="unread-dot"></span>`));
-  }
-
-  const acc = accountsById[thread.account_id];
-  const accSlot = card.querySelector(".acct-slot");
-  if (acc) {
-    const badge = el(`<span class="acct"></span>`);
-    badge.style.backgroundColor = accountColor(thread.account_id);
-    badge.textContent = acc.name;
-    accSlot.replaceWith(badge);
-  } else {
-    accSlot.remove();
-  }
-
-  card.querySelector(".price").textContent = thread.ad_price ?? "";
-
-  let preview = (thread.ru_client ?? "").replace(/\s+/g, " ").trim();
-  if (!preview && thread.deal_brief_json) {
-    try {
-      const b = typeof thread.deal_brief_json === "string"
-        ? JSON.parse(thread.deal_brief_json) : thread.deal_brief_json;
-      if (b?.summary_ru) preview = b.summary_ru;
-    } catch (e) { /* skip */ }
-  }
-  if (preview.length > 110) preview = preview.slice(0, 110) + "…";
-  const sub = card.querySelector(".tc-sub");
-  sub.textContent = preview
-    ? `${thread.buyer_display_name ?? "?"} · ${preview}`
-    : (thread.buyer_display_name ?? "?");
-
-  card.querySelector(".when").textContent = berlinTime(thread.last_event_at);
-
-  const badges = card.querySelector(".badges");
-  if (thread.is_autopilot) badges.appendChild(chip("amb", "автопилот"));
-  if (thread.pending_drafts_count > 0) {
-    badges.appendChild(chip("blu", thread.pending_drafts_count > 1
-      ? `драфт ${thread.pending_drafts_count}` : "драфт"));
-  }
-  return card;
+// Горячие и с готовым черновиком — выше в «Ждут ответа»
+function hotFirst(list) {
+  const score = t => (t.is_hot ? 2 : 0) + (t.pending_drafts_count > 0 ? 1 : 0);
+  return [...list].sort((a, b) => score(b) - score(a));
 }
 
-function renderWith(mount, data) {
-  removeBulkBar();
-  const accountsById = {};
-  (data.accounts ?? []).forEach(a => { accountsById[a.id] = a; });
+function openThread(t) {
+  location.hash = `#/thread/${encodeURIComponent(t.thread_id)}`;
+}
 
-  const container = el(`<div class="${sel.active ? "pb-5" : ""}"></div>`);
+// ---------- полоса-итог и плашки ----------
 
-  // Фильтры (только в обычном режиме); ↻ и «Выбрать» — в конце второго ряда
-  if (!sel.active) {
-    const accBar = el(`<div class="frow"></div>`);
-    accBar.appendChild(filterChip("Все аккаунты", state.account === "",
-      () => { state.account = ""; _cachedData = null; paint(mount); }));
-    (data.accounts ?? []).forEach(a => {
-      accBar.appendChild(filterChip(a.name, String(state.account) === String(a.id),
-        () => { state.account = a.id; _cachedData = null; paint(mount); }));
+function summaryStrip(data, mount) {
+  const s = data.summary ?? {};
+  const waiting = s.waiting ?? (data.red ?? []).length;
+  const waitingClient = s.waiting_client ?? (data.green ?? []).length;
+  const strip = el(`<div class="sumstrip"></div>`);
+  const cell = (n, label, cls, onClick) => {
+    const c = el(`<button class="sc"><b></b><small></small></button>`);
+    if (cls) c.classList.add(cls);
+    c.querySelector("b").textContent = n;
+    c.querySelector("small").textContent = label;
+    c.addEventListener("click", onClick);
+    strip.appendChild(c);
+  };
+  cell(String(waiting), "ждут ответа", waiting ? "hot" : "", () => { state.status = "red"; renderWith(mount, data); });
+  cell(String(waitingClient), "ждём клиента", "", () => { state.status = "green"; renderWith(mount, data); });
+  const soldCell = (n, sumEur) => {
+    const sum = sumEur ? ` · ${Math.round(sumEur).toLocaleString("de-DE")} €` : "";
+    cell(`${n}${sum}`, "продано сегодня", n ? "good" : "", () => { location.hash = "#/sales"; });
+  };
+  if (s.sold_today_count != null) soldCell(s.sold_today_count, s.sold_today_eur);
+  else if (_soldToday) soldCell(_soldToday.count, _soldToday.eur);
+  return strip;
+}
+
+function detectedBanner(n) {
+  const b = el(`<a class="banner-detected" href="#/detected"><span class="bd-t"></span><span class="bd-go"><b>Проверить </b>›</span></a>`);
+  b.querySelector(".bd-t").textContent = `💰 Найдено продаж: ${n}`;
+  return b;
+}
+
+// Счётчик найденных продаж: из summary, иначе отдельный запрос (раз в 5 мин)
+async function refreshDetected(data, mount) {
+  if (data.summary?.detected_pending != null) { _detected = { n: data.summary.detected_pending, at: Date.now() }; return; }
+  // без summary — не чаще раза в 30 мин: /detected-sales на сервере переводит цитаты через LLM
+  if (Date.now() - _detected.at < 1800000) return;
+  _detected.at = Date.now();
+  try {
+    const r = await api("/api/ma/detected-sales");
+    const items = Array.isArray(r) ? r : (r?.items ?? r?.detections ?? []);
+    _detected.n = items.length;
+    if (mount.isConnected && _cachedData) renderWith(mount, _cachedData);
+  } catch (e) {
+    console.warn("[pipeline] detected-sales failed:", e);  // плашка просто не покажется
+  }
+}
+
+// ---------- фильтры ----------
+
+function toolbar(data, mount, counts) {
+  const bar = el(`<div class="tbar"><div class="fchips"></div><div class="tbar-r"></div></div>`);
+  const chips = bar.querySelector(".fchips");
+  [["all", "Все", counts.all], ["red", "Ждут", counts.red], ["green", "Ждём", counts.green], ["ap", "Авто", counts.ap]]
+    .forEach(([k, label, n]) => {
+      if (k === "ap" && !n && state.status !== "ap") return;
+      const c = el(`<button class="fchip"><span></span><b></b></button>`);
+      c.querySelector("span").textContent = label;
+      c.querySelector("b").textContent = String(n);
+      c.classList.toggle("on", state.status === k);
+      c.setAttribute("aria-pressed", state.status === k ? "true" : "false");
+      c.addEventListener("click", () => { state.status = k; renderWith(mount, data); });
+      chips.appendChild(c);
     });
-    container.appendChild(accBar);
+  // аккаунт — один чип со списком (вместо второго ряда фильтров)
+  const accs = data.accounts ?? [];
+  if (accs.length > 1) {
+    const cur = accs.find(a => String(a.id) === String(state.account));
+    const ac = el(`<button class="fchip acc-chip"><span></span> ▾</button>`);
+    ac.querySelector("span").textContent = cur ? cur.name : "Все аккаунты";
+    ac.classList.toggle("on", !!cur);
+    ac.addEventListener("click", () => menuSheet([
+      { label: "Все аккаунты", onClick: () => { state.account = ""; renderWith(mount, data); } },
+      ...accs.map(a => ({ label: a.name, onClick: () => { state.account = a.id; renderWith(mount, data); } })),
+    ], "Аккаунт"));
+    chips.appendChild(ac);
   }
+  const right = bar.querySelector(".tbar-r");
+  const triBtn = el(`<a class="ibtn tri-btn" href="#/triage" aria-label="Разбор по одной карточке"></a>`);
+  triBtn.appendChild(icon("cards"));
+  right.appendChild(triBtn);
+  const selBtn = el(`<button class="ibtn" aria-label="Выбрать несколько"></button>`);
+  selBtn.appendChild(icon("sel"));
+  selBtn.addEventListener("click", () => { sel.active = true; sel.ids.clear(); renderWith(mount, data); });
+  right.appendChild(selBtn);
+  return bar;
+}
 
-  const stBar = el(`<div class="frow"></div>`);
-  if (!sel.active) {
-    [["all", "Все"], ["red", "Ждут нас"], ["green", "Ждём"], ["ap", "Автопилот"]]
-      .forEach(([k, lbl]) => stBar.appendChild(filterChip(lbl, state.status === k,
-        () => { state.status = k; renderWith(mount, data); })));
-    const refresh = filterChip("↻", false, async () => { _cachedData = null; await paint(mount); });
-    refresh.style.marginLeft = "auto";
-    stBar.appendChild(refresh);
-  }
-  const selToggle = filterChip(sel.active ? "Отмена" : "Выбрать", sel.active, () => {
-    sel.active = !sel.active;
-    sel.ids.clear();
-    renderWith(mount, data); // re-render without API fetch
+// ---------- выбор нескольких ----------
+
+const BULK = [
+  ["pin", "📌 Закрепить"], ["unpin", "Открепить"], ["read", "Прочитано"],
+  ["unread", "Непрочитано"], ["wait", "✋ Жду"], ["close", "🗑 Убрать"],
+];
+
+function selBar(data, mount) {
+  const bar = el(`<div class="selbar"><button class="ibtn x" aria-label="Отменить выбор"></button><b class="sel-n"></b><span class="sel-l">выбрано</span></div>`);
+  bar.querySelector(".x").appendChild(icon("x"));
+  bar.querySelector(".sel-n").textContent = String(sel.ids.size);
+  bar.querySelector(".x").addEventListener("click", () => { sel.active = false; sel.ids.clear(); renderWith(mount, data); });
+  return bar;
+}
+
+function bulkDock(data, mount) {
+  const dock = el(`<div class="bulkdock"></div>`);
+  BULK.forEach(([action, label]) => {
+    const b = el(`<button class="btn btn-sm"></button>`);
+    b.textContent = label;
+    if (action === "close") b.classList.add("btn-danger");
+    b.disabled = sel.ids.size === 0;
+    b.addEventListener("click", async () => {
+      const ids = [...sel.ids];
+      if (!ids.length) return;
+      if (action === "close" && !(await confirmSheet(`Убрать ${ids.length} переписк(у/и) из входящих?`, "Убрать"))) return;
+      dock.querySelectorAll("button").forEach(x => { x.disabled = true; });
+      try {
+        if (action === "wait") {
+          // массового «Жду» у api нет — по одному
+          for (const id of ids) await api(`/api/ma/threads/${encodeURIComponent(id)}/wait`, { method: "POST" });
+        } else {
+          await api("/api/ma/threads/bulk-action", { method: "POST", body: { thread_ids: ids, action } });
+        }
+        toast(`Готово: ${label.replace(/^\S+\s/, "")} · ${ids.length}`, { level: "ok" });
+      } catch (e) {
+        toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+      }
+      sel.active = false;
+      sel.ids.clear();
+      _cachedData = null;
+      await paint(mount);
+    });
+    dock.appendChild(b);
   });
-  if (!sel.active) selToggle.style.flexShrink = "0";
-  stBar.appendChild(selToggle);
-  container.appendChild(stBar);
+  return dock;
+}
 
-  // Секции
-  const pinned = (data.pinned ?? []).filter(t => matchFilter(t, "pinned"));
-  const red    = (data.red   ?? []).filter(t => matchFilter(t, "red"));
-  const green  = (data.green ?? []).filter(t => matchFilter(t, "green"));
-  const list = el(`<div></div>`);
+// ---------- отрисовка ----------
 
-  function addSection(label, items, cls) {
-    const hdr = el(`<div class="sec"></div>`);
-    if (cls) hdr.classList.add(cls);
-    hdr.innerHTML = "";
-    hdr.appendChild(document.createTextNode(`${label} · `));
-    const n = el(`<b></b>`);
-    n.textContent = String(items.length);
-    hdr.appendChild(n);
-    list.appendChild(hdr);
-    items.forEach(t => list.appendChild(threadCard(t, accountsById, sel.active)));
+function renderWith(mount, data) {
+  const pinnedAll = data.pinned ?? [], redAll = data.red ?? [], greenAll = data.green ?? [];
+  setTabBadge("inbox", redAll.length + pinnedAll.filter(t => t.last_event_kind === "in").length);
+  const inAcc = t => !state.account || String(t.account_id) === String(state.account);
+  const all = [...pinnedAll, ...redAll, ...greenAll].filter(inAcc);
+  const counts = {
+    all: all.length,
+    red: [...pinnedAll.filter(t => t.last_event_kind === "in"), ...redAll].filter(inAcc).length,
+    green: [...pinnedAll.filter(t => t.last_event_kind !== "in"), ...greenAll].filter(inAcc).length,
+    ap: all.filter(t => t.is_autopilot).length,
+  };
+
+  const container = el(`<div class="inbox"></div>`);
+  if (sel.active) {
+    container.appendChild(selBar(data, mount));
+  } else {
+    container.appendChild(summaryStrip(data, mount));
+    if (_detected.n) container.appendChild(detectedBanner(_detected.n));
+    container.appendChild(toolbar(data, mount, counts));
   }
 
-  if (!pinned.length && !red.length && !green.length) {
-    list.appendChild(el(`<div class="text-muted small fst-italic px-2 py-3 text-center">Нет обращений по фильтру</div>`));
-  } else {
-    if (pinned.length) addSection("📌 Закреплённые", pinned);
-    if (red.length)    addSection("Ждут нас", red, "sec-red");
-    if (green.length)  addSection("Ждём клиента", green, "sec-grn");
+  const rowOpts = t => ({
+    selecting: sel.active,
+    picked: sel.ids.has(t.thread_id),
+    onOpen: sel.active ? () => {
+      if (sel.ids.has(t.thread_id)) sel.ids.delete(t.thread_id); else sel.ids.add(t.thread_id);
+      renderWith(mount, data);
+    } : openThread,
+    onLongPress: () => { sel.active = true; sel.ids = new Set([t.thread_id]); renderWith(mount, data); },
+    onWait: async th => {
+      try {
+        await api(`/api/ma/threads/${encodeURIComponent(th.thread_id)}/wait`, { method: "POST" });
+        toast(`✋ Ждём ответа: ${th.buyer_display_name || "покупатель"}`, { level: "ok" });
+        _cachedData = null;
+        paint(mount);
+      } catch (e) {
+        toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+      }
+    },
+    onSold: th => {
+      const d = dealOf(th);
+      openSoldSheet({
+        threadId: th.thread_id, msgId: th.msg_id, title: th.ad_title,
+        price: d.ours ?? d.offer ?? d.price, prices: [d.price, d.ours, d.offer],
+        onDone: () => { _cachedData = null; paint(mount); },
+      });
+    },
+  });
+
+  const list = el(`<div class="tlist"></div>`);
+  const section = (title, items, cls) => {
+    if (!items.length) return;
+    const h = el(`<div class="lsec"><span></span><i></i></div>`);
+    if (cls) h.classList.add(cls);
+    h.querySelector("span").textContent = title;
+    h.querySelector("i").textContent = String(items.length);
+    list.appendChild(h);
+    items.forEach(t => list.appendChild(threadRow(t, rowOpts(t))));
+  };
+  const pinned = pinnedAll.filter(t => matchFilter(t, "pinned") && (state.status === "all" ||
+    (state.status === "red" ? t.last_event_kind === "in" : state.status === "green" ? t.last_event_kind !== "in" : !!t.is_autopilot)));
+  const red = hotFirst(redAll.filter(t => matchFilter(t, "red")));
+  const green = greenAll.filter(t => matchFilter(t, "green"));
+  section("Закреплённые", pinned, "pin");
+  section("Ждут ответа", red, "hot");
+  section("Ждём клиента", green);
+  if (!list.children.length) {
+    const empty = el(`<div class="empty"><p></p></div>`);
+    empty.prepend(icon("check"));
+    empty.querySelector("p").textContent = state.status === "all" && !state.account
+      ? "Пусто — на все письма ответили." : "Нет переписок по этому фильтру.";
+    list.appendChild(empty);
   }
   container.appendChild(list);
+  if (sel.active) container.appendChild(bulkDock(data, mount));
   mount.replaceChildren(container);
-
-  // Bulk-панель (тёмная, токены — не белая)
-  if (sel.active) {
-    _bulkBar = el(`<div class="bulkbar"></div>`);
-    const countLine = el(`<b class="small sel-count">Ничего не выбрано</b>`);
-    const btns = el(`<div class="brow"></div>`);
-    const actions = [
-      ["pin",   "📌 Закрепить",  "btn-sm",        null],
-      ["unpin", "Открепить",     "btn-sm",        null],
-      ["read",  "Прочитано",     "btn-sm",        null],
-      ["unread","Непрочитано",   "btn-sm",        null],
-      ["close", "🗑 Убрать",     "btn-sm btn-danger", true],
-    ];
-    actions.forEach(([action, label, cls, needConfirm]) => {
-      const btn = el(`<button class="btn ${cls}" data-action="${action}"></button>`);
-      btn.textContent = label;
-      btn.disabled = true;
-      btn.addEventListener("click", async () => {
-        if (!sel.ids.size) return;
-        if (needConfirm && !(await confirmSheet(`Убрать ${sel.ids.size} треда(ов) из входящих?`, "Убрать"))) return;
-        btn.disabled = true;
-        try {
-          await api("/api/ma/threads/bulk-action", {
-            method: "POST",
-            body: { thread_ids: [...sel.ids], action },
-          });
-        } catch (e) {
-          alert(`Ошибка: ${e.message}`);
-          updateBulkBar();
-          return;
-        }
-        sel.active = false;
-        sel.ids.clear();
-        _cachedData = null;
-        await paint(mount);
-      });
-      btns.appendChild(btn);
-    });
-    _bulkBar.appendChild(countLine);
-    _bulkBar.appendChild(btns);
-    document.body.appendChild(_bulkBar);
-    updateBulkBar();
-  }
 }
 
 let _paintSeq = 0;
@@ -260,9 +276,20 @@ async function paint(mount) {
       return;
     }
     // Ушли с экрана, пока шёл запрос, или уже ушёл более свежий запрос
-    // (таймер + ручное ↻) — устаревший ответ не рисуем и не кэшируем.
+    // (таймер + ручное обновление) — устаревший ответ не рисуем и не кэшируем.
     if (!mount.isConnected || seq !== _paintSeq) return;
     _cachedData = data;
+    refreshDetected(data, mount);
+    if (data.summary?.sold_today_count == null) {
+      soldToday(api).then(v => {
+        const changed = !_soldToday || _soldToday.count !== v.count;
+        _soldToday = v;
+        if (changed && mount.isConnected && _cachedData && !sel.active) renderWith(mount, _cachedData);
+      }).catch(e => {
+        console.warn("[pipeline] sold today:", e);
+        _soldToday = { count: "—", eur: 0 };  // не показываем старое число как «сегодня»
+      });
+    }
   }
   renderWith(mount, _cachedData);
 }
@@ -275,13 +302,11 @@ export async function render(mount, params) {
   setLoading(mount, "Загружаю входящие…");
   await paint(mount);
   // Пока грузились, оператор ушёл на другой экран — таймеры не заводим
-  // (раньше hashchange-обработчик ещё не был повешен, и опрос продолжал
-  // перерисовывать #app поверх треда).
   if (!mount.isConnected) return;
 
   const refresh = async () => {
     if (!mount.isConnected) { teardown(); return; }
-    // не дёргаем список пока оператор выбирает карточки
+    // не дёргаем список, пока оператор выбирает карточки
     if (document.visibilityState === "visible" && !sel.active) {
       _cachedData = null;
       await paint(mount);
@@ -290,8 +315,10 @@ export async function render(mount, params) {
   _timer = setInterval(refresh, REFRESH_MS);
   _visHandler = refresh;
   document.addEventListener("visibilitychange", _visHandler);
+  // Ушли с экрана — стоп. На Fold список живёт в левой панели и при открытии
+  // треда остаётся в DOM: тогда опрос продолжается.
   _hashHandler = () => {
-    if (!location.hash.startsWith("#/pipeline") && location.hash !== "#/" && location.hash !== "") teardown();
+    if (!mount.isConnected) teardown();
   };
   window.addEventListener("hashchange", _hashHandler);
 }
