@@ -56,6 +56,10 @@ sed -i "s|https://[a-z0-9-]\+\.trycloudflare\.com|$NEW_URL|g" "$API_JS"
 grep -rlE '\?v=[0-9]+-[0-9]+' "$WEBAPP" | while read -r f; do
   sed -i -E "s|\?v=[0-9]+-[0-9]+|?v=$STAMP|g" "$f"
 done
+# С import map (af607f2) версии модулей — хэши содержимого: пересчитать после правки api.js
+if [ -x "$REPO/scripts/bump_cache.sh" ]; then
+  "$REPO/scripts/bump_cache.sh" || log "bump_cache.sh завершился с ошибкой"
+fi
 
 # 4. Коммит
 git -C "$REPO" add web-app/
