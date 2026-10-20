@@ -941,3 +941,27 @@ def test_apply_seed_marks_merged(inv):
     inv.apply_seed(inv.plan_seed(inv.seed_ads_from_messages(), merge_doubtful=True))
     assert inv.inv.get_listing("2")["link_method"] == "seed_merged"
     assert inv.inv.get_listing("2")["product_id"] == inv.inv.get_listing("1")["product_id"]
+
+
+@pytest.mark.parametrize("txt,exp", [
+    ("10 шт × 45 €", (10, 45.0)), ("10x45", (10, 45.0)), ("10 по 45,5", (10, 45.5)),
+    ("10 шт 450 всего", (10, 45.0)), ("3", (3, None)), ("2 шт", (2, None)), ("5 * 20 eur", (5, 20.0)),
+])
+def test_parse_receipt_line(txt, exp):
+    import modules.inventory as m
+    assert m.parse_receipt_line(txt) == exp
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "0 шт × 5", "много"])
+def test_parse_receipt_line_bad(bad):
+    import modules.inventory as m
+    with pytest.raises(ValueError):
+        m.parse_receipt_line(bad)
+
+
+def test_receive_line_confirmation(inv):
+    p = inv.inv.create_product(title="Sitzbank")
+    r = inv.receive_line(p, "10 шт × 45 €")
+    assert r["qty"] == 10 and r["unit_cost_eur"] == 45.0 and r["qty_after"] == 10
+    assert r["message"] == "Принято 10 шт × 45 € · на складе стало 10"
+    assert inv.receive_line(p, "2")["message"].endswith("на складе стало 12")
