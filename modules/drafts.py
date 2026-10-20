@@ -13,7 +13,7 @@ from modules import claude
 
 logger = logging.getLogger(__name__)
 
-_FINAL_STATUSES = ("sent", "sent_debug", "skipped", "skipped_sold", "not_sent_disabled", "sending")
+_FINAL_STATUSES = claude.FINAL_STATUSES
 
 
 def _final_msg(message_id: int, status: str) -> str:
@@ -112,6 +112,8 @@ def regenerate_draft_with_price(message_id: int, price_eur: float) -> dict[str, 
     msg = db.get_message(message_id)
     if not msg:
         return {"kind": "error", "message": f"❌ msg={message_id} не найдено"}
+    if msg["status"] in _FINAL_STATUSES:
+        return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     history, brief_text, _ = _regen_context(msg)
     try:
         result = claude.regenerate_with_price(
@@ -129,6 +131,8 @@ def regenerate_draft_with_instruction(message_id: int, instruction: str) -> dict
     msg = db.get_message(message_id)
     if not msg:
         return {"kind": "error", "message": f"❌ msg={message_id} не найдено"}
+    if msg["status"] in _FINAL_STATUSES:
+        return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     history, brief_text, _ = _regen_context(msg)
     try:
         result = claude.regenerate_with_instruction(

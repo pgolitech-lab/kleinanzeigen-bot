@@ -18,7 +18,6 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,7 +90,7 @@ def _format_thread(gmail_thread_id: str, rows: list) -> str:
     if ad_title or ad_price:
         parts.append(f"ОБЪЯВЛЕНИЕ: {ad_title or '?'} | цена: {ad_price or '?'}")
     parts.append("---")
-    text, _ = claude.format_history(claude.history_for(gmail_thread_id), max_chars=12000)
+    text, _ = claude.format_history(claude.rows_to_history(rows), max_chars=12000, with_dates=True)
     parts.append(text)
     return "\n".join(parts)
 

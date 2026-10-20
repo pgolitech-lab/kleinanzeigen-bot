@@ -247,3 +247,31 @@ def test_regenerate_refuses_sent_row(tmp_db, fake_llm):
     assert res["kind"] == "error"
     assert tmp_db.get_message(mid)["de_answer"] == "y"
     assert fake_llm.calls == []
+
+
+def test_history_for_keeps_our_ack_created_after_current(tmp_db):
+    # auto-ack создаётся с utcnow() ПОЗЖЕ Date-заголовка письма — терять его нельзя
+    t = "thr-ack"
+    cur = tmp_db.add_message(1, "in", gmail_thread_id=t, de_client="Noch da?", created_at="2026-10-01T10:00")
+    tmp_db.add_message(1, "out", gmail_thread_id=t, de_answer="Guten Tag, melde mich gleich", status="sent",
+                       is_auto_ack=1, created_at="2026-10-01T10:03", sent_at="2026-10-01T10:03")
+    hist = claude.history_for(t, exclude_id=cur, before="2026-10-01T10:00")
+    text, has_ours = claude.format_history(hist)
+    assert "авто-приветствие" in text and has_ours
+
+
+def test_regenerate_core_refuses_final_status(fake_llm):
+    row = {"id": 7, "status": "sent", "de_client": "x", "de_answer": "y"}
+    with pytest.raises(RuntimeError, match="уже обработано"):
+        claude.regenerate_with_price(row, 100, brief_text="", history=[])
+    assert fake_llm.calls == []
+
+
+def test_translate_rejects_echo_and_wrong_language(fake_llm):
+    src = "Да, сиденье ещё есть, можно забрать в субботу."
+    fake_llm.response = _resp({"translation": src})
+    with pytest.raises(claude_utils.LLMResponseError):
+        claude.translate_only(src, target_lang="de", source_lang="ru")
+    fake_llm.response = _resp({"translation": "Ja, der Sitz ist noch da, Abholung am Samstag. MfG",
+                               "back_translation_ru": "Да, ещё есть"})
+    assert claude.translate_with_back(src, target_lang="de")["translation"].startswith("Ja")

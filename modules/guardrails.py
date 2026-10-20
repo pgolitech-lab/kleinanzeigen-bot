@@ -1,6 +1,6 @@
 # Детерминированные guardrails для негоциации — «код владеет числами».
-# Чистые функции без побочных эффектов и без обращений к БД/сети. Вешаются на
-# авто-отправку автопилота в Инкременте 3; здесь — только сами примитивы + тесты.
+# Чистые функции без побочных эффектов и без обращений к БД/сети; исключение —
+# outgoing_language_ok_llm (добирает Haiku, когда эвристика языка не уверена).
 
 import json
 import re
@@ -30,23 +30,125 @@ def floor_violation(
     return float(proposed_eur) < float(floor_eur)
 
 
-_CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE)
+_CYRILLIC_RE = re.compile(r"[а-яёіїєґўђјљњћџ]", re.IGNORECASE)
+_SCRIPT_RES: dict[str, "re.Pattern[str]"] = {
+    "cyrillic": _CYRILLIC_RE,
+    "latin": re.compile(r"[a-zà-ɏ]", re.IGNORECASE),
+    "arabic": re.compile(r"[؀-ۿ]"),
+    "greek": re.compile(r"[α-ωά-ώ]", re.IGNORECASE),
+    "hebrew": re.compile(r"[א-ת]"),
+    "cjk": re.compile(r"[぀-ヿ一-鿿가-힯]"),
+}
+_LANG_SCRIPT: dict[str, str] = {
+    **{c: "cyrillic" for c in ("ru", "uk", "bg", "sr", "mk", "be", "kk")},
+    **{c: "arabic" for c in ("ar", "fa", "ur")},
+    "el": "greek", "he": "hebrew", "zh": "cjk", "ja": "cjk", "ko": "cjk",
+}
+
+# Частые служебные слова: по ним отличаем языки с одной письменностью.
+# Порог — минимум 2 совпадения, чтобы имя/подпись («MfG», «Müller») не решали за весь текст.
+_STOPWORDS: dict[str, set[str]] = {
+    "de": {"und", "ist", "ich", "nicht", "sie", "das", "die", "der", "mit", "für", "noch",
+           "gerne", "wir", "haben", "ein", "eine", "auch", "bitte", "danke", "kann", "wäre", "es"},
+    "en": {"the", "and", "is", "you", "it", "for", "with", "not", "are", "can", "have",
+           "still", "available", "thanks", "please", "would", "we", "this", "of", "to"},
+    "tr": {"ve", "bir", "bu", "için", "ile", "çok", "mi", "mı", "evet", "hayır", "teşekkürler",
+           "merhaba", "var", "yok", "fiyat", "ne", "ben", "siz", "olarak"},
+    "pl": {"jest", "nie", "się", "i", "na", "że", "dla", "czy", "jak", "dzień", "dobry",
+           "dziękuję", "proszę", "tak", "cena", "mam", "pan", "pani", "do"},
+    "fr": {"le", "la", "les", "est", "et", "pour", "avec", "pas", "vous", "je", "bonjour",
+           "merci", "oui", "une", "des", "du", "encore"},
+    "es": {"el", "la", "es", "y", "para", "con", "no", "usted", "hola", "gracias", "sí",
+           "una", "los", "las", "todavía", "precio"},
+    "it": {"il", "è", "e", "per", "con", "non", "sono", "ciao", "grazie", "una", "ancora",
+           "prezzo", "buongiorno", "della"},
+    "nl": {"het", "een", "en", "is", "niet", "voor", "met", "nog", "ik", "u", "bedankt", "graag", "ja"},
+    "ru": {"и", "не", "в", "на", "что", "это", "да", "есть", "вы", "я", "спасибо",
+           "здравствуйте", "цена", "ещё", "еще", "можно", "мы", "по", "для", "уже"},
+    "uk": {"і", "що", "це", "так", "є", "ви", "дякую", "добрий", "день", "ціна", "ще",
+           "можна", "ми", "для", "вже", "будь", "ласка"},
+    "bg": {"и", "не", "е", "на", "че", "това", "да", "има", "вие", "аз", "благодаря",
+           "здравейте", "цена", "още", "може", "ние", "за", "вече"},
+}
+# Буквы, которых нет в «соседях» по письменности: однозначный сигнал языка
+_MARKERS: dict[str, "re.Pattern[str]"] = {
+    "uk": re.compile(r"[іїєґ]", re.IGNORECASE),
+    "ru": re.compile(r"[ыэё]", re.IGNORECASE),
+    # без IGNORECASE: «ı» при свёртке регистра совпадает с обычной «i»
+    "tr": re.compile(r"[ğışĞŞİ]"),
+    "pl": re.compile(r"[ąęłńśźż]", re.IGNORECASE),
+    "de": re.compile(r"[äöüß]", re.IGNORECASE),
+}
+_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def _script_of(text: str) -> Optional[str]:
+    """Преобладающая письменность текста (по числу букв) или None, если букв нет."""
+    counts = {name: len(rx.findall(text)) for name, rx in _SCRIPT_RES.items()}
+    best = max(counts, key=counts.get)
+    return best if counts[best] else None
+
+
+def language_verdict(text: str, client_lang: Optional[str]) -> str:
+    """Дешёвая эвристика: подходит ли язык текста языку клиента.
+
+    'ok' — уверенно совпадает; 'mismatch' — уверенно другой язык (другая письменность
+    или явные слова/буквы другого языка при нуле признаков языка клиента);
+    'unsure' — эвристика не решает (короткий текст, нет известных слов) → нужна LLM-проверка.
+    Пустой текст → 'mismatch' (нечего слать).
+    """
+    if not text or not text.strip():
+        return "mismatch"
+    lang = (client_lang or "de").strip().lower()
+    script = _script_of(text)
+    if script is None:
+        return "ok"  # только цифры/знаки — языково-нейтрально
+    if script != _LANG_SCRIPT.get(lang, "latin"):
+        return "mismatch"
+
+    words = [w.lower() for w in _WORD_RE.findall(text)]
+    scores = {code: sum(1 for w in words if w in sw) for code, sw in _STOPWORDS.items()
+              if _LANG_SCRIPT.get(code, "latin") == script}
+    for code, rx in _MARKERS.items():
+        if code in scores and rx.search(text):
+            scores[code] += 2
+    own = scores.get(lang, 0)
+    rival_code, rival = max(((c, v) for c, v in scores.items() if c != lang),
+                            key=lambda cv: cv[1], default=(None, 0))
+    if lang not in scores:
+        # Язык без словаря (fr-подобные редкие, sr, …): уверены только при сильном сопернике
+        return "mismatch" if rival >= 4 else "unsure"
+    if own >= 2 and own >= rival:
+        return "ok"
+    if rival >= 2 and own == 0:
+        return "mismatch"
+    return "unsure"
 
 
 def outgoing_language_ok(text: str, client_lang: Optional[str]) -> bool:
-    """Алфавитная санити-проверка исходящего клиенту текста.
+    """Чистая (без LLM) санити-проверка исходящего: False только при уверенном
+    несовпадении языка или пустом тексте. Для автоотправки при 'unsure' используйте
+    `outgoing_language_ok_llm`."""
+    return language_verdict(text, client_lang) != "mismatch"
 
-    Ловит катастрофу — когда вместо переведённого client_answer уходит русский
-    черновик ru_answer (или наоборот). Кириллица допустима ТОЛЬКО при
-    client_lang='ru'; для не-ru языков кириллица = провал, а для 'ru' —
-    наоборот требуем кириллицу. Пустой текст → провал (нечего слать)."""
-    if not text or not text.strip():
+
+def outgoing_language_ok_llm(text: str, client_lang: Optional[str]) -> bool:
+    """Эвристика + Haiku (claude.detect_text_lang), если эвристика не уверена.
+
+    Fail-closed: ошибка LLM → False (автоотправка не должна уйти вслепую; вызывающий
+    отдаёт письмо оператору). Языково-нейтральный текст ('und') — ок.
+    """
+    verdict = language_verdict(text, client_lang)
+    if verdict != "unsure":
+        return verdict == "ok"
+    from modules import claude
+    try:
+        detected = claude.detect_text_lang(text)["lang"]
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("language guard: detect_text_lang упал — считаю несовпадением")
         return False
-    has_cyrillic = bool(_CYRILLIC_RE.search(text))
-    lang = (client_lang or "").strip().lower()
-    if lang == "ru":
-        return has_cyrillic
-    return not has_cyrillic
+    return detected in ("und", (client_lang or "de").strip().lower())
 
 
 def extract_json_object(text_blocks: list[str]) -> dict[str, Any]:
