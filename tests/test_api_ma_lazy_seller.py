@@ -42,21 +42,27 @@ def _thread(mdb, brief=None, ad_price="450 €", status="pending", sent_at=None)
     conn.execute.return_value.fetchone.return_value = None  # в очереди ничего
 
 
-def test_sold_any_thread_price_from_deal_brief(client):
-    c, mdb = client
-    _thread(mdb, brief='{"negotiated_price_eur": 380}')
-    r = c.post("/api/ma/threads/t1/sold", json={}, headers=H())
-    assert r.status_code == 200 and r.json()["sold_price_eur"] == 380 and r.json()["price_source"] == "deal_brief"
-    assert mdb.mark_thread_sold.call_args.kwargs["sold_price_eur"] == 380.0
-
-
-def test_sold_any_thread_price_from_ad_and_explicit(client):
+def test_sold_price_required_and_stock_recorded(client):
     c, mdb = client
     _thread(mdb)
-    assert c.post("/api/ma/threads/t1/sold", json={}, headers=H()).json()["sold_price_eur"] == 450
-    r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300, "note": "забрал сам"}, headers=H())
-    assert r.json()["price_source"] == "operator"
+    assert c.post("/api/ma/threads/t1/sold", json={}, headers=H()).status_code == 422
+    with patch("modules.inventory.record_sale",
+               return_value={"product_id": 5, "qty_after": 2, "stock_tracked": True, "created": True}) as rs:
+        r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300, "note": "забрал сам"}, headers=H())
+    assert r.status_code == 200
+    assert r.json()["stock"] == {"product_id": 5, "qty_after": 2, "stock_tracked": True}
+    assert mdb.mark_thread_sold.call_args.kwargs["sold_price_eur"] == 300.0
+    assert rs.call_args.kwargs["source"] == "thread" and rs.call_args.kwargs["gmail_thread_id"] == "t1"
     assert "забрал сам" in mdb.update_message.call_args.kwargs["extra_notes"]
+
+
+def test_sold_stock_failure_does_not_fail_sale(client):
+    c, mdb = client
+    _thread(mdb)
+    with patch("modules.inventory.record_sale", side_effect=RuntimeError("db locked")):
+        r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
+    assert r.status_code == 200 and r.json()["stock"] is None
+    mdb.mark_thread_sold.assert_called_once()
 
 
 def test_sold_on_answered_thread_keeps_sent_row(client):
@@ -65,7 +71,9 @@ def test_sold_on_answered_thread_keeps_sent_row(client):
     c, mdb = client
     _thread(mdb, status="sent", sent_at="2026-10-19T10:00:00")
     mdb.add_manual_sale.return_value = {"msg_id": 99, "thread_id": "manual-x"}
-    r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
+    with patch("modules.inventory.record_sale", return_value={"product_id": None}) as rs:
+        r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
+    assert rs.call_args.kwargs["source"] == "operator"  # тред не «продан» в messages — sync не снимет
     assert r.status_code == 200 and r.json()["separate_sale"] == {"msg_id": 99, "thread_id": "manual-x"}
     mdb.mark_thread_sold.assert_not_called()
     assert mdb.add_manual_sale.call_args.kwargs["sold_price_eur"] == 300.0
@@ -77,13 +85,6 @@ def test_sold_refused_while_letter_queued(client):
     _thread(mdb)
     mdb.get_conn.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = {"id": 7}
     assert c.post("/api/ma/threads/t1/sold", json={"price_eur": 1}, headers=H()).status_code == 409
-    mdb.mark_thread_sold.assert_not_called()
-
-
-def test_sold_without_any_price_400(client):
-    c, mdb = client
-    _thread(mdb, ad_price="VB")
-    assert c.post("/api/ma/threads/t1/sold", json={}, headers=H()).status_code == 400
     mdb.mark_thread_sold.assert_not_called()
 
 

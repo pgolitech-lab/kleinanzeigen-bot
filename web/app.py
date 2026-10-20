@@ -19,6 +19,7 @@ import scheduler as sched_mod
 from contextlib import asynccontextmanager
 
 from web.api_ma import invalidate_pipeline_cache, resume_send_queue, router as ma_router
+from web.api_stock import router as stock_router
 
 # Документация OpenAPI наружу не нужна (и через туннель её не видно); локально — тоже лишнее
 logger = logging.getLogger(__name__)
@@ -46,12 +47,13 @@ app.add_middleware(
         "https://pgolitech-lab.github.io",
         "https://web.telegram.org",
     ],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["X-Telegram-Init-Data", "Content-Type", "If-None-Match"],
     expose_headers=["ETag"],
     max_age=600,
 )
 app.include_router(ma_router)
+app.include_router(stock_router)
 
 
 # Через cloudflared-туннель (публичный адрес) наружу видны только Mini App API и /health.
@@ -77,7 +79,7 @@ async def _tunnel_guard(request: Request, call_next):
         return JSONResponse({"detail": "Not Found"}, status_code=404)
     response = await call_next(request)
     # Любое действие оператора в MA меняет pipeline — сбрасываем короткий кэш
-    if request.method == "POST" and path.startswith("/api/ma/"):
+    if request.method in ("POST", "PATCH") and path.startswith("/api/ma/"):
         invalidate_pipeline_cache()
     return response
 

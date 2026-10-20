@@ -160,6 +160,9 @@ def _row_to_pipeline_item(row: Any) -> dict[str, Any]:
         "last_event_kind": row["last_event_kind"],
         "pending_drafts_count": row["pending_drafts_count"],
         "is_autopilot": bool(row["autopilot_active"]),
+        # «горячий покупатель» (mail помечает is_hot/hot_reason) — наверх в «ждут нас»
+        "is_hot": bool(row["is_hot"]) if "is_hot" in keys else False,
+        "hot_reason": row["hot_reason"] if "hot_reason" in keys else None,
         "account_id": row["account_id"] if "account_id" in keys else None,
         "ru_client": _preview(row["ru_client"]) if "ru_client" in keys else None,
         "is_pinned": bool(row["is_pinned"]) if "is_pinned" in keys else False,
@@ -188,6 +191,7 @@ def ma_pipeline(request: Request, user: dict = Depends(verify_init_data_dep)) ->
             green.append(item)
     for section in (pinned, red, green):
         section.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
+    red.sort(key=lambda x: x["is_hot"], reverse=True)  # стабильная: горячие сверху, внутри — по времени
     accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
     body = json.dumps({"pinned": pinned, "red": red, "green": green, "accounts": accounts},
                       ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -1102,17 +1106,18 @@ class SoldBody(BaseModel):
 
 
 class ThreadSoldBody(BaseModel):
-    # Нет цены — берём договорённую из сводки сделки, иначе цену объявления
-    price_eur: "float | None" = Field(None, ge=0, lt=1000000)
+    # Цена обязательна (склад/прибыль); фронт предзаполняет из GET /threads/{id}/sale-price
+    price_eur: float = Field(..., ge=0, lt=1000000)
     note: str = Field("", max_length=500)
     close_other_threads_for_ad: bool = False
 
 
 @router.post("/threads/{thread_id}/sold")
-def ma_thread_sold(thread_id: str, body: "ThreadSoldBody | None" = None,
+def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """«Продано» на любом треде — с черновиком или без (QA S-01: раньше только через черновик)."""
-    b = body or ThreadSoldBody()
+    """«Продано» на любом треде — с черновиком или без (QA S-01). Цена обязательна; товар
+    списывается со склада (stock в ответе; product_id=None — товар не найден, привязать)."""
+    b = body
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
@@ -1120,15 +1125,6 @@ def ma_thread_sold(thread_id: str, body: "ThreadSoldBody | None" = None,
     if latest_in is None:
         raise HTTPException(404, "no incoming message in thread")
     price = b.price_eur
-    source = "operator"
-    if price is None:
-        brief = _parse_deal_brief(latest_in["deal_brief_json"] if "deal_brief_json" in latest_in.keys() else None)
-        price = (brief or {}).get("negotiated_price_eur")
-        source = "deal_brief"
-        if not price:
-            price, source = _parse_listed_price_eur(latest_in["ad_price"]), "ad_price"
-    if not price:
-        raise HTTPException(400, "Укажите цену продажи — в переписке и объявлении её нет")
     _ensure_nothing_queued(thread_id)
     msg_id = latest_in["id"]
     actor = actor_from_user(user)
@@ -1158,8 +1154,29 @@ def ma_thread_sold(thread_id: str, body: "ThreadSoldBody | None" = None,
                 db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
     finally:
         telegram_bot._release_lock(msg_id, actor)
-    return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price), "price_source": source,
-            "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref}
+    stock = _record_stock_sale(
+        price=float(price), thread_id=thread_id, msg_row=latest_in,
+        # продажа отдельной строкой: тред не «продан» в messages — sync_sales не должен её снимать
+        source="operator" if sale_ref else "thread", actor=actor)
+    return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price),
+            "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref,
+            "stock": stock}
+
+
+def _record_stock_sale(*, price: float, thread_id: str, msg_row: Any, source: str, actor: str) -> "dict[str, Any] | None":
+    """Списать товар со склада (идемпотентно по треду — если db уже сделала это в mark_thread_sold,
+    второй раз не спишется). Сбой склада продажу не откатывает: ERROR в лог, джоб sync_all догонит."""
+    from modules import inventory
+    try:
+        res = inventory.record_sale(
+            price_eur=price, gmail_thread_id=thread_id,
+            ad_id=msg_row["ad_id"] if "ad_id" in msg_row.keys() else None,
+            ad_title=msg_row["ad_title"], message_id=msg_row["id"], source=source, created_by=actor)
+    except Exception:
+        logger.exception("склад: продажа треда %s не списана — догонит sync_all", thread_id)
+        return None
+    return {"product_id": res.get("product_id"), "qty_after": res.get("qty_after"),
+            "stock_tracked": res.get("stock_tracked")}
 
 
 @router.post("/messages/{msg_id}/sold")
@@ -1177,12 +1194,17 @@ def ma_sold(msg_id: int, body: SoldBody,
         sold_price_eur=body.price_eur,
         close_other_threads_for_ad=body.close_other_threads_for_ad,
     )
-    telegram_bot._release_lock(msg_id)
+    sold_row = db.get_message(msg_id)
+    stock = _record_stock_sale(price=float(body.price_eur), thread_id=sold_row["gmail_thread_id"] or "",
+                               msg_row=sold_row, source="thread", actor=actor) \
+        if sold_row is not None and sold_row["gmail_thread_id"] else None
+    telegram_bot._release_lock(msg_id, actor)
     return {
         "ok": True,
         "status": "skipped_sold",
         "sold_price_eur": body.price_eur,
         "closed_other_threads": result["closed_other_threads"],
+        "stock": stock,
     }
 
 
@@ -2147,6 +2169,7 @@ ALLOWED_SETTING_KEYS = {
     "reminders_enabled", "reminder_after_days",
     "polling_paused",
     "telegram_authorized", "telegram_operator_dm_ids", "telegram_admin_chat_id",
+    "tg_quiet_from", "tg_quiet_to",
     "max_discount_percent",
     "claude_model", "system_prompt",
     "chat_font_em", "chat_padding_v_rem", "chat_padding_h_rem",
@@ -2182,6 +2205,8 @@ VALIDATORS = {
     "max_discount_percent": lambda v: v.replace(".", "", 1).isdigit() and 0 <= float(v) <= 100,
     "autopilot_message_cap": lambda v: v.isdigit() and 0 <= int(v) <= 1000,
     "scout_auto_enabled": lambda v: v in {"0", "1"},
+    "tg_quiet_from": lambda v: v.isdigit() and 0 <= int(v) <= 23,
+    "tg_quiet_to": lambda v: v.isdigit() and 0 <= int(v) <= 23,
     # интервал применяется при старте сервиса (job регистрируется в build_scheduler)
     "scout_interval_hours": lambda v: v.isdigit() and 1 <= int(v) <= 168,
     "scout_page_delay_sec": lambda v: _is_float_in(v, 0.2, 10.0),
