@@ -1,0 +1,14 @@
+[Unit]
+Description=Nightly SQLite backup of kleinanzeigen-bot (local rotation + rclone copy to OneDrive)
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pg
+# rclone читает и обновляет OAuth-токен в /home/pg/.config/rclone/rclone.conf
+Environment=HOME=/home/pg
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1800
+ExecStart=/home/pg/kleinanzeigen-bot/scripts/backup.sh

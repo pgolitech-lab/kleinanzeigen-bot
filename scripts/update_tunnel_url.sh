@@ -1,103 +1,107 @@
 #!/usr/bin/env bash
-# Синхронизирует текущий quick-tunnel URL cloudflared в web-app/js/api.js и пушит на GitHub Pages.
-# Запускается systemd-юнитом tunnel-url-sync.service после (ре)старта cloudflared.service.
-# Quick-туннели Cloudflare ротируют hostname при каждом старте — этот скрипт убирает ручную правку.
+# update_tunnel_url.sh — передаёт актуальный quick-tunnel URL боту БЕЗ git и GitHub Pages.
+#
+# Было: каждая ротация URL = правка web-app/js/api.js + bump всех ?v= + коммит + push +
+# `git reset --hard` в проде (мог стереть чужие незакоммиченные правки) + 60–90 с, пока
+# Pages пересоберётся. Стало: адрес API передаётся в URL самой Mini App (?api=<tunnel>).
+#   1. Узнаём живой URL у cloudflared (метрики /quicktunnel, запасной путь — журнал).
+#   2. Атомарно пишем его в $TUNNEL_URL_FILE — бот подставляет его во все новые web_app-кнопки.
+#   3. Через бота обновляем кнопку меню (setChatMenuButton) у всех операторов.
+#   4. Отмечаем успех в $MENU_SYNCED_FILE — по нему bot_health.sh видит, что синк дошёл.
+#
+# Запуск: tunnel-url-sync.service (после старта cloudflared) и self-heal из bot_health.sh.
+# Ключи: --dry-run (ничего не пишет и не вызывает бота), --url URL (не спрашивать cloudflared),
+#        --force (обновить кнопку меню, даже если URL не менялся).
 set -uo pipefail
 
-REPO=/home/pg/kleinanzeigen-bot
-API_JS="$REPO/web-app/js/api.js"
-WEBAPP="$REPO/web-app"
+REPO="${KAB_REPO:-/home/pg/kleinanzeigen-bot}"
+# shellcheck source=lib_tunnel.sh
+. "$(dirname "$(readlink -f "$0")")/lib_tunnel.sh"
 
-log() { logger -t tunnel-url-sync "$*"; echo "$*"; }
-
-# 0. Сериализация: не допускаем параллельных запусков (иначе гонка за ref main при push)
-exec 9>/tmp/tunnel-url-sync.lock
-if ! flock -n 9; then
-  log "другой экземпляр уже выполняется — выходим"
-  exit 0
-fi
-
-# 1. Ждём, пока cloudflared напечатает quick-tunnel URL в журнал (до ~90с)
-get_url() {
-  local start
-  start=$(systemctl show -p ActiveEnterTimestamp --value cloudflared 2>/dev/null)
-  if [ -n "$start" ]; then
-    journalctl -u cloudflared --since "$start" --no-pager 2>/dev/null \
-      | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' \
-      | grep -v 'https://api\.trycloudflare\.com' | tail -1
-  fi
-}
-
-NEW_URL=""
-for i in $(seq 1 30); do
-  NEW_URL=$(get_url)
-  [ -n "$NEW_URL" ] && break
-  sleep 3
+DRY=0; FORCE=0; URL_ARG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --force) FORCE=1 ;;
+    --url) URL_ARG="${2:-}"; shift ;;
+    *) echo "неизвестный аргумент: $1" >&2; exit 2 ;;
+  esac
+  shift
 done
 
-if [ -z "$NEW_URL" ]; then
-  log "ERROR: quick-tunnel URL не найден в журнале cloudflared за 90с"
+log() { logger -t tunnel-url-sync -- "$*" 2>/dev/null; echo "$*"; }
+err() { logger -t tunnel-url-sync -p user.err -- "ERROR: $*" 2>/dev/null; echo "ERROR: $*" >&2; }
+
+# 0. Сериализация: unit и self-heal из bot_health.sh могут стартовать одновременно
+mkdir -p "$KAB_STATE_DIR" || { err "не могу создать $KAB_STATE_DIR"; exit 1; }
+exec 9>"$KAB_STATE_DIR/update_tunnel_url.lock"
+if ! flock -w 120 9; then
+  err "другой экземпляр держит лок больше 120 с — выхожу"
   exit 1
 fi
 
-# 2. Текущий URL, зашитый в api.js
-CUR_URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$API_JS" | head -1)
+# 1. Живой URL: ждём, пока cloudflared зарегистрирует туннель (до ~90 с после старта)
+NEW_URL="$URL_ARG"
+if [ -z "$NEW_URL" ]; then
+  for _ in $(seq 1 30); do
+    NEW_URL=$(cf_live_url) && break
+    sleep 3
+  done
+fi
+if ! tunnel_url_valid "$NEW_URL"; then
+  err "нет валидного quick-tunnel URL (получено: '${NEW_URL}'): --url не по формату или cloudflared не поднялся за 90 с"
+  exit 1
+fi
 
-if [ "$NEW_URL" = "$CUR_URL" ]; then
-  log "URL не изменился ($NEW_URL) — ничего не делаю"
+CUR_URL=$(read_url_file "$TUNNEL_URL_FILE" || true)
+SYNCED_URL=$(read_url_file "$MENU_SYNCED_FILE" || true)
+
+if [ "$NEW_URL" = "$CUR_URL" ] && [ "$NEW_URL" = "$SYNCED_URL" ] && [ "$FORCE" = 0 ]; then
+  log "URL не изменился и кнопка меню уже на нём ($NEW_URL) — ничего не делаю"
   exit 0
 fi
 
-log "URL сменился: ${CUR_URL:-<none>} -> $NEW_URL — обновляю api.js + cache-bust"
-
-# 3. Меняем URL и бампаем cache-bust (?v=YYYYMMDD-HHMMSS) во всех файлах web-app
-STAMP=$(date +%Y%m%d-%H%M%S)
-sed -i "s|https://[a-z0-9-]\+\.trycloudflare\.com|$NEW_URL|g" "$API_JS"
-grep -rlE '\?v=[0-9]+-[0-9]+' "$WEBAPP" | while read -r f; do
-  sed -i -E "s|\?v=[0-9]+-[0-9]+|?v=$STAMP|g" "$f"
-done
-# С import map (af607f2) версии модулей — хэши содержимого: пересчитать после правки api.js
-if [ -x "$REPO/scripts/bump_cache.sh" ]; then
-  "$REPO/scripts/bump_cache.sh" || log "bump_cache.sh завершился с ошибкой"
-fi
-
-# 4. Коммит
-git -C "$REPO" add web-app/
-if git -C "$REPO" diff --cached --quiet; then
-  log "нет изменений для коммита — выходим"
+if [ "$DRY" = 1 ]; then
+  log "[dry-run] записал бы $NEW_URL в $TUNNEL_URL_FILE (сейчас: ${CUR_URL:-<нет>})"
+  log "[dry-run] вызвал бы telegram_bot.set_menu_button() из $REPO (кнопка сейчас на: ${SYNCED_URL:-<нет>})"
   exit 0
 fi
-git -C "$REPO" commit -q -m "chore(ma): авто-обновление cloudflared quick-tunnel URL ($NEW_URL)"
 
-# 5. Push с устойчивостью к расхождению remote (fetch+rebase, идемпотентность)
-push_ok=0
-for attempt in 1 2 3; do
-  if git -C "$REPO" push -q origin main 2>/dev/null; then push_ok=1; break; fi
-  log "push attempt $attempt отклонён — fetch и проверка remote"
-  git -C "$REPO" fetch -q origin main
-  remote_url=$(git -C "$REPO" show origin/main:web-app/js/api.js 2>/dev/null \
-    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1)
-  if [ "$remote_url" = "$NEW_URL" ]; then
-    git -C "$REPO" reset -q --hard origin/main
-    log "remote уже на актуальном URL ($NEW_URL) — синхронизирован параллельным прогоном"
-    push_ok=1; break
-  fi
-  # --autostash: посторонние незакоммиченные правки в репо (например, недоделанная
-  # фича из другой сессии) НЕ должны блокировать синк tunnel-URL — git сам спрячет
-  # их на время rebase и вернёт обратно. Инцидент 2026-08-13: ребут после потери
-  # питания сменил tunnel URL, а рабочее дерево было грязным от предыдущей сессии —
-  # rebase упал с "У вас есть непроиндексированные изменения", MA осталась недоступна
-  # до ручного вмешательства.
-  if ! git -C "$REPO" rebase -q --autostash origin/main; then
-    git -C "$REPO" rebase --abort 2>/dev/null
-    log "ERROR: rebase-конфликт при синхронизации с remote"
+# 2. Бот читает этот файл на каждый web_app-URL — новые уведомления сразу с новым ?api=
+if [ "$NEW_URL" != "$CUR_URL" ]; then
+  if ! write_url_file "$TUNNEL_URL_FILE" "$NEW_URL"; then
+    err "не удалось записать $TUNNEL_URL_FILE"
     exit 1
   fi
-done
+  log "адрес API для Mini App: ${CUR_URL:-<нет>} -> $NEW_URL"
+fi
 
-if [ "$push_ok" = 1 ]; then
-  log "OK: GitHub Pages пересоберётся ~60с. Актуальный URL: $NEW_URL"
-else
-  log "ERROR: git push не удался после 3 попыток"
+# 3. Кнопка меню. Отдельный процесс python — работает, даже если сам бот лежит.
+#    set_menu_button() возвращает число чатов, где Telegram принял кнопку. Успех — только
+#    если приняли ВСЕ операторы: иначе у кого-то кнопка останется со старым (мёртвым) адресом,
+#    а menu_synced_url сказал бы «всё ок». Частичный успех → exit 1 → bot_health повторит.
+out=$( { cd "$REPO" && timeout 120 python3 -c '
+import sys
+import config
+from modules import telegram_bot
+total = len(config.telegram_operator_dm_ids() or [config.telegram_chat_id()])
+n = telegram_bot.set_menu_button()
+if not isinstance(n, int):
+    sys.exit("set_menu_button() вернула %r вместо числа чатов — бэкенд без поддержки ?api=" % (n,))
+if n < total:
+    sys.exit("set_menu_button(): кнопку приняли %d из %d чатов (ошибки выше)" % (n, total))
+print(n)
+'; } 2>&1)
+rc=$?
+if [ $rc -ne 0 ]; then
+  err "кнопка меню НЕ обновлена (rc=$rc): $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
   exit 1
 fi
+
+# 4. Фиксируем успех — сравнивая с ним живой URL, bot_health.sh ловит недошедший синк
+if ! write_url_file "$MENU_SYNCED_FILE" "$NEW_URL"; then
+  err "кнопка обновлена, но не записан $MENU_SYNCED_FILE — watchdog будет повторять синк"
+  exit 1
+fi
+log "OK: кнопка меню обновлена в $(printf '%s' "$out" | tail -1) чат(ах), API: $NEW_URL"
+exit 0
