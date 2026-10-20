@@ -140,3 +140,25 @@ def test_detected_sales_evidence_translated_and_cached(client):
         c.get("/api/ma/detected-sales", headers=H())
     assert [i["evidence_ru"] for i in items] == ["Беру за 300", "Беру за 300"]
     assert mcl.translate_only.call_count == 1  # кириллица не переводится, повтор — из кэша
+
+
+def test_repeat_sold_on_answered_thread_is_idempotent(client):
+    """Двойной тап «Продано» на отвеченном треде: вторая продажа не создаётся (already:true)."""
+    c, mdb = client
+    _thread(mdb, status="sent", sent_at="2026-10-19T10:00:00")
+    conn = mdb.get_conn.return_value.__enter__.return_value
+    conn.execute.return_value.fetchone.side_effect = [None, {"id": 99, "gmail_thread_id": "manual-x",
+                                                             "sold_price_eur": 300.0}]
+    r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
+    assert r.status_code == 200 and r.json()["already"] is True
+    assert r.json()["separate_sale"] == {"msg_id": 99, "thread_id": "manual-x"}
+    mdb.add_manual_sale.assert_not_called()
+
+
+def test_repeat_skip_is_409(client):
+    c, mdb = client
+    mdb.get_message.return_value = _row(id=7, status="skipped", sent_at=None, sent_message_id=None)
+    assert c.post("/api/ma/messages/7/skip", headers=H()).status_code == 409
+    mdb.get_message.return_value = _row(id=7, status="sent_debug", sent_at="x", sent_message_id="m")
+    assert c.post("/api/ma/messages/7/skip", headers=H()).status_code == 409
+    mdb.update_message.assert_not_called()

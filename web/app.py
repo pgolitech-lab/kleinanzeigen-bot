@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 import config
@@ -53,6 +54,21 @@ app.add_middleware(
     expose_headers=["ETag"],
     max_age=600,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_422(request, exc):
+    """422 без эха введённого значения: NaN/Infinity в input не сериализуются в JSON → был 500."""
+    errs = [{"loc": list(e.get("loc", ())), "msg": e.get("msg"), "type": e.get("type")} for e in exc.errors()]
+    return JSONResponse({"detail": errs}, status_code=422)
+
+
+@app.exception_handler(OverflowError)
+async def _overflow_422(request, exc):
+    """Гигантский id в пути/теле (> int64) ломал SQLite → 500; для клиента это неверный ввод."""
+    return JSONResponse({"detail": "значение слишком большое"}, status_code=422)
+
+
 app.include_router(ma_router)
 app.include_router(stock_router)
 app.include_router(market_router)

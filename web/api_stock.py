@@ -33,7 +33,8 @@ def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        # «товар/вопрос … не найден» — это 404, остальное (qty ≤ 0, поле) — 400
+        raise HTTPException(404 if "не найден" in str(e) else 400, str(e))
 
 
 # ── отчёты ──
