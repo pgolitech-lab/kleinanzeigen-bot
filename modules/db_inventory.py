@@ -21,7 +21,10 @@ import database
 from database import get_conn, transaction
 
 MOVEMENT_KINDS = ("receipt", "sale", "writeoff", "adjust")
-LINK_METHODS = ("exact", "normalized", "llm", "operator", "new", "seed")
+LINK_METHODS = ("exact", "normalized", "llm", "operator", "new", "seed", "seed_merged")
+
+# Стандартная себестоимость по умолчанию (вставляется один раз, дальше правит оператор)
+STANDARD_COSTS_DEFAULT = {"sitzbank": 500.0, "einzelsitz": 170.0, "tisch": 50.0}
 
 # Пути БД, для которых схема уже проверена в этом процессе (тесты подменяют DB_PATH).
 _ready: set[str] = set()
@@ -111,6 +114,21 @@ def ensure_inventory_schema(conn: sqlite3.Connection) -> None:
             created_by TEXT
         )
     """)
+    _add_column(conn, "inv_products", "category_confirmed", "INTEGER NOT NULL DEFAULT 0")  # тип подтвердил оператор
+    # Стандартная себестоимость типа (владелец 20.10: «стандартная закупка: 1 скамья 500 евро,
+    # вип 170 евро, столик 50 евро»). Правится в настройках склада; товарам без партии и без своей
+    # цены закупки себестоимость берётся отсюда (unit_cost_source='standard').
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS inv_category_costs (
+            category TEXT PRIMARY KEY,
+            unit_cost_eur REAL NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT
+        )
+    """)
+    for cat, cost in STANDARD_COSTS_DEFAULT.items():
+        conn.execute("INSERT OR IGNORE INTO inv_category_costs (category, unit_cost_eur, updated_at, updated_by) "
+                     "VALUES (?, ?, ?, 'default')", (cat, cost, _now()))
     # Комплект (Komplettsatz): товар, собранный из других товаров. Своего остатка нет —
     # доступность = min(остаток составляющей // qty); продажа комплекта списывает составляющие.
     conn.execute("""
@@ -203,7 +221,7 @@ def tracked_since(product_id: int, conn: Optional[sqlite3.Connection] = None) ->
 
 
 _PRODUCT_FIELDS = ("title", "category", "condition", "unit_cost_eur", "list_price_eur",
-                   "min_price_eur", "note", "match_key", "non_stock")
+                   "min_price_eur", "note", "match_key", "non_stock", "category_confirmed")
 
 
 def create_product(*, title: str, **fields: Any) -> int:
@@ -406,6 +424,33 @@ def sales_for_thread(gmail_thread_id: str) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+# ─── стандартная себестоимость типов ──────────────────────────────────────────
+
+def category_costs() -> dict[str, float]:
+    ensure_schema()
+    with get_conn() as conn:
+        return {r["category"]: float(r["unit_cost_eur"])
+                for r in conn.execute("SELECT category, unit_cost_eur FROM inv_category_costs")}
+
+
+def set_category_cost(category: str, unit_cost_eur: Optional[float], updated_by: Optional[str] = None) -> None:
+    """Задать стандартную себестоимость типа; None — убрать (тип без стандарта)."""
+    ensure_schema()
+    cat = (category or "").strip()
+    if not cat:
+        raise ValueError("пустой тип")
+    with get_conn() as conn:
+        if unit_cost_eur is None:
+            conn.execute("DELETE FROM inv_category_costs WHERE category = ?", (cat,))
+            return
+        if float(unit_cost_eur) < 0:
+            raise ValueError("себестоимость не может быть отрицательной")
+        conn.execute("INSERT INTO inv_category_costs (category, unit_cost_eur, updated_at, updated_by) "
+                     "VALUES (?, ?, ?, ?) ON CONFLICT(category) DO UPDATE SET unit_cost_eur = excluded.unit_cost_eur, "
+                     "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                     (cat, float(unit_cost_eur), _now(), updated_by))
+
+
 # ─── партии и комплекты ───────────────────────────────────────────────────────
 
 def create_batch(*, total_cost_eur: Optional[float], occurred_at: Optional[str], note: Optional[str],
@@ -456,6 +501,11 @@ def set_kit_components(kit_product_id: int, components: list[tuple[int, int]]) -
         for pid in [kit, *seen]:
             if conn.execute("SELECT 1 FROM inv_products WHERE id = ?", (pid,)).fetchone() is None:
                 raise ValueError(f"товар {pid} не найден")
+        if seen and conn.execute("SELECT 1 FROM inv_movements WHERE product_id = ? AND voided_at IS NULL "
+                                 "AND kind IN ('receipt', 'adjust', 'writeoff')", (kit,)).fetchone():
+            # Свой приход/пересчёт у комплекта потерялся бы: остаток комплекта — только из составляющих
+            raise ValueError("у товара есть свой приход/инвентаризация — оприходуйте составляющие "
+                             "и отмените эти движения, потом делайте его комплектом")
         nested = conn.execute(
             f"SELECT 1 FROM inv_kit_components WHERE kit_product_id IN ({','.join('?' * len(seen)) or 'NULL'})",
             list(seen)).fetchone()
@@ -579,6 +629,23 @@ def merge_products(src_id: int, dst_id: int) -> dict[str, int]:
             raise ValueError("товар не найден")
         if dst["archived_at"]:
             raise ValueError(f"товар {dst_id} в архиве — сливать в него нельзя")
+        if bool(src["non_stock"]) != bool(dst["non_stock"]):
+            raise ValueError("один товар скрыт со склада, другой нет — сначала выровняйте")
+        dst_is_kit = conn.execute("SELECT 1 FROM inv_kit_components WHERE kit_product_id = ?",
+                                  (int(dst_id),)).fetchone()
+        src_is_comp = conn.execute("SELECT 1 FROM inv_kit_components WHERE component_product_id = ?",
+                                   (int(src_id),)).fetchone()
+        if dst_is_kit and (src_is_comp or conn.execute(
+                "SELECT 1 FROM inv_movements WHERE product_id = ? AND voided_at IS NULL "
+                "AND kind IN ('receipt', 'adjust', 'writeoff')", (int(src_id),)).fetchone()):
+            raise ValueError("нельзя слить в комплект товар с остатком или составляющую другого комплекта")
+        clash = conn.execute("""
+            SELECT 1 FROM inv_movements a JOIN inv_movements b ON a.gmail_thread_id = b.gmail_thread_id
+             WHERE a.product_id = ? AND b.product_id = ? AND a.kind = 'sale' AND b.kind = 'sale'
+               AND a.voided_at IS NULL AND b.voided_at IS NULL LIMIT 1""", (int(src_id), int(dst_id))).fetchone()
+        if clash:
+            raise ValueError("у обоих товаров есть продажа в одном и том же треде (составляющие одного "
+                             "комплекта?) — слить нельзя")
         n_list = conn.execute("UPDATE inv_listings SET product_id = ? WHERE product_id = ?",
                               (int(dst_id), int(src_id))).rowcount
         n_mov = conn.execute("UPDATE inv_movements SET product_id = ? WHERE product_id = ?",

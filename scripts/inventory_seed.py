@@ -38,6 +38,11 @@ def _copy_db(src: Path) -> Path:
     return dst
 
 
+def db_inventory_costs() -> dict[str, float]:
+    from modules import db_inventory
+    return db_inventory.category_costs()
+
+
 def _fmt_price(p) -> str:
     return f"{p:.0f} €" if p else "—"
 
@@ -56,6 +61,8 @@ def render(plan: dict, ads_total: int, skipped: list[str]) -> str:
         f"Скрыто со склада (не запчасти: гараж, дом, личное, машины): {len(hidden)}.",
         f"Сведено по решению владельца (похожие запчасти одной категории): {len(merged)}.",
         f"Сомнительных пар «это тот же товар?» (вопрос оператору): {len(plan['doubtful'])}.",
+        f"Тип не ясен («какой тип?»): "
+        f"{sum(1 for g in groups if inventory.detect_category(g.title) in inventory.AMBIGUOUS_CATEGORIES)}.",
         "",
         "## Товары с несколькими объявлениями",
         "",
@@ -96,6 +103,20 @@ def render(plan: dict, ads_total: int, skipped: list[str]) -> str:
             a = g.ads[0]
             out.append(f"- #{g.gid} {a.ad_id} · {_fmt_price(a.price)} · {a.last_seen[:10]} · {g.title}")
         out.append("")
+    costs = db_inventory_costs()
+    by_type: dict[str, int] = {}
+    for g in groups:
+        by_type[inventory.detect_category(g.title)] = by_type.get(inventory.detect_category(g.title), 0) + 1
+    out += ["## Себестоимость по типам", "",
+            "| тип | товаров | стандартная себестоимость |", "|---|---|---|"]
+    for cat, n in sorted(by_type.items(), key=lambda x: (x[0] not in costs, -x[1])):
+        std = f"{costs[cat]:.0f} €" if cat in costs else "вручную на товаре или партией"
+        out.append(f"| {inventory.CATEGORY_LABELS.get(cat, cat)} | {n} | {std} |")
+    amb = [g for g in groups if inventory.detect_category(g.title) in inventory.AMBIGUOUS_CATEGORIES]
+    out += ["", f"## Какой тип? — очередь оператору ({len(amb)})", ""]
+    for g in sorted(amb, key=lambda g: g.title):
+        out.append(f"- #{g.gid} {g.title} ({_fmt_price(g.latest.price)})")
+    out.append("")
     out += ["## Скрыто со склада (non_stock)", ""]
     for g in sorted(hidden, key=lambda g: g.title):
         out.append(f"- #{g.gid} [{inventory.detect_category(g.title)}] {g.title} ({len(g.ads)} объявл.)")
@@ -127,8 +148,12 @@ def main() -> int:
         # Бэкап — вне репозитория (он публичный): /home/pg/backups, иначе рядом с расширением .db
         # (*.db в .gitignore). В БД пароли Gmail, токен бота и переписка покупателей.
         bdir = Path("/home/pg/backups")
-        is_prod = src.resolve().name == "kleinanzeigen.db"
-        bdir = bdir if (is_prod and bdir.is_dir()) else src.parent
+        # Копии из /tmp (эксперименты) бэкапим рядом, всё остальное (прод) — в /home/pg/backups
+        in_tmp = str(src.resolve()).startswith("/tmp/")
+        if not in_tmp and not bdir.is_dir():
+            print(f"нет каталога бэкапов {bdir} — --apply не выполнен", file=sys.stderr)
+            return 2
+        bdir = src.parent if in_tmp else bdir
         backup = bdir / f"{src.stem}-pre-inventory-{datetime.now():%Y%m%d-%H%M%S}.db"
         with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as s, sqlite3.connect(backup) as d:
             s.backup(d)

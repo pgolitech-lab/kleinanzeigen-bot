@@ -757,3 +757,187 @@ def test_profile_has_kit_and_min(inv):
     prof = inv.product_profile(kit)
     assert prof["kit"] is True and prof["components"] == [{"product_id": a, "per_kit": 2}, {"product_id": b, "per_kit": 1}]
     assert prof["min_price_eur"] == 900.0 and prof["min_price_source"] == "percent" and prof["non_stock"] is False
+
+
+# ─── стандартная себестоимость типов (владелец: скамья 500, VIP 170, столик 50) ─
+
+def test_standard_cost_defaults_and_profit(inv):
+    assert inv.inv.category_costs() == {"sitzbank": 500.0, "einzelsitz": 170.0, "tisch": 50.0}
+    r = inv.link_listing("1", title="Peugeot Traveller Sitzbank", price=1300)
+    pid = r["product_id"]
+    prof = inv.product_profile(pid)
+    assert (prof["unit_cost_eur"], prof["unit_cost_source"]) == (500.0, "standard")
+    # продажа без партии — прибыль считается сразу по стандарту
+    inv.record_sale(product_id=pid, price_eur=1200.0, gmail_thread_id="t1")
+    it = inv.report()["products"][0]
+    assert it["cogs"] == 500.0 and it["profit"] == 700.0 and it["default_cost_source"] == "standard"
+    # инвентаризация — остаток оценивается по стандарту
+    inv.set_stock(pid, 2)
+    it = inv.report()["products"][0]
+    assert it["stock_cost_eur"] == 1000.0 and it["expected_profit_list"] == 1600.0
+
+
+def test_cost_priority_batch_over_product_over_standard(inv):
+    r = inv.link_listing("1", title="VIP Einzelsitz Traveller", price=500)
+    pid = r["product_id"]
+    assert inv.product_profile(pid)["unit_cost_source"] == "standard"
+    inv.inv.update_product(pid, unit_cost_eur=150.0)
+    assert inv.product_profile(pid)["unit_cost_eur"] == 150.0 and inv.product_profile(pid)["unit_cost_source"] == "estimate"
+    inv.receive_batch([(pid, 2)], 260.0)
+    prof = inv.product_profile(pid)
+    assert (prof["unit_cost_eur"], prof["unit_cost_source"]) == (130.0, "lots")
+    # приход без цены берёт стандарт/оценку, «вложено» считается
+    t = inv.inv.create_product(title="Klapptisch", category="tisch")
+    inv.receive(t, 3, occurred_at="2026-10-02T00:00:00")
+    assert inv.monthly_report(2026, 10)["invested"] == 260.0 + 150.0
+    inv.inv.set_category_cost("tisch", 60.0, updated_by="op")
+    assert inv.inv.category_costs()["tisch"] == 60.0
+    assert inv.monthly_report(2026, 10)["invested"] == 260.0 + 180.0
+    inv.inv.set_category_cost("tisch", None)
+    assert "tisch" not in inv.inv.category_costs()
+    with pytest.raises(ValueError):
+        inv.inv.set_category_cost("tisch", -1)
+
+
+def test_type_questions_and_answer(inv):
+    a = inv.link_listing("1", title="Sitze Peugeot Traveller Expert, Citroën SpaceTourer", price=900)
+    inv.link_listing("2", title="Peugeot Traveller Sitzbank", price=1300)
+    qs = inv.list_type_questions()
+    assert [q["product_id"] for q in qs] == [a["product_id"]]
+    assert qs[0]["options"][0]["standard_cost_eur"] is not None
+    out = inv.set_type(a["product_id"], "sitzbank")
+    assert out == {"category": "sitzbank", "unit_cost_eur": 500.0, "unit_cost_source": "standard"}
+    assert inv.list_type_questions() == []
+    with pytest.raises(ValueError):
+        inv.set_type(a["product_id"], "rakete")
+    assert inv.set_type(a["product_id"], "ahk", unit_cost_eur=80.0)["unit_cost_source"] == "estimate"
+    assert inv.detect_category("Drehsitz Peugeot Traveller") == "einzelsitz"
+    assert inv.category_cost_table()[0]["standard_cost_eur"] is not None
+
+
+# ─── третье ревью: чужие марки, счётчики комплектов, гонка треда, guard'ы ─────
+
+def test_core_key_only_for_platform_titles():
+    from modules.inventory import core_key
+    assert core_key("Felgen Ford Mondeo 17 Zoll") is None
+    assert core_key("Anhängerkupplung") is None
+    assert core_key("Felgen Opel Zafira 17 Zoll") == core_key("Felgen Peugeot Traveller 17 Zoll")
+
+
+def test_non_stock_needs_no_part_words():
+    from modules.inventory import detect_category as d
+    assert d("Scheinwerfer Traveller 2.0 BlueHDi") == "leuchten"
+    assert d("AdBlue Pumpe Traveller") != "dienst"
+    assert d("Sitz zu verschenken Traveller") not in ("haushalt",)
+    assert d("AdBlue-Fehler bei Ihrem Fahrzeug? Wir haben die Lösung!") == "dienst"
+
+
+def test_kit_sale_counts_once(inv):
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 2), (b, 1)])
+    inv.receive(a, 4, 100.0, occurred_at="2026-10-01T00:00:00")
+    inv.receive(b, 2, 200.0, occurred_at="2026-10-01T00:00:00")
+    inv.record_sale(product_id=kit, price_eur=1000.0, gmail_thread_id="t1", occurred_at="2026-10-05T00:00:00")
+    t = inv.report()["totals"]
+    assert (t["sales"], t["sold_qty"], t["revenue"], t["cogs"], t["profit"]) == (1, 1, 1000.0, 400.0, 600.0)
+    m = inv.monthly_report(2026, 10)
+    assert (m["sales"], m["sold_qty"]) == (1, 1)
+
+
+def test_second_sale_same_thread_other_product_not_written(inv):
+    a = inv.inv.create_product(title="A")
+    b = inv.inv.create_product(title="B")
+    inv.record_sale(product_id=a, price_eur=10, gmail_thread_id="t1")
+    res = inv.record_sale(product_id=b, price_eur=10, gmail_thread_id="t1")
+    assert not res["created"] and res["product_id"] == a and len(inv.inv.sales_for_thread("t1")) == 1
+
+
+def test_guards_on_kit_merged_hidden(inv):
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 1)])
+    for fn in (lambda: inv.receive(kit, 1), lambda: inv.write_off(kit, 1), lambda: inv.set_stock(kit, 2)):
+        with pytest.raises(ValueError):
+            fn()
+    c = inv.inv.create_product(title="C")
+    inv.inv.merge_products(c, b)
+    inv.receive(c, 2, 5.0)                       # слитый → приход идёт на итоговый товар
+    assert inv.inv.stock_qty(b) == 2
+    h = inv.inv.create_product(title="Garage", non_stock=1)
+    with pytest.raises(ValueError):
+        inv.receive(h, 1)
+    with pytest.raises(ValueError):
+        inv.inv.merge_products(h, b)              # скрытый с обычным
+
+
+def test_set_kit_refuses_own_stock(inv):
+    a, b, kit = _kit(inv)
+    inv.receive(kit, 1, 10.0)
+    with pytest.raises(ValueError):
+        inv.set_kit(kit, [(a, 1)])
+
+
+def test_merge_clash_same_thread_is_value_error(inv):
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 1), (b, 1)])
+    inv.record_sale(product_id=kit, price_eur=500.0, gmail_thread_id="t1")
+    inv.set_kit(kit, [])
+    with pytest.raises(ValueError):
+        inv.inv.merge_products(a, b)
+
+
+def test_reprice_kit_sale(inv):
+    import database as db
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 1), (b, 1)])
+    inv.inv.relink_listing("k1", kit)
+    _msg(db, ad_id="k1", title="Komplettsatz", price="700 €", thread="t9", status="skipped_sold",
+         sold_price=700.0, sold_at="2026-10-01T12:00:00")
+    inv.sync_sales()
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET sold_price_eur = 1400 WHERE gmail_thread_id='t9'")
+    assert inv.sync_sales()["repriced"] == 1
+    assert sum(-m["qty"] * m["unit_price_eur"] for m in inv.inv.sales_for_thread("t9")) == pytest.approx(1400.0)
+
+
+def test_min_price_bad_setting_is_unknown(inv, monkeypatch):
+    import config
+    pid = inv.inv.create_product(title="X", list_price_eur=100.0)
+    monkeypatch.setattr(config, "max_discount_percent", lambda: 150)
+    assert inv.effective_min_price(inv.inv.get_product(pid)) == (None, None)
+
+
+def test_kit_min_price_not_below_components_cost(inv):
+    a, b, kit = _kit(inv)                         # комплект 1000 €, −10 % = 900
+    inv.set_kit(kit, [(a, 2), (b, 1)])
+    inv.receive(a, 2, 400.0)
+    inv.receive(b, 1, 300.0)                     # себестоимость комплекта 2×400 + 300 = 1100
+    inv.inv.upsert_listing(ad_id="k1", product_id=kit, link_method="operator")
+    ctx = inv.ad_context("k1")
+    assert (ctx["min_price_eur"], ctx["min_price_source"]) == (1100.0, "cost")
+
+
+def test_split_kit_price_equal_when_price_missing(inv):
+    a, b, kit = _kit(inv)
+    inv.inv.update_product(b, list_price_eur=None)
+    inv.set_kit(kit, [(a, 1), (b, 1)])
+    inv.record_sale(product_id=kit, price_eur=600.0, gmail_thread_id="t1")
+    prices = sorted(m["unit_price_eur"] for m in inv.inv.sales_for_thread("t1"))
+    assert prices == [300.0, 300.0]
+
+
+def test_hidden_sales_counted_and_qty_after_none(inv):
+    h = inv.inv.create_product(title="Garage", non_stock=1)
+    inv.record_sale(product_id=h, price_eur=50.0, gmail_thread_id="g1")
+    t = inv.report()["totals"]
+    assert t["hidden_sales"] == 1 and t["hidden_revenue"] == 50.0 and t["sales"] == 0
+    p = inv.inv.create_product(title="Tisch")
+    assert inv.record_sale(product_id=p, price_eur=5.0, gmail_thread_id="x")["qty_after"] is None
+
+
+def test_apply_seed_marks_merged(inv):
+    import database as db
+    _msg(db, ad_id="1", title="Peugeot Traveller Sitzbank", price="1.299 €", created_at="2026-05-01T00:00:00")
+    _msg(db, ad_id="2", title="Citroen Spacetourer Sitzbank 2+1", price="1.299 €", created_at="2026-06-01T00:00:00")
+    inv.apply_seed(inv.plan_seed(inv.seed_ads_from_messages(), merge_doubtful=True))
+    assert inv.inv.get_listing("2")["link_method"] == "seed_merged"
+    assert inv.inv.get_listing("2")["product_id"] == inv.inv.get_listing("1")["product_id"]

@@ -124,14 +124,14 @@ _CATEGORIES: list[tuple[str, re.Pattern]] = [
     # «Traveller BlueHDi – 8 Sitze» — машина, «Rückleuchten Set» — фонари, а не комплект сидений)
     ("fahrzeug", re.compile(r'bluehdi|\bkombi\b|wohnwagen|schlachtfest|\btuv\b|\b[7-9] ?sitzer\b')),
     ("immobilie", re.compile(r'garage|vermieten|lagerraum|stellplatz|\bhaus\b')),
-    ("haushalt", re.compile(r'kleiderschrank|laminat|fritteuse|vibrationsplatte|router|fritz|tp link|'
-                            r'scooter|moebel|mobel|\bsofa\b|verschenken')),
-    ("dienst", re.compile(r'gassigehen|unterstutzung|klonen|adblue|wir haben die losung')),
+    ("haushalt", re.compile(r'kleiderschrank|laminat|fritteuse|vibrationsplatte|wlan router|fritz box|'
+                            r'tp link|e scooter|\bsofa\b')),
+    ("dienst", re.compile(r'gassigehen|steuergerat klonen|adblue fehler|wir haben die losung')),
     ("gurte", re.compile(r'gurt')),
     ("leuchten", re.compile(r'leuchte|scheinwerfer')),
     ("komplettsatz", re.compile(r'komplettsatz|sitzpaket|sitzgarnitur|\bsitz\w* (?:\w+ )?set\b|\b[6-9] ?sitze\b')),
     ("fahrersitze", re.compile(r'beifahrer|fahrersitz|doppelbank vorne')),
-    ("einzelsitz", re.compile(r'einzelsitz|\bvip\b')),
+    ("einzelsitz", re.compile(r'einzelsitz|drehsitz|\bvip\b')),
     ("sitzbank", re.compile(r'sitzbank|doppelsitzbank|\b2\+1\b|\b3er\b')),
     ("sitze", re.compile(r'\b(?:leder)?sitze\b|\bsitz\b')),
     ("tisch", re.compile(r'tisch')),
@@ -149,9 +149,19 @@ _CATEGORIES: list[tuple[str, re.Pattern]] = [
 NON_STOCK_CATEGORIES = {"immobilie", "haushalt", "dienst", "fahrzeug"}
 
 
+# Явное слово запчасти: если оно есть, заголовок не может быть «не склад»
+# («Scheinwerfer Traveller 2.0 BlueHDi», «AdBlue Pumpe» — запчасти, а не машина/услуга)
+_PART_WORDS = re.compile(r'sitzbank|einzelsitz|drehsitz|\bsitz\b|scheinwerfer|leuchte|tisch|anhangerkupplung|'
+                         r'felgen|reifen|gurt|sitzschiene|heckklappe|motorhaube|dachreling|dachtrager|'
+                         r'pumpe|modul|\btank\b|ladekabel|kappen|spiegel\b|stossstange|\btur\b')
+
+
 def detect_category(title: str) -> str:
     s = " ".join(tokens(title))
+    part = bool(_PART_WORDS.search(s))
     for name, rx in _CATEGORIES:
+        if name in NON_STOCK_CATEGORIES and part:
+            continue
         if rx.search(s):
             return name
     return "other"
@@ -196,13 +206,25 @@ def _core(title: str) -> set[str]:
     return {t for t in tokens(title) if t not in _STOP and t not in _MODELS}
 
 
+# Одна платформа кузова (PSA K0): Peugeot Traveller/Expert, Citroën SpaceTourer/Jumpy,
+# Toyota ProAce (Verso), Opel Zafira Life/Vivaro, Fiat Ulysse/Scudo — детали общие.
+_PLATFORM = {"peugeot", "traveller", "teaveller", "expert", "citroen", "cirtroen", "spacetourer", "space",
+             "tourer", "toyota", "totota", "proace", "verso", "opel", "zafira", "life", "fiat", "ulysse",
+             "vivaro", "jumpy", "psa", "mistral", "scudo", "c"}
+
+
 def core_key(title: str) -> Optional[str]:
-    """Суть товара без моделей авто: «категория|ядро заголовка». Владелец: скамья «для Traveller»
-    и «для SpaceTourer / ProAce / Zafira» — один товар (одна модель кузова, разные заголовки).
-    None — для нераспознанных категорий и не-запчастей (там только точный заголовок)."""
+    """Суть товара без моделей авто: «категория|флаги|ядро заголовка». Владелец: скамья «для
+    Traveller» и «для SpaceTourer / ProAce / Zafira» — один товар (одна модель кузова, разные
+    заголовки). Только для заголовков, где названа эта платформа и нет других марок (Ford, Tesla…);
+    None — для нераспознанных категорий, не-запчастей и чужих марок (там только точный заголовок
+    или вопрос)."""
     cat = detect_category(title)
     core = _core(title)
+    models = set(tokens(title)) & _MODELS
     if cat == "other" or cat in NON_STOCK_CATEGORIES or not core:
+        return None
+    if not models or not models <= _PLATFORM:
         return None
     f = features(title)
     flags = "".join(k[0] for k in ("defekt", "neu", "vip") if f[k])
@@ -593,8 +615,10 @@ def _split_kit_price(price_eur: Optional[float], comps: list[Any], kits: int) ->
     составляющей × шт. (без цен — поровну). Сумма по составляющим = цена комплекта."""
     if price_eur is None:
         return [None] * len(comps)
-    weights = [(c["list_price_eur"] or 0) * c["qty"] for c in comps]
-    if not any(weights):
+    if all(c["list_price_eur"] for c in comps):
+        weights = [c["list_price_eur"] * c["qty"] for c in comps]
+    else:
+        # У кого-то нет цены объявления — делим по штукам, а не даём ему 0 € выручки
         weights = [c["qty"] for c in comps]
     total_w = sum(weights)
     shares, left = [], float(price_eur)
@@ -643,6 +667,14 @@ def record_sale(*, price_eur: Optional[float], gmail_thread_id: Optional[str] = 
                   message_id=message_id, ad_id=ad_id, created_by=created_by)
     try:
         with transaction() as conn:
+            if gmail_thread_id:
+                # Перепроверка под блокировкой записи: параллельный вызов мог записать продажу
+                # этого треда на ДРУГОЙ товар (уникальный индекс — тред+товар, он не спасёт)
+                prev = conn.execute("SELECT * FROM inv_movements WHERE kind = 'sale' AND gmail_thread_id = ? "
+                                    "AND voided_at IS NULL ORDER BY id LIMIT 1", (gmail_thread_id,)).fetchone()
+                if prev is not None:
+                    return {"movement_id": prev["id"], "product_id": _sold_pid(prev), "created": False,
+                            "kit": bool(prev["kit_product_id"]), **_stock_state(_sold_pid(prev))}
             if comps:
                 ids = [inv.add_movement(product_id=c["component_product_id"], kind="sale",
                                         qty=-int(qty) * c["qty"], unit_price_eur=unit,
@@ -679,14 +711,11 @@ def receive_batch(items: list[tuple[int, int]], total_cost_eur: Optional[float],
         raise ValueError("сумма партии не может быть отрицательной")
     prods = []
     for pid, q in items:
-        p = inv.get_product(int(pid))
-        if p is None:
-            raise ValueError(f"товар {pid} не найден")
         if int(q) <= 0:
             raise ValueError("количество в партии должно быть > 0")
-        if inv.kit_components(int(pid)):
-            raise ValueError(f"товар {pid} — комплект: приходуйте составляющие")
-        prods.append((p, int(q)))
+        prods.append((inv.get_product(_plain_product(pid)), int(q)))
+    if len({p["id"] for p, _ in prods}) != len(prods):
+        raise ValueError("товар в партии указан дважды")
     known = [p["list_price_eur"] for p, _ in prods if p["list_price_eur"]]
     avg = sum(known) / len(known) if known else 1.0
     weights = [(p["list_price_eur"] or avg) * q for p, q in prods]
@@ -724,8 +753,8 @@ def set_non_stock(product_id: int, non_stock: bool = True) -> None:
 
 def _stock_state(product_id: int) -> dict[str, Any]:
     sv = stock_view(product_id)
-    return {"qty_after": sv["qty"] if sv["tracked"] else inv.stock_qty(product_id),
-            "stock_tracked": sv["tracked"]}
+    # Учёт не ведётся — остаток неизвестен (None), а не 0 («0» читается как «нет в наличии»)
+    return {"qty_after": sv["qty"] if sv["tracked"] else None, "stock_tracked": sv["tracked"]}
 
 
 def resolve_product(*, ad_id: Optional[str] = None, ad_title: Optional[str] = None) -> Optional[int]:
@@ -750,6 +779,37 @@ def _follow_merge(product_id: int) -> int:
         seen.add(p["id"])
         p = inv.get_product(p["merged_into"])
     return p["id"] if p is not None else product_id
+
+
+def _reprice_thread_sale(thread_id: str, price: float) -> bool:
+    """Оператор поправил цену «Продано» — обновить выручку движений треда. Комплект — заново
+    поделить между составляющими. True — цена изменилась."""
+    rows = inv.sales_for_thread(thread_id)
+    if not rows:
+        return False
+    kit = rows[0]["kit_product_id"]
+    if kit:
+        comps = inv.kit_components(kit)
+        by_pid = {r["product_id"]: r for r in rows}
+        if {c["component_product_id"] for c in comps} != set(by_pid):
+            logger.warning("склад: цена продажи комплекта %s в треде %s изменилась, но состав комплекта "
+                           "уже другой — выручку не пересчитал", kit, thread_id)
+            return False
+        kits = -by_pid[comps[0]["component_product_id"]]["qty"] // comps[0]["qty"]
+        new = dict(zip([c["component_product_id"] for c in comps], _split_kit_price(price, comps, kits)))
+        changed = any(abs((by_pid[c]["unit_price_eur"] or -1) - new[c]) > 0.005 for c in new)
+        if changed:
+            for c, unit in new.items():
+                inv.update_sale_price(by_pid[c]["id"], unit)
+            logger.info("склад: цена продажи комплекта в треде %s исправлена → %s", thread_id, price)
+        return changed
+    r = rows[0]
+    unit = price / -r["qty"]
+    if r["unit_price_eur"] is not None and abs(r["unit_price_eur"] - unit) <= 0.005:
+        return False
+    inv.update_sale_price(r["id"], unit)
+    logger.info("склад: цена продажи треда %s исправлена %s → %s", thread_id, r["unit_price_eur"], unit)
+    return True
 
 
 def _thread_still_sold(thread_id: str) -> bool:
@@ -782,11 +842,8 @@ def sync_sales() -> dict[str, Any]:
             if prev is not None:
                 stats["already"] += 1
                 price = s["sold_price_eur"]
-                if (price is not None and prev["unit_price_eur"] != price and prev["qty"] == -1
-                        and not prev["kit_product_id"]):
-                    inv.update_sale_price(prev["id"], float(price))
+                if price is not None and _reprice_thread_sale(tid, float(price)):
                     stats["repriced"] += 1
-                    logger.info("склад: цена продажи треда %s исправлена %s → %s", tid, prev["unit_price_eur"], price)
                 continue
             source = "manual" if tid.startswith("manual-") else "detected" if tid in detected else "thread"
             res = record_sale(price_eur=s["sold_price_eur"], gmail_thread_id=tid, ad_id=s["ad_id"],
@@ -860,18 +917,34 @@ def sync_all(*, use_llm: bool = False) -> dict[str, Any]:
 
 # ─── операции оператора ───────────────────────────────────────────────────────
 
+def _plain_product(product_id: int) -> int:
+    """Товар для прихода/списания/инвентаризации: слитый → итоговый; комплект, архив, скрытый —
+    ValueError (у комплекта остаток только у составляющих, иначе движение «пропадёт»)."""
+    pid = _follow_merge(int(product_id))
+    p = inv.get_product(pid)
+    if p is None:
+        raise ValueError(f"товар {product_id} не найден")
+    if p["archived_at"]:
+        raise ValueError(f"товар {pid} в архиве")
+    if p["non_stock"]:
+        raise ValueError(f"товар {pid} скрыт со склада (не запчасть) — сначала верните его")
+    if inv.kit_components(pid):
+        raise ValueError(f"товар {pid} — комплект: приход, списание и пересчёт — по его составляющим")
+    return pid
+
+
 def receive(product_id: int, qty: int, unit_cost_eur: Optional[float] = None, *,
             occurred_at: Optional[str] = None, note: Optional[str] = None,
             created_by: Optional[str] = None) -> int:
-    """Приход: купили qty шт. по unit_cost_eur за штуку."""
-    return inv.add_movement(product_id=product_id, kind="receipt", qty=qty, unit_cost_eur=unit_cost_eur,
+    """Приход: купили qty шт. по unit_cost_eur за штуку (None — по стандарту типа / оценке товара)."""
+    return inv.add_movement(product_id=_plain_product(product_id), kind="receipt", qty=qty, unit_cost_eur=unit_cost_eur,
                             occurred_at=occurred_at, note=note, created_by=created_by)
 
 
 def write_off(product_id: int, qty: int, *, note: Optional[str] = None,
               created_by: Optional[str] = None) -> int:
     """Списание (брак, отдали, потеряли): −qty без выручки."""
-    return inv.add_movement(product_id=product_id, kind="writeoff", qty=-abs(int(qty)), note=note,
+    return inv.add_movement(product_id=_plain_product(product_id), kind="writeoff", qty=-abs(int(qty)), note=note,
                             created_by=created_by)
 
 
@@ -882,6 +955,7 @@ def set_stock(product_id: int, qty: int, *, note: Optional[str] = None,
     Возвращает id движения или None, если остаток уже такой."""
     if qty < 0:
         raise ValueError("остаток не может быть отрицательным")
+    product_id = _plain_product(product_id)
     # Оператор считает склад уже без только что проданной штуки — перенести свежие «Продано»
     # до корректировки, иначе джоб запишет их после неё и спишет второй раз
     try:
@@ -941,25 +1015,57 @@ def effective_min_price(product: Any, unit_cost: Optional[float] = None) -> tupl
     try:
         import config
         pct = float(config.max_discount_percent())
-    except Exception:  # noqa: BLE001 — настройка недоступна: дефолт владельца
-        logger.warning("склад: max_discount_percent недоступен — беру 10 %%", exc_info=True)
-        pct = 10.0
+    except Exception:  # noqa: BLE001
+        # Минимум идёт в промпт как пол цены: лучше «неизвестен», чем молча чужой процент
+        logger.exception("склад: max_discount_percent не прочитан — минимум неизвестен")
+        return None, None
+    if not 0 <= pct < 100:
+        logger.error("склад: max_discount_percent=%s вне 0..99 — минимум неизвестен", pct)
+        return None, None
     val = round(float(lp) * (1 - pct / 100), 2)
     if unit_cost is not None and val < unit_cost:
         return round(float(unit_cost), 2), "cost"
     return val, "percent"
 
 
+# Типы, по которым нельзя уверенно сказать, что это за товар (и какая у него себестоимость) —
+# в очередь оператору «какой тип?» (list_type_questions / set_type).
+AMBIGUOUS_CATEGORIES = {"sitze", "other"}
+
+
+def default_cost(product: Any, costs: Optional[dict[str, float]] = None) -> tuple[Optional[float], Optional[str]]:
+    """Себестоимость единицы без партии: цена закупки на товаре (unit_cost_eur, ввёл оператор) →
+    стандарт типа (inv_category_costs) → неизвестно. Возвращает (цена|None, 'estimate'|'standard'|None).
+    Партия (приход со своей ценой) перекрывает обе — это делает FIFO."""
+    if product["unit_cost_eur"] is not None:
+        return float(product["unit_cost_eur"]), "estimate"
+    std = (costs if costs is not None else inv.category_costs()).get(product["category"] or "")
+    if std is not None:
+        return float(std), "standard"
+    return None, None
+
+
 def _unit_cost(product_id: int, product: Any) -> tuple[Optional[float], Optional[str]]:
-    """Средняя себестоимость единицы: открытые FIFO-партии, иначе оценка товара."""
-    lots, _ = _fifo(inv.list_movements(product_id), product["unit_cost_eur"], inv.tracked_since(product_id))
-    open_lots = [l for l in lots if l["left"] > 0 and l["cost"] is not None]
+    """Средняя себестоимость единицы: открытые FIFO-партии с ценой, иначе default_cost.
+    Источник: 'lots' | 'estimate' (на товаре) | 'standard' (тип) | None."""
+    comps = inv.kit_components(product_id)
+    if comps:
+        # Комплект: сумма себестоимостей составляющих; хоть одна неизвестна — неизвестно
+        total = 0.0
+        for c in comps:
+            cp = inv.get_product(c["component_product_id"])
+            uc, _src = _unit_cost(c["component_product_id"], cp) if cp is not None else (None, None)
+            if uc is None:
+                return None, None
+            total += uc * c["qty"]
+        return round(total, 2), "kit"
+    dc, dsrc = default_cost(product)
+    lots, _ = _fifo(inv.list_movements(product_id), dc, inv.tracked_since(product_id))
+    open_lots = [l for l in lots if l["left"] > 0 and l["kind"] == "receipt" and l["own_cost"]]
     if open_lots:
         units = sum(l["left"] for l in open_lots)
         return round(sum(l["left"] * l["cost"] for l in open_lots) / units, 2), "lots"
-    if product["unit_cost_eur"] is not None:
-        return float(product["unit_cost_eur"]), "estimate"
-    return None, None
+    return dc, dsrc
 
 
 def _empty_context() -> dict[str, Any]:
@@ -1098,8 +1204,9 @@ def _fifo(movements: list[Any], default_cost: Optional[float],
         q = int(m["qty"])
         pre = since is None or (m["occurred_at"] or "") < since
         if q > 0 and not pre:
-            cost = m["unit_cost_eur"] if m["kind"] == "receipt" and m["unit_cost_eur"] is not None else default_cost
-            lot = {"movement_id": m["id"], "kind": m["kind"], "batch_id": m["batch_id"],
+            own = m["kind"] == "receipt" and m["unit_cost_eur"] is not None
+            cost = m["unit_cost_eur"] if own else default_cost
+            lot = {"movement_id": m["id"], "kind": m["kind"], "batch_id": m["batch_id"], "own_cost": own,
                    "date": when, "occurred_at": m["occurred_at"],
                    "qty_in": q, "cost": cost, "left": q, "sold": 0, "revenue": 0.0, "unpriced_sold": 0}
             lots.append(lot)
@@ -1137,8 +1244,46 @@ def _fifo(movements: list[Any], default_cost: Optional[float],
                 "revenue": None if unit_price is None else unit_price * -q,
                 "cogs": cogs, "days": (days_sum / days_n) if days_n and not need else None,
                 "pre_tracking": pre, "gmail_thread_id": m["gmail_thread_id"],
+                "kit_product_id": m["kit_product_id"], "product_id": m["product_id"],
             })
     return lots, sales
+
+
+def _sale_events(sales: list[dict], kit_per: dict[int, dict[int, int]]) -> list[dict]:
+    """Продажи → события для счётчиков: продажа комплекта (движения его составляющих в одном
+    треде) = одно событие; qty — сколько комплектов. revenue/cogs — суммы, None если хоть одна
+    часть неизвестна."""
+    events: dict[tuple, dict] = {}
+    for x in sales:
+        if x["kit_product_id"]:
+            key = ("kit", x["kit_product_id"], x["gmail_thread_id"] or x["movement_id"])
+        else:
+            key = ("one", x["movement_id"])
+        e = events.get(key)
+        if e is None:
+            per = kit_per.get(x["kit_product_id"] or -1, {}).get(x["product_id"])
+            qty = (x["qty"] // per if per else 1) if x["kit_product_id"] else x["qty"]
+            e = events[key] = {"qty": qty, "revenue": 0.0, "cogs": 0.0}
+        e["revenue"] = None if (e["revenue"] is None or x["revenue"] is None) else e["revenue"] + x["revenue"]
+        e["cogs"] = None if (e["cogs"] is None or x["cogs"] is None) else e["cogs"] + x["cogs"]
+    return list(events.values())
+
+
+def _kit_per() -> dict[int, dict[int, int]]:
+    out: dict[int, dict[int, int]] = {}
+    for r in inv.iter_rows("SELECT kit_product_id, component_product_id, qty FROM inv_kit_components"):
+        out.setdefault(r["kit_product_id"], {})[r["component_product_id"]] = r["qty"]
+    return out
+
+
+def _hidden_sales(pf: Optional[datetime], pt: Optional[datetime], now: datetime) -> dict[str, Any]:
+    """Продажи скрытых (non_stock) товаров за период — в отчёты склада не входят, но видно, что они есть."""
+    rows = inv.iter_rows("SELECT m.occurred_at, m.qty, m.unit_price_eur FROM inv_movements m "
+                         "JOIN inv_products p ON p.id = m.product_id "
+                         "WHERE p.non_stock = 1 AND m.kind = 'sale' AND m.voided_at IS NULL")
+    hit = [r for r in rows if _in_period(r["occurred_at"], pf, pt, now)]
+    return {"hidden_sales": len(hit),
+            "hidden_revenue": _r(sum(-r["qty"] * r["unit_price_eur"] for r in hit if r["unit_price_eur"] is not None))}
 
 
 def _in_period(iso: Optional[str], pf: Optional[datetime], pt: Optional[datetime], now: datetime) -> bool:
@@ -1182,6 +1327,9 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
                          "open_questions": len(inv.list_open_questions())}
     days_all: list[tuple[float, int]] = []
 
+    std_costs = inv.category_costs()
+    kit_per = _kit_per()
+    period_sales: list[dict] = []     # все продажи периода (для счётчиков и денег — по событиям)
     kit_moves: dict[int, list] = {}
     for mvs in moves.values():
         for m in mvs:
@@ -1194,9 +1342,13 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         if comps:
             # Комплект: своего остатка и денег нет (они у составляющих — иначе двойной счёт);
             # показываем, сколько можно собрать, и сколько комплектов продано за период
-            if p["archived_at"] and not kit_moves.get(p["id"]):
+            if p["archived_at"] and not kit_moves.get(p["id"]) and not mv:
                 continue
             sv = stock_view(p["id"])
+            # История продаж товара до того, как он стал комплектом, — тоже выручка
+            own = [x for x in _fifo(mv, default_cost(p, std_costs)[0], None)[1]
+                   if _in_period(x["occurred_at"], pf, pt, now)]
+            period_sales.extend(own)
             k_threads = {m["gmail_thread_id"] or f"m{m['id']}" for m in kit_moves.get(p["id"], [])
                          if _in_period(m["occurred_at"], pf, pt, now)}
             items.append({"product_id": p["id"], "title": p["title"], "category": p["category"],
@@ -1204,12 +1356,13 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
                           "components": sv["components"], "stock_tracked": sv["tracked"], "qty": sv["qty"],
                           "negative_stock": sv["negative"], "list_price_eur": p["list_price_eur"],
                           "min_price_eur": effective_min_price(p)[0], "listings": p["listings"],
-                          "kit_sales": len(k_threads), "stale": False})
+                          "kit_sales": len(k_threads), "own_sales_before_kit": len(own), "stale": False})
             continue
         if p["archived_at"] and not mv:
             continue
         since = inv.tracked_since(p["id"])
-        lots, sales = _fifo(mv, p["unit_cost_eur"], since)
+        dc, _dsrc = default_cost(p, std_costs)
+        lots, sales = _fifo(mv, dc, since)
         tracked = bool(p["stock_tracked"])
         qty = int(p["qty"]) if tracked else None
         on_hand = max(0, qty or 0)
@@ -1227,12 +1380,13 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         listed_days = round((now - listed).total_seconds() / 86400, 1) if listed else None
 
         unit_avg = (stock_cost / (on_hand - no_cost)) if stock_cost is not None and on_hand > no_cost else None
-        min_price, _src = effective_min_price(p, unit_avg if unit_avg is not None else p["unit_cost_eur"])
+        min_price, _src = effective_min_price(p, unit_avg if unit_avg is not None else dc)
         exp_list = on_hand * p["list_price_eur"] if on_hand and p["list_price_eur"] else None
         exp_min = on_hand * min_price if on_hand and min_price else None
         full_cost = stock_cost if (on_hand and no_cost == 0) else None
 
         in_period = [x for x in sales if _in_period(x["occurred_at"], pf, pt, now)]
+        period_sales.extend(in_period)
         priced = [x for x in in_period if x["revenue"] is not None]
         costed_sales = [x for x in in_period if x["cogs"] is not None]
         with_profit = [x for x in priced if x["cogs"] is not None]
@@ -1245,7 +1399,8 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         item = {
             "product_id": p["id"], "title": p["title"], "category": p["category"], "condition": p["condition"],
             "archived": bool(p["archived_at"]), "stock_tracked": tracked, "tracked_since": since, "qty": qty,
-            "unit_cost_eur": p["unit_cost_eur"], "list_price_eur": p["list_price_eur"],
+            "unit_cost_eur": p["unit_cost_eur"], "default_cost_eur": dc, "default_cost_source": _dsrc,
+            "list_price_eur": p["list_price_eur"],
             "min_price_eur": min_price, "listings": p["listings"], "kit": False,
             "stock_cost_eur": _r(stock_cost), "units_without_cost": no_cost,
             "expected_revenue_list": _r(exp_list), "expected_revenue_min": _r(exp_min),
@@ -1274,18 +1429,26 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         T["expected_revenue_min"] += exp_min or 0.0
         T["units_without_list_price"] += on_hand if not p["list_price_eur"] else 0
         T["units_without_min_price"] += on_hand if not min_price else 0
-        T["sales"] += len(in_period)
-        T["sold_qty"] += item["sold_qty"]
-        T["revenue"] += p_rev
-        T["cogs"] += p_cogs
-        T["profit"] += p_profit
-        T["sales_with_profit"] += len(with_profit)
-        T["sales_without_cost"] += item["sales_without_cost"]
-        T["sales_without_price"] += item["sales_without_price"]
         T["negative_stock"] += 1 if item["negative_stock"] else 0
         T["stale"] += 1 if item["stale"] else 0
         T["untracked_listed"] += 1 if (not tracked and not p["archived_at"]) else 0
 
+    # Продажи и деньги — по событиям: продажа комплекта = одна продажа, а не по составляющей
+    for e in _sale_events(period_sales, kit_per):
+        T["sales"] += 1
+        T["sold_qty"] += e["qty"]
+        if e["revenue"] is None:
+            T["sales_without_price"] += 1
+        else:
+            T["revenue"] += e["revenue"]
+        if e["cogs"] is None:
+            T["sales_without_cost"] += 1
+        else:
+            T["cogs"] += e["cogs"]
+        if e["revenue"] is not None and e["cogs"] is not None:
+            T["profit"] += e["revenue"] - e["cogs"]
+            T["sales_with_profit"] += 1
+    T.update(_hidden_sales(pf, pt, now))
     for k in ("stock_cost", "expected_revenue_list", "expected_revenue_min", "revenue", "cogs", "profit"):
         T[k] = _r(T[k])
     if T["sales"] and not T["sales_with_profit"]:
@@ -1337,6 +1500,9 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
     products = {p["id"]: p for p in inv.list_products(include_archived=True)}   # без non_stock
     moves = _product_moves()
     batches = {b["id"]: b for b in inv.list_batches()}
+    std_costs = inv.category_costs()
+    kit_per = _kit_per()
+    all_month_sales: list[dict] = []
     out: dict[str, Any] = {"year": int(year), "month": int(month), "from": s_iso, "to": e_iso,
                            "invested": 0.0, "invested_unknown_qty": 0, "received_qty": 0,
                            "revenue": 0.0, "cogs": 0.0, "profit": 0.0, "sales": 0, "sold_qty": 0,
@@ -1348,12 +1514,13 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
     for pid, mv_all in moves.items():
         p = products.get(pid)
         if p is None:
-            continue
+            continue   # скрытый (non_stock) товар — его продажи в hidden_sales
         mv = [m for m in mv_all if (m["occurred_at"] or "") < e_iso]
         if not mv:
             continue
         since = min((m["occurred_at"] for m in mv if m["kind"] in ("receipt", "adjust")), default=None)
-        lots, sales = _fifo(mv, p["unit_cost_eur"], since)
+        dc, _dsrc = default_cost(p, std_costs)
+        lots, sales = _fifo(mv, dc, since)
         month_sales = [x for x in sales if s_iso <= (x["occurred_at"] or "") < e_iso]
         priced = [x for x in month_sales if x["revenue"] is not None]
         with_profit = [x for x in priced if x["cogs"] is not None]
@@ -1368,14 +1535,7 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
                 "profit": _r(prof) if with_profit else None,
                 "sales_without_price": len(month_sales) - len(priced),
                 "sales_without_cost": sum(1 for x in month_sales if x["cogs"] is None)})
-        out["sales"] += len(month_sales)
-        out["sold_qty"] += sum(x["qty"] for x in month_sales)
-        out["revenue"] += rev
-        out["cogs"] += cogs
-        out["profit"] += prof
-        out["sales_with_profit"] += len(with_profit)
-        out["sales_without_price"] += len(month_sales) - len(priced)
-        out["sales_without_cost"] += sum(1 for x in month_sales if x["cogs"] is None)
+        all_month_sales.extend(month_sales)
 
         for l in lots:
             if l["kind"] != "receipt":
@@ -1417,11 +1577,27 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
                     se["list_value"] += qty_end * p["list_price_eur"]
                 else:
                     se["units_without_list_price"] += qty_end
-                mp = effective_min_price(p, p["unit_cost_eur"])[0]
+                mp = effective_min_price(p, dc)[0]
                 if mp:
                     se["min_value"] += qty_end * mp
                 else:
                     se["units_without_min_price"] += qty_end
+    # Продажи и деньги — по событиям (продажа комплекта = одна продажа)
+    for e in _sale_events(all_month_sales, kit_per):
+        out["sales"] += 1
+        out["sold_qty"] += e["qty"]
+        if e["revenue"] is None:
+            out["sales_without_price"] += 1
+        else:
+            out["revenue"] += e["revenue"]
+        if e["cogs"] is None:
+            out["sales_without_cost"] += 1
+        else:
+            out["cogs"] += e["cogs"]
+        if e["revenue"] is not None and e["cogs"] is not None:
+            out["profit"] += e["revenue"] - e["cogs"]
+            out["sales_with_profit"] += 1
+    out.update(_hidden_sales(start, end, end))
     for k in ("invested", "revenue", "cogs", "profit"):
         out[k] = _r(out[k])
     if out["sales"] and not out["sales_with_profit"]:
@@ -1443,7 +1619,11 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
         b = batches.get(bid)
         invested = b["total_cost_eur"] if b is not None else None
         revenue = sum(l["revenue"] or 0 for l in ls)
-        unknown = invested is None or any(l["payback"] == "unknown" and l["unit_cost"] is not None for l in ls)
+        # Часть позиций партии не видна (товар скрыт / удалён) — окупаемость неизвестна
+        lines_total = inv.iter_rows("SELECT COUNT(*) AS n FROM inv_movements WHERE batch_id = ? "
+                                    "AND voided_at IS NULL", (bid,))[0]["n"]
+        unknown = (invested is None or lines_total != len(ls)
+                   or any(l["payback"] == "unknown" and l["unit_cost"] is not None for l in ls))
         out["batches"].append({
             "batch_id": bid, "date": b["occurred_at"] if b is not None else ls[0]["date"],
             "note": b["note"] if b is not None else None, "invested": _r(invested),
@@ -1582,6 +1762,7 @@ def apply_seed(plan: dict[str, Any]) -> dict[str, int]:
     дублей товаров). Сомнительные пары → вопросы оператору."""
     inv.ensure_schema()
     gid2pid: dict[int, int] = {}
+    merged_ads = {d["ad"].ad_id: d for d in plan.get("merged_doubts") or []}
     stats = {"products": 0, "listings": 0, "questions": 0, "skipped_known": 0,
              "joined_existing": 0, "doubts_skipped": 0}
     with transaction():
@@ -1614,9 +1795,12 @@ def apply_seed(plan: dict[str, Any]) -> dict[str, int]:
                 gid2pid[g.gid] = pid
                 stats["products"] += 1
             for a in fresh:
-                inv.upsert_listing(ad_id=a.ad_id, product_id=pid, link_method="seed", seen_at=a.last_seen,
-                                   account_id=a.account_id, title=a.title, price_eur=a.price, url=a.url,
-                                   state=a.state)
+                md = merged_ads.get(a.ad_id)
+                # Сведённые по решению владельца — отдельная отметка, чтобы их можно было найти и разделить
+                inv.upsert_listing(ad_id=a.ad_id, product_id=pid, link_method="seed_merged" if md else "seed",
+                                   seen_at=a.last_seen, account_id=a.account_id, title=a.title,
+                                   price_eur=a.price, url=a.url, state=a.state,
+                                   link_score=md["score"] if md else None)
                 with get_conn() as conn:
                     conn.execute("UPDATE inv_listings SET first_seen_at = ? WHERE ad_id = ?",
                                  (a.first_seen or a.last_seen, a.ad_id))
@@ -1792,3 +1976,56 @@ def suggest_sale_price(gmail_thread_id: str) -> dict[str, Any]:
     best = cands[0] if cands else None
     return {"price_eur": best["price_eur"] if best else None, "source": best["source"] if best else None,
             "candidates": cands}
+
+
+# ─── типы товаров и стандартная себестоимость ─────────────────────────────────
+
+CATEGORY_LABELS = {
+    "sitzbank": "скамья (2+1 / 3er)", "einzelsitz": "одиночное / VIP сиденье", "tisch": "столик",
+    "fahrersitze": "водитель + пассажир", "komplettsatz": "комплект сидений", "sitze": "сиденья (не ясно какие)",
+    "ahk": "фаркоп", "sitzschienen": "салазки", "gurte": "ремни", "leuchten": "фонари / фары",
+    "raeder": "колёса / колпаки", "ladekabel": "кабель зарядки", "dach": "рейлинги / багажник",
+    "karosserie": "кузовные детали", "other": "другое",
+}
+
+
+def list_type_questions() -> list[dict[str, Any]]:
+    """Очередь «какой тип?»: товары склада с неясным типом (AMBIGUOUS_CATEGORIES), которые оператор
+    ещё не подтвердил. От типа зависит стандартная себестоимость. Варианты — типы со стандартом
+    первыми, затем остальные."""
+    inv.ensure_schema()
+    costs = inv.category_costs()
+    rows = inv.iter_rows(
+        f"SELECT id, title, category, list_price_eur, unit_cost_eur FROM inv_products "
+        f"WHERE archived_at IS NULL AND non_stock = 0 AND category_confirmed = 0 "
+        f"AND category IN ({','.join('?' * len(AMBIGUOUS_CATEGORIES))}) ORDER BY title",
+        sorted(AMBIGUOUS_CATEGORIES))
+    options = [{"category": c, "label": CATEGORY_LABELS.get(c, c), "standard_cost_eur": costs.get(c)}
+               for c in sorted(CATEGORY_LABELS, key=lambda c: (c not in costs, c)) if c not in ("sitze",)]
+    return [{"product_id": r["id"], "title": r["title"], "category": r["category"],
+             "list_price_eur": r["list_price_eur"], "unit_cost_eur": r["unit_cost_eur"],
+             "options": options} for r in rows]
+
+
+def set_type(product_id: int, category: str, *, unit_cost_eur: Optional[float] = None) -> dict[str, Any]:
+    """Ответ «какой тип?»: задать тип товара (подтверждён оператором); для типа без стандарта можно
+    сразу указать себестоимость единицы. Возвращает {category, unit_cost_eur, unit_cost_source}."""
+    cat = (category or "").strip()
+    if cat not in CATEGORY_LABELS and cat not in inv.category_costs():
+        raise ValueError(f"неизвестный тип: {category}")
+    fields: dict[str, Any] = {"category": cat, "category_confirmed": 1}
+    if unit_cost_eur is not None:
+        if unit_cost_eur < 0:
+            raise ValueError("себестоимость не может быть отрицательной")
+        fields["unit_cost_eur"] = float(unit_cost_eur)
+    inv.update_product(product_id, **fields)
+    p = inv.get_product(product_id)
+    cost, src = _unit_cost(product_id, p)
+    return {"category": cat, "unit_cost_eur": cost, "unit_cost_source": src}
+
+
+def category_cost_table() -> list[dict[str, Any]]:
+    """Справочник для настроек склада: тип, подпись, стандартная себестоимость (None — нет стандарта)."""
+    costs = inv.category_costs()
+    cats = sorted(set(CATEGORY_LABELS) | set(costs), key=lambda c: (c not in costs, c))
+    return [{"category": c, "label": CATEGORY_LABELS.get(c, c), "standard_cost_eur": costs.get(c)} for c in cats]
