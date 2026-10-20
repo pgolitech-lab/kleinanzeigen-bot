@@ -21,11 +21,7 @@ def env(tmp_path, monkeypatch):
                                client_lang="de", ad_title="Rückbank", buyer_name="b@x")
     from web import api_ma
 
-    def fake_twb(text, target_lang, source_lang="ru", context=None):
-        return {"translation": f"[{target_lang}] {text}", "back_translation": text, "target_lang": target_lang}
-
-    with patch("modules.tg_init_data.config") as mc, \
-         patch.object(api_ma.claude, "translate_with_back", fake_twb):
+    with patch("modules.tg_init_data.config") as mc:
         mc.telegram_bot_token.return_value = TEST_BOT_TOKEN
         mc.telegram_authorized_ids.return_value = {"999"}
         from web.app import app
@@ -41,18 +37,28 @@ def test_wait_until_days_sets_snooze(env):
     assert c.post("/api/ma/threads/T1/wait", headers=H()).json()["wait_until"] is None  # как раньше
 
 
-def test_followup_in_client_language(env):
+def test_followup_via_llm(env):
     c, acc, mid = env
-    r = c.post("/api/ma/threads/T1/followup", headers=H()).json()
-    assert r["target_lang"] == "de" and r["translated"].startswith("[de] ") and "Rückbank" in r["ru_text"]
+    with patch("modules.drafts.followup_ping", return_value={
+            "ru_answer": "Напомнить", "client_answer": "Noch Interesse?", "ru_translation": "Ещё интересно?",
+            "client_lang": "de", "days_silent": 3.0, "anchor_msg_id": mid}) as fp:
+        r = c.post("/api/ma/threads/T1/followup", headers=H()).json()
+    fp.assert_called_once_with("T1")
+    assert r == {"translated": "Noch Interesse?", "back_ru": "Ещё интересно?", "target_lang": "de",
+                 "ru_text": "Напомнить", "days_silent": 3.0, "anchor_msg_id": mid}
+    from modules import claude
+    with patch("modules.drafts.followup_ping", side_effect=claude.SuggestError("последним писал клиент")):
+        assert c.post("/api/ma/threads/T1/followup", headers=H()).status_code == 409
 
 
-def test_quick_replies(env):
+def test_quick_replies_via_llm(env):
     c, acc, mid = env
-    assert c.post(f"/api/ma/messages/{mid}/quick", json={"kind": "city"}, headers=H()).status_code == 400
-    info = c.post(f"/api/ma/accounts/{acc}/quick-info", json={"city": "Гамбург, Альтона"}, headers=H()).json()
-    assert info["city"] == "Гамбург, Альтона" and info["hours"] == ""
-    assert c.get(f"/api/ma/accounts/{acc}/quick-info", headers=H()).json()["city"] == "Гамбург, Альтона"
-    r = c.post(f"/api/ma/messages/{mid}/quick", json={"kind": "city"}, headers=H()).json()
-    assert r["translated"].startswith("[de] ") and "Гамбург" in r["ru_text"]
-    assert c.post(f"/api/ma/messages/{mid}/quick", json={"kind": "price"}, headers=H()).status_code == 422
+    info = c.post(f"/api/ma/accounts/{acc}/quick-info", json={"pickup": "Köln, вечером"}, headers=H()).json()
+    assert info == {"delivery": "", "pickup": "Köln, вечером", "payment": ""}
+    with patch("modules.drafts.quick_reply", return_value={"client_answer": "Abholung in Köln", "ru_translation":
+                                                          "Самовывоз в Кёльне", "client_lang": "de",
+                                                          "kind": "pickup"}) as qr:
+        r = c.post(f"/api/ma/messages/{mid}/quick", json={"kind": "pickup"}, headers=H()).json()
+    assert qr.call_args.args == (mid, "pickup", {"delivery": "", "pickup": "Köln, вечером", "payment": ""})
+    assert r["translated"] == "Abholung in Köln" and r["kind"] == "pickup"
+    assert c.post(f"/api/ma/messages/{mid}/quick", json={"kind": "city"}, headers=H()).status_code == 422
