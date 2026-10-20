@@ -53,21 +53,27 @@ _PIPELINE_PREVIEW_CHARS = 200
 # Короткий кэш pipeline_threads: дашборд MA параллельно грузит /dashboard и /pipeline —
 # один тяжёлый запрос на двоих. Любой POST /api/ma/* сбрасывает кэш (web/app.py).
 _PIPELINE_TTL_SEC = 3.0
-_pipeline_cache: dict[str, Any] = {"rows": None, "at": 0.0}
-_pipeline_lock = threading.Lock()
+_pipeline_cache: dict[str, Any] = {"rows": None, "at": 0.0, "gen": 0}
+_pipeline_lock = threading.Lock()  # только на чтение/запись словаря, не на время SQL
 
 
 def invalidate_pipeline_cache() -> None:
     with _pipeline_lock:
         _pipeline_cache["rows"] = None
+        _pipeline_cache["gen"] += 1
 
 
 def _pipeline_rows() -> list:
     with _pipeline_lock:
-        if _pipeline_cache["rows"] is None or time.monotonic() - _pipeline_cache["at"] > _PIPELINE_TTL_SEC:
-            _pipeline_cache["rows"] = db.pipeline_threads()
-            _pipeline_cache["at"] = time.monotonic()
-        return _pipeline_cache["rows"]
+        rows, gen = _pipeline_cache["rows"], _pipeline_cache["gen"]
+        if rows is not None and time.monotonic() - _pipeline_cache["at"] <= _PIPELINE_TTL_SEC:
+            return rows
+    rows = db.pipeline_threads()
+    with _pipeline_lock:
+        # Пока шёл запрос, POST мог сбросить кэш — тогда результат не кладём (он мог устареть)
+        if _pipeline_cache["gen"] == gen:
+            _pipeline_cache.update(rows=rows, at=time.monotonic())
+    return rows
 
 
 def _active_autopilot_threads(rows: list) -> set[str]:
@@ -460,7 +466,7 @@ def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> 
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign_holder = telegram_bot._check_lock(msg_id, actor)
+    foreign_holder = telegram_bot._claim_lock(msg_id, actor)
     if foreign_holder is not None:
         raise HTTPException(
             status_code=409,
@@ -469,7 +475,6 @@ def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> 
                 "remaining_min": operator_lock.remaining_min(msg_id),
             },
         )
-    telegram_bot._acquire_lock(msg_id, actor)
     return {
         "holder": actor,
         "remaining_min": operator_lock.remaining_min(msg_id),
@@ -504,12 +509,11 @@ async def ma_lock_release_beacon(msg_id: int, request: Request) -> None:
     return None
 
 
-def _check_actor_holds(msg_id: int, actor: str) -> "str | None":
-    return telegram_bot._check_lock(msg_id, actor)
-
-
-def _ensure_lock(msg_id: int, actor: str) -> None:
-    telegram_bot._acquire_lock(msg_id, actor)
+def _claim_or_409(msg_id: int, actor: str) -> None:
+    """Взять лок карточки атомарно; занят другим оператором — 409 с его именем."""
+    foreign = telegram_bot._claim_lock(msg_id, actor)
+    if foreign:
+        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
 
 
 # ── Языковой guard отправки ──────────────────────────────────────────────
@@ -558,10 +562,7 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     b = body or SendBody()
     client_lang = (row["client_lang"] if "client_lang" in row.keys() else None) or "de"
@@ -639,10 +640,7 @@ def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     b = body or TranslateDraftBody()
     client_lang = (row["client_lang"] if "client_lang" in row.keys() else None) or "de"
@@ -706,10 +704,7 @@ def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[st
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     db.update_message(msg_id, status="skipped")
     telegram_bot._release_lock(msg_id)
@@ -727,10 +722,7 @@ def ma_sold(msg_id: int, body: SoldBody,
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     result = db.mark_thread_sold(
         msg_id,
@@ -774,10 +766,7 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft(msg_id, body.strategy))
 
@@ -796,10 +785,7 @@ def ma_edit_ru(msg_id: int, body: EditTextBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     target_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
     de_res = claude.translate_only(body.text, target_lang=target_lang, source_lang="ru")
@@ -819,10 +805,7 @@ def ma_edit_de(msg_id: int, body: EditTextBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     source_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
     ru_res = claude.translate_only(body.text, target_lang="ru", source_lang=source_lang)
@@ -848,10 +831,7 @@ def ma_price(msg_id: int, body: PriceBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft_with_price(msg_id, body.eur))
     return _message_review_dict(msg_id)
@@ -865,10 +845,7 @@ def ma_instruction(msg_id: int, body: InstructionBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
-    foreign = _check_actor_holds(msg_id, actor)
-    if foreign:
-        raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
-    _ensure_lock(msg_id, actor)
+    _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft_with_instruction(msg_id, body.text))
     return _message_review_dict(msg_id)

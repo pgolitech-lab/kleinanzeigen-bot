@@ -10,6 +10,14 @@ local = TestClient(app, client=("127.0.0.1", 50000))
 TUNNEL = {"cf-ray": "8d1f-FRA", "cf-connecting-ip": "203.0.113.7"}
 
 
+@pytest.fixture(autouse=True)
+def _no_db_config():
+    from unittest.mock import patch
+    with patch("web.app.config") as mc:
+        mc.polling_paused.return_value = False
+        yield mc
+
+
 @pytest.mark.parametrize("method,path", [
     ("GET", "/"), ("GET", "/settings"), ("GET", "/api/settings"), ("POST", "/api/settings"),
     ("GET", "/api/logs"), ("GET", "/api/status"), ("GET", "/api/messages"), ("POST", "/accounts/1/delete"),
@@ -60,4 +68,21 @@ def test_old_web_ui_removed():
 def test_health_shape():
     body = local.get("/health").json()
     assert body["status"] == "ok"
-    assert "poll_age_sec" in body and "polluted_incoming" in body
+    assert body["polling_paused"] is False
+    assert "poll_age_sec" in body and "poll_tracking" in body and "polluted_incoming" in body
+
+
+def test_health_uses_scheduler_poll_status(_no_db_config):
+    import time
+    from unittest.mock import patch
+    import scheduler
+    st = {"last_pass_sec": 1.5, "last_errors": 0, "accounts": {1: {"last_ok_at": "x", "fails_in_row": 0}},
+          "queue": {"worker_alive": True, "busy_sec": 0.0, "queue_len": 2}}
+    _no_db_config.polling_paused.return_value = True
+    with patch.object(scheduler, "last_poll_ok_at", lambda: time.time() - 42, create=True), \
+         patch.object(scheduler, "poll_status", lambda: st, create=True):
+        body = local.get("/health").json()
+    assert body["poll_tracking"] is True and 41 <= body["poll_age_sec"] <= 44
+    assert body["polling_paused"] is True
+    assert body["mail"]["worker_alive"] is True and body["mail"]["queue_len"] == 2
+    assert body["mail"]["accounts"]["1"]["fails_in_row"] == 0

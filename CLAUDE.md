@@ -82,8 +82,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - `modules/ad_brief.py` — генератор брифа объявления (Sonnet с json_schema, кэшируется в `ad_briefs` по `ad_id`)
 - `modules/telegram_bot.py` — ТОЛЬКО исходящие уведомления (нотификатор на urllib, без polling/PTB). Вся работа оператора — в MA/веб. См. раздел «Telegram-бот».
 - `modules/backup.py` — Google Drive backup через service account
-- `web/app.py` — FastAPI: `/`, `/clients`, `/clients/{email}`, `/threads`, `/threads/{id}`, `/messages`, `/accounts`, `/settings`, `/logs` + `/api/*` + `/debug/*`
-- `web/templates/` — Bootstrap 5.3 dark theme + simple-datatables 9.0.3 (CDN) для клиент-side сортировки/фильтрации в таблицах. `base.html` определяет глобальный хелпер `window.initDataTable(selector, opts)` — все табличные страницы (`/clients`, `/threads`, `/messages`, `/accounts`, dashboard «recent») используют его. Дефолт-сортировка: дата DESC (свежие сверху). Навигация — pills вместо navbar; компактная типографика (14px база)
+- `web/app.py` — FastAPI: CORS + `/api/ma/*` (web/api_ma.py) + `/health` (poll_age_sec, polling_paused, очередь почты, polluted_incoming). Служебное только с 127.0.0.1 и не через туннель: `/api/logs`, `/api/status`, `POST /debug/run-job/{job_id}` (ставит джоб в APScheduler). Старая Jinja-морда и `web/templates/` удалены 2026-10-20 — UI оператора только Mini App
 - `docs/superpowers/specs/` — design-спеки фич (`auto-ack-design.md`, `tg-rework-design.md`)
 
 ## БД (текущая схема, актуально 2026-05-03)
@@ -104,7 +103,7 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - **deal_brief_json** (NEW: JSON {summary_ru, expected_next, negotiated_price_eur, client_assessment} — генерится Sonnet вместе с reply)
 - ~~**similar_buyers_json**~~ (deprecated 2026-05-04 — фича удалена; колонка пустая, не пишется/не читается; в схеме оставлена ради старых данных)
 
-**`settings`**: KV (key, value, updated_at). Управляются через web `/settings` или `/api/settings`.
+**`settings`**: KV (key, value, updated_at). Управляются через MA (`/api/ma/settings`, whitelist).
 
 **`ad_briefs`**: ad_id (PK), ad_title, ad_url, ad_price, brief_md, key_facts_json, **sold_at** (если установлен — auto-skip новых inquiries по этому объявлению), created_at, updated_at
 
@@ -262,7 +261,7 @@ Command-menu в Telegram очищено (`setMyCommands([])`) — нет авт�
 - `google_drive_credentials_json`, `google_drive_folder_id`, `backup_interval_hours`
 - `max_discount_percent`, `web_port`, `web_host`
 - **API balance estimator**: `api_balance_snapshot_usd` (snapshot $ от console.anthropic.com), `api_balance_snapshot_at` (ISO datetime сверки). Остаток = snapshot − SUM(cost_usd) с created_at>snapshot_at. Burn-rate из last-7d-spend, days_remaining = remaining/burn_per_day. Дашборд: цветная stat-карточка (🟢 ≥ $10, 🟡 < $10, 🔴 < $2, клик → /settings).
-- **Стиль чат-пузырей в веб-морде** (см. /settings → «💬 Стиль чата»): `chat_font_em`, `chat_padding_v_rem`, `chat_padding_h_rem`, `chat_max_width_pct`, `chat_radius_rem`, `chat_row_gap_rem`, `chat_meta_font_em`, `chat_secondary_font_em`. Применяются через CSS-переменные в `base.html` через Jinja-global `chat_style()` (`web/app.py`).
+- **Стиль чат-пузырей в веб-морде** (см. /settings → «💬 Стиль чата»): `chat_font_em`, `chat_padding_v_rem`, `chat_padding_h_rem`, `chat_max_width_pct`, `chat_radius_rem`, `chat_row_gap_rem`, `chat_meta_font_em`, `chat_secondary_font_em`. (Jinja-морда удалена 2026-10-20 — ключи остались, не используются.)
 
 ## Правила
 - Комментарии в коде на русском
@@ -312,7 +311,7 @@ ssh pg@192.168.88.28 'journalctl -u kleinanzeigen-bot -f'
 - **`db.add_message`** принимает `created_at` от вызывающего (по умолчанию utcnow). `scheduler._process_incoming` парсит email Date-header и передаёт его — реальные таймстампы и при live-fetch, и при recovery.
 - **Бэкфилл RU для auto-ack**: `_send_auto_ack` после Haiku-генерации вызывает `claude.translate_only(target='ru')` и пишет в `ru_answer` + `ru_translation`. Если client_lang=ru — копия текста.
 - **Classifier bypass для follow-up'ов**: если в gmail_thread_id уже есть сохранённый incoming — Haiku-classifier обходится (это продолжение разговора, не системка). Защита от ложно-junk коротких follow-up'ов («Danke», «Sorry…»).
-- **Time zone в UI**: БД хранит UTC, оператор в Берлине. `modules/telegram_bot._to_berlin(iso, fmt)` + Jinja-фильтр `| berlin('%fmt')` (зарегистрирован в `web/app.py`) — везде где таймстампы видны оператору.
+- **Time zone в UI**: БД хранит UTC, оператор в Берлине. `modules/telegram_bot._to_berlin(iso, fmt)` — везде где таймстампы видны оператору.
 - **Чекбоксы в формах** с hidden fallback `value="0"`: сравнивать со строкой `"1"` явно (`1 if value == "1" else 0`), а не truthy — иначе hidden "0" даёт truthy → галка не выключается. См. POST /accounts/{id}/edit.
 - **Telegram message limits — defense-in-depth**:
   - Лимит 4096 chars. Превышение → `BadRequest: text is too long` или `parse entities` если разорвало тег.
