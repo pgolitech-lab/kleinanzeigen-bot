@@ -1,0 +1,17 @@
+{
+ "_note": "Синтетический ответ по известному формату messagebox API (gateway.kleinanzeigen.de). Сверить с живым через scripts/ka_site_sync.py --conversation ... --raw",
+ "id": "49sml:2cxlxdm:2pxg5bw9w",
+ "role": "Seller",
+ "adId": "3100000001",
+ "adTitle": "Testartikel",
+ "buyerName": "Käufer",
+ "sellerName": "Verkäufer",
+ "numUnread": 0,
+ "messages": [
+  {"messageId": "m1", "type": "MESSAGE", "boundness": "INBOUND", "receivedDate": "2026-10-19T10:00:00.000+0200", "text": "Hallo, ist der Artikel noch da?", "textShort": "Hallo, ist der Artikel noch da?", "attachments": []},
+  {"messageId": "m2", "type": "MESSAGE", "boundness": "OUTBOUND", "receivedDate": "2026-10-19T10:30:00.000+0200", "text": "Hallo, ja, noch da.\n\nMfG", "textShort": "Hallo, ja, noch da.", "attachments": []},
+  {"messageId": "m3", "type": "MESSAGE", "boundness": "INBOUND", "receivedDate": "2026-10-19T11:00:00.000+0200", "text": "Letzter Preis 50?", "textShort": "Letzter Preis 50?", "attachments": []},
+  {"messageId": "m4", "type": "MESSAGE", "boundness": "OUTBOUND", "receivedDate": "2026-10-19T12:15:00.000+0200", "text": "60 geht, darunter nicht.\nViele Grüße", "textShort": "60 geht", "attachments": []},
+  {"messageId": "m5", "type": "MESSAGE", "boundness": "OUTBOUND", "receivedDate": "2026-10-19T12:16:00.000+0200", "text": "", "textShort": "", "attachments": [{"url": "x"}]}
+ ]
+}
