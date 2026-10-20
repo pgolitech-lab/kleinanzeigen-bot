@@ -1,16 +1,18 @@
 """Shared in-memory lock на review-карточку (msg_id).
 
 Используется и telegram_bot, и web/api_ma. Bot wrappers в telegram_bot.py
-(_acquire_lock/_release_lock/_check_lock/_lock_remaining_min) держат
+(_claim_lock/_release_lock) держат
 orchestration с thread_busy + drain_deferred — здесь только примитивы.
 """
 from __future__ import annotations
+import threading
 import time
 
 LOCK_TIMEOUT_SEC = 300
 
-# msg_id -> (actor_str, acquired_at_unix)
+# msg_id -> (actor_str, acquired_at_unix). Трогают потоки threadpool uvicorn — только под _MUTEX.
 _LOCKS: dict[int, tuple[str, float]] = {}
+_MUTEX = threading.RLock()
 
 
 def state(msg_id: int) -> tuple[str, float] | None:
@@ -18,23 +20,39 @@ def state(msg_id: int) -> tuple[str, float] | None:
 
     На read обнаруженный expired-lock автоматически удаляется из dict.
     """
-    e = _LOCKS.get(msg_id)
-    if e is None:
+    with _MUTEX:
+        e = _LOCKS.get(msg_id)
+        if e is None:
+            return None
+        if time.time() - e[1] > LOCK_TIMEOUT_SEC:
+            _LOCKS.pop(msg_id, None)
+            return None
+        return e
+
+
+def try_acquire(msg_id: int, actor: str) -> str | None:
+    """Атомарно «проверить и взять»: None — лок теперь наш (продлён), иначе имя чужого владельца.
+
+    Раздельные state() + remember() из двух потоков пропускали обоих операторов.
+    """
+    with _MUTEX:
+        e = state(msg_id)
+        if e is not None and e[0] != actor:
+            return e[0]
+        _LOCKS[msg_id] = (actor, time.time())
         return None
-    if time.time() - e[1] > LOCK_TIMEOUT_SEC:
-        _LOCKS.pop(msg_id, None)
-        return None
-    return e
 
 
 def remember(msg_id: int, actor: str) -> None:
     """Низкоуровневый set. Caller отвечает за thread_busy + drain orchestration."""
-    _LOCKS[msg_id] = (actor, time.time())
+    with _MUTEX:
+        _LOCKS[msg_id] = (actor, time.time())
 
 
 def forget(msg_id: int) -> None:
     """Низкоуровневый del. No-op если key отсутствует."""
-    _LOCKS.pop(msg_id, None)
+    with _MUTEX:
+        _LOCKS.pop(msg_id, None)
 
 
 def remaining_min(msg_id: int) -> int:

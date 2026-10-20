@@ -4,7 +4,6 @@
 #   • /api/logs, /api/status, /debug/run-job/{id} — служебное, ТОЛЬКО с самого сервера
 #     (127.0.0.1, не через туннель). Старая Jinja-морда удалена 2026-10-20 — UI оператора = MA.
 
-import threading
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -13,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import config
 import log_buffer
 import scheduler as sched_mod
 from web.api_ma import invalidate_pipeline_cache, router as ma_router
@@ -73,51 +73,56 @@ def _require_local(request: Request) -> None:
 
 _POLLUTED_TTL_SEC = 600
 _polluted_cache: dict[str, Any] = {"value": None, "at": 0.0}
-_polluted_lock = threading.Lock()
 
 
 def _polluted_incoming() -> Optional[int]:
-    """count_polluted_incoming (LIKE по всем входящим) — не чаще раза в 10 мин."""
-    with _polluted_lock:
-        if _polluted_cache["value"] is None or time.time() - _polluted_cache["at"] > _POLLUTED_TTL_SEC:
-            from modules.incoming import count_polluted_incoming
-            _polluted_cache["value"] = count_polluted_incoming()
-            _polluted_cache["at"] = time.time()
-        return _polluted_cache["value"]
+    """count_polluted_incoming (LIKE по всем входящим) — не чаще раза в 10 мин.
+    SQL идёт вне лока: медленная БД не должна вешать остальные /health."""
+    if _polluted_cache["value"] is None or time.time() - _polluted_cache["at"] > _POLLUTED_TTL_SEC:
+        from modules.incoming import count_polluted_incoming
+        _polluted_cache.update(value=count_polluted_incoming(), at=time.time())
+    return _polluted_cache["value"]
 
 
-def _poll_age_sec() -> Optional[int]:
-    """Сколько секунд назад был последний успешный опрос почты. None — ещё не было.
+def _mail_status() -> dict[str, Any]:
+    """Возраст последнего удачного опроса почты + состояние очереди (scheduler модуля mail).
 
-    Основной источник — scheduler.last_poll_ok_at() (unix ts, модуль mail). Пока его нет —
-    время последнего завершения джоба poll_gmail из JOB_STATUS (HH:MM:SS, без даты).
+    poll_age_sec=None при poll_tracking=True — с запуска ещё ни одного удачного опроса.
+    poll_tracking=False — в этой сборке scheduler не отдаёт статус опроса (не «всё хорошо»).
     """
-    getter = getattr(sched_mod, "last_poll_ok_at", None)
-    if callable(getter):
-        ts = getter()
-        return None if ts is None else max(0, int(time.time() - ts))
-    st = sched_mod.JOB_STATUS.get("poll_gmail") or {}
-    if not st.get("ok") or not st.get("last_run"):
-        return None
-    now = datetime.now()
-    h, m, s = (int(x) for x in st["last_run"].split(":"))
-    age = (now.hour * 3600 + now.minute * 60 + now.second) - (h * 3600 + m * 60 + s)
-    return age if age >= 0 else age + 86400
+    out: dict[str, Any] = {"polling_paused": bool(config.polling_paused())}
+    last_ok = getattr(sched_mod, "last_poll_ok_at", None)
+    if not callable(last_ok):
+        out.update(poll_tracking=False, poll_age_sec=None)
+        return out
+    ts = last_ok()
+    out.update(poll_tracking=True, poll_age_sec=None if ts is None else max(0, int(time.time() - ts)))
+    status = getattr(sched_mod, "poll_status", None)
+    if callable(status):
+        st = status()
+        q = st.get("queue") or {}
+        out["mail"] = {
+            "last_pass_sec": st.get("last_pass_sec"),
+            "last_errors": st.get("last_errors"),
+            "worker_alive": q.get("worker_alive"),
+            "busy_sec": q.get("busy_sec"),
+            "queue_len": q.get("queue_len"),
+            "accounts": {str(k): {"last_ok_at": v.get("last_ok_at"), "fails_in_row": v.get("fails_in_row")}
+                         for k, v in (st.get("accounts") or {}).items()},
+        }
+    return out
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Liveness + сигналы для мониторинга. HTTP 200, пока процесс жив (watchdog смотрит код).
 
-    - poll_age_sec: возраст последнего успешного опроса почты (None — ещё не было).
+    - polling_paused: опрос почты на паузе (/pause) — это не зависание.
+    - poll_age_sec / poll_tracking / mail: см. _mail_status.
     - polluted_incoming: входящие с неочищенным relay-шаблоном Kleinanzeigen (0 — норма;
       стабильно >0 — регресс parser._strip_relay_template). Кэш 10 мин.
     """
-    return {
-        "status": "ok",
-        "poll_age_sec": _poll_age_sec(),
-        "polluted_incoming": _polluted_incoming(),
-    }
+    return {"status": "ok", **_mail_status(), "polluted_incoming": _polluted_incoming()}
 
 
 # ============================================================

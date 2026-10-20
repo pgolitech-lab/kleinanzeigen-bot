@@ -57,8 +57,7 @@ def client():
         mdb.get_message.return_value = _full_msg_row()
         mdb.find_related_inquiries.return_value = []
         mdb.get_thread_autopilot.return_value = None
-        mtb._check_lock.return_value = None
-        mtb._acquire_lock.return_value = None
+        mtb._claim_lock.return_value = None
         mtb._release_lock.return_value = None
         mol.state.return_value = ("@pgtest#999", 1700000000.0)
         mol.remaining_min.return_value = 5
@@ -166,7 +165,7 @@ def test_send_rejects_unknown_mode(client):
 
 def test_send_409_when_locked_by_other(client):
     c, mdb, mtb, msched, mclaude = client
-    mtb._check_lock.return_value = "@other#222"
+    mtb._claim_lock.return_value = "@other#222"
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/send",
                  headers={"X-Telegram-Init-Data": init})
@@ -306,7 +305,7 @@ def test_translate_draft_empty_translation_500(client):
 
 def test_translate_draft_409_when_locked(client):
     c, mdb, mtb, msched, mclaude = client
-    mtb._check_lock.return_value = "@other#222"
+    mtb._claim_lock.return_value = "@other#222"
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/translate-draft",
                  json={"text": "Привет"},
@@ -491,7 +490,7 @@ def test_regenerate_invalid_strategy_422(client):
 
 def test_regenerate_409_when_locked(client):
     c, mdb, mtb, msched, mclaude = client
-    mtb._check_lock.return_value = "@other#222"
+    mtb._claim_lock.return_value = "@other#222"
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/regenerate",
                  json={"strategy": "harsh"},

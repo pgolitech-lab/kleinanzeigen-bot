@@ -28,8 +28,7 @@ def client():
         mc.telegram_bot_token.return_value = TEST_BOT_TOKEN
         mc.telegram_authorized_ids.return_value = {"999", "555"}
         mdb.get_message.return_value = _row(id=123, gmail_thread_id="abc")
-        mtb._check_lock.return_value = None  # default: lock free
-        mtb._acquire_lock.return_value = None
+        mtb._claim_lock.return_value = None  # default: lock free
         mtb._release_lock.return_value = None
         mol.remaining_min.return_value = 5
         from web.app import app
@@ -48,7 +47,7 @@ def test_actor_format_without_username():
 
 def test_acquire_succeeds_when_free(client):
     c, mtb, mol, mdb = client
-    mtb._check_lock.return_value = None
+    mtb._claim_lock.return_value = None
     init = make_init_data(TEST_USER_PG)
     res = c.post("/api/ma/messages/123/lock/acquire",
                  headers={"X-Telegram-Init-Data": init})
@@ -56,12 +55,12 @@ def test_acquire_succeeds_when_free(client):
     body = res.json()
     assert body["holder"] == "@pgtest#999"
     assert body["remaining_min"] == 5
-    mtb._acquire_lock.assert_called_once_with(123, "@pgtest#999")
+    mtb._claim_lock.assert_called_once_with(123, "@pgtest#999")
 
 
 def test_acquire_409_when_held_by_other(client):
     c, mtb, mol, mdb = client
-    mtb._check_lock.return_value = "@other#111"
+    mtb._claim_lock.return_value = "@other#111"
     mol.remaining_min.return_value = 4
     init = make_init_data(TEST_USER_PG)
     res = c.post("/api/ma/messages/123/lock/acquire",
@@ -70,18 +69,18 @@ def test_acquire_409_when_held_by_other(client):
     body = res.json()
     assert body["detail"]["holder"] == "@other#111"
     assert body["detail"]["remaining_min"] == 4
-    mtb._acquire_lock.assert_not_called()
+    mtb._claim_lock.assert_called_once()  # попытка была, лок чужой — 409
 
 
 def test_acquire_idempotent_when_already_self(client):
     """check_lock возвращает None если holder=self — мы re-acquire-аем (refresh ttl)."""
     c, mtb, mol, mdb = client
-    mtb._check_lock.return_value = None
+    mtb._claim_lock.return_value = None
     init = make_init_data(TEST_USER_PG)
     res = c.post("/api/ma/messages/123/lock/acquire",
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    mtb._acquire_lock.assert_called_once()
+    mtb._claim_lock.assert_called_once()
 
 
 def test_acquire_404_when_msg_missing(client):
