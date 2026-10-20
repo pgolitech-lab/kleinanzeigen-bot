@@ -1,0 +1,694 @@
+<!DOCTYPE html><html lang="de" dir="auto" data-color-scheme="light" data-illustration=""><head>
+  <script type="text/javascript" async="" src="https://server.sgtm-legacy.kleinanzeigen.de/gtag/js?id=G-6V6MWRHVN8&amp;cx=c&amp;gtm=4e6ag1&amp;sign=SIGN" nonce="X"></script><script type="text/javascript" async="" src="https://www.googletagmanager.com/gtm.js?id=GTM-WHRTL83&amp;gtg_health=1" nonce="X"></script><script type="text/javascript" async="" src="https://unpkg.com/web-vitals@3/dist/web-vitals.attribution.iife.js" nonce="X"></script><script async="" src="https://server.sgtm-legacy.kleinanzeigen.de/gtm.js?id=GTM-WHRTL83"></script><script>
+    (function () {
+      var html = document.documentElement;
+      var initialScheme = html.getAttribute("data-color-scheme");
+      var illustrationUrl = html.getAttribute("data-illustration");
+
+      var LOGO_DARK =
+          "https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-dark-mode.svg";
+      var LOGO_LIGHT =
+          "https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-horizontal.svg";
+
+      var updateLogos = function (isDark) {
+        var headerLogo = document.querySelector(".knz-header__logo-img");
+        var centerLogo = document.getElementById("prompt-logo-center");
+
+        if (headerLogo) {
+          headerLogo.src = isDark ? LOGO_DARK : LOGO_LIGHT;
+        }
+
+        if (centerLogo) {
+          centerLogo.style.setProperty("content", "unset", "important");
+          if (illustrationUrl) {
+            centerLogo.src = illustrationUrl;
+          } else {
+            if (isDark) {
+              centerLogo.src = LOGO_DARK;
+            } else {
+              centerLogo.src = LOGO_LIGHT;
+            }
+            centerLogo.style.display = "block"; /* not add !important */
+          }
+        }
+      };
+
+      // --- CASE 1: HARDCODED DARK ---
+      if (initialScheme === "dark") {
+        document.addEventListener("DOMContentLoaded", function () {
+          updateLogos(true);
+        });
+        return;
+      }
+
+      // --- CASE 2: HARDCODED LIGHT ---
+      if (initialScheme === "light") {
+        document.addEventListener("DOMContentLoaded", function () {
+          updateLogos(false);
+        });
+        return;
+      }
+
+      // --- CASE 3: SYSTEM (or empty) ---
+      if (initialScheme === "system" || !initialScheme) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+
+        var applySystemTheme = function (isDark) {
+          html.setAttribute("data-color-scheme", isDark ? "dark" : "light");
+          if (
+              document.readyState === "interactive" ||
+              document.readyState === "complete"
+          ) {
+            updateLogos(isDark);
+          }
+        };
+
+        // Run immediately
+        applySystemTheme(mq.matches);
+
+        // Listen for live changes
+        mq.addEventListener("change", function (e) {
+          applySystemTheme(e.matches);
+        });
+
+        // Ensure logos update on load
+        document.addEventListener("DOMContentLoaded", function () {
+          var current = html.getAttribute("data-color-scheme");
+          updateLogos(current === "dark");
+        });
+      }
+    })();
+  </script>
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="ulp-version" content="1.145.2">
+    
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="https://cdn.auth0.com/ulp/react-components/1.222.2/css/main_wcag_compliant.cdn.min.css">
+    <style id="custom-styles-container">
+      :root, .af-custom-form-container .af-form {
+          --primary-color: #B5E941;
+        }
+:root, .af-custom-form-container .af-form {
+          --button-font-color: #1D4B00;
+        }
+:root {
+          --secondary-button-border-color: #95958E;
+          --social-button-border-color: #95958E;
+          --radio-button-border-color: #95958E;
+        }
+:root {
+          --secondary-button-text-color: #326916;
+        }
+:root {
+          --link-color: #326916;
+        }
+:root {
+          --title-font-color: #0C0C0B;
+        }
+:root {
+          --font-default-color: #0C0C0B;
+        }
+:root {
+          --widget-background-color: #ffffff;
+        }
+:root {
+          --box-border-color: #ffffff;
+        }
+:root {
+          --font-light-color: #77756F;
+        }
+:root {
+          --input-text-color: #0C0C0B;
+        }
+:root {
+          --input-border-color: #95958E;
+          --border-default-color: #95958E;
+        }
+:root {
+          --input-background-color: #ffffff;
+        }
+:root {
+          --icon-default-color: #0C0C0B;
+        }
+:root {
+          --error-color: #B30C0C;
+          --error-text-color: #ffffff;
+        }
+:root {
+          --success-color: #326916;
+        }
+:root {
+          --base-focus-color: #0C0C0B;
+          --transparency-focus-color: rgba(12,12,11, 0.15);
+        }
+:root {
+          --base-hover-color: #000000;
+          --transparency-hover-color: rgba(0,0,0, var(--hover-transparency-value));
+        }
+
+            @media (prefers-color-scheme: dark) {
+              :root {
+                --ulp-captcha-widget-theme: dark;
+              }
+            }
+            @media (not (prefers-color-scheme: dark)) {
+              :root {
+                --ulp-captcha-widget-theme: light;
+              }
+            }
+
+html, :root {
+          font-size: 100%;
+          --default-font-size: 1rem;
+          --small-font-size: 0.75rem;
+          --title-font-size: 1.5rem;
+          --lg-font-size: 1rem;
+          --xl-font-size: 1.25rem;
+          --spacing: 0.5rem;
+        }
+        .af-custom-form-container .af-form {
+          font-size: 1rem;
+        }
+body {
+          --title-font-size: 1.125rem;
+          --title-font-weight: var(--font-bold-weight);
+        }
+.c8ca42957 {
+          font-size: 0.875rem;
+          font-weight: var(--font-default-weight);
+        }
+.c7d4418d9 {
+          font-size: 0.875rem;
+          font-weight: var(--font-default-weight);
+        }
+        .ulp-passkey-benefit-heading {
+          font-size: 1.025rem;
+        }
+.cb10dac59, .cce6001ae {
+          font-size: 0.875rem;
+          font-weight: var(--font-bold-weight);
+        }
+body {
+          --ulp-label-font-size: 0.875rem;
+          --ulp-label-font-weight: var(--font-default-weight);
+        }
+.c8577202b, .c06bc2bb0, [id^='ulp-container-'] a {
+          font-size: 0.875rem;
+          font-weight: var(--font-bold-weight) !important;
+        }
+.c06bc2bb0, .c8577202b {
+            text-decoration: underline;
+          }
+:root {
+          --button-border-width: 1px;
+          --social-button-border-width: 1px;
+          --radio-border-width: 1px;
+        }
+body {
+          --button-border-radius: 9999px;
+          --radio-border-radius: 9999px;
+        }
+
+:root {
+          --input-border-width: 1px;
+        }
+body {
+          --input-border-radius: 8px;
+        }
+
+        .af-custom-form-container .af-form {
+          --border-radius: 8px;
+        }
+
+:root {
+          --border-radius-outer: 16px;
+        }
+:root {
+          --box-border-width: 0px;
+        }
+
+
+            .c8ae6d9f3 {
+              display: none;
+            }
+
+            body {
+              --header-title-spacing: 0;
+            }
+          
+
+          .c8ae6d9f3 {
+            content: url('https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-bimi-green.svg');
+          }
+        
+body {
+          --logo-height: 52px;
+        }
+        .c8ae6d9f3 {
+          height: var(--logo-height);
+        }
+        
+
+          body {
+            --header-alignment: center;
+          }
+        
+
+.c3121fc3c {
+          --page-background-alignment: center;
+        }
+body {
+          --page-background-color: #ffffff00;
+        }
+
+
+    </style>
+    <style>
+    /* By default, hide features for javascript-disabled browsing */
+    /* We use !important to override any css with higher specificity */
+    /* It is also overriden by the styles in <noscript> in the header file */
+    .no-js {
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      height: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+      width: 1px;
+    }
+  </style>
+  <noscript>
+    <style>
+      /* We use !important to override the default for js enabled */
+      /* If the display should be other than block, it should be defined specifically here */
+      .js-required { display: none !important; }
+      .no-js {
+        clip: auto;
+        clip-path: none;
+        height: auto;
+        overflow: auto;
+        position: static;
+        white-space: normal;
+        width: 100%;
+      }
+      .no-js-container {
+        width: var(--prompt-width);
+      }
+    </style>
+  </noscript>
+    
+  
+  <link rel="icon" href="https://www.kleinanzeigen.de/favicon.ico" sizes="32x32">
+  <link rel="icon" href="https://www.kleinanzeigen.de/favicon.svg" type="image/svg+xml">
+  <title>Kleinanzeigen - Anmelden</title>
+  <style>
+    :root {
+      --font-family:
+          "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+      --button-height: 44px;
+      --input-height: 44px;
+      --font-bold-weight: 600;
+      --knz-header-height: 50px;
+    }
+    :root[data-color-scheme="light"] {
+      color-scheme: light;
+      -webkit-color-scheme: light;
+      -moz-color-scheme: light;
+      /* NOTE: Do not define light mode variables here — theme JSON provides default light colors */
+      /* NOTE: exception for page-background-color that is not inserted for html element, so hardcode it here */
+      --page-background-color: #ffffff;
+
+      /* Define Assets for Light Mode */
+      --lock-icon-bg: url("https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-bimi-green.svg");
+      --error-icon-bg: url("data:image/svg+xml;utf8,<svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' fill='none'><path d='M11 10C11 9.44772 11.4477 9 12 9 12.5523 9 13 9.44772 13 10V14C13 14.5523 12.5523 15 12 15 11.4477 15 11 14.5523 11 14V10ZM13 17C13 17.5523 12.5523 18 12 18 11.4477 18 11 17.5523 11 17 11 16.4477 11.4477 16 12 16 12.5523 16 13 16.4477 13 17Z' fill='%23D63A3A'/><path fill-rule='evenodd' clip-rule='evenodd' d='M11.1345 3.49481C11.5197 2.82953 12.4802 2.82953 12.8654 3.49481L22.1309 19.499C22.5169 20.1656 22.0358 21 21.2655 21H2.73441C1.96407 21 1.48302 20.1656 1.86898 19.499L11.1345 3.49481ZM4.46885 19L12 5.99171L19.5311 19H4.46885Z' fill='%23B30C0C'/></svg>");
+    }
+    :root[data-color-scheme="light"] #password-security-popover {
+      background-color: #F4F2EF;
+      border: none;
+    }
+    :root[data-color-scheme="dark"] {
+      color-scheme: dark;
+      -webkit-color-scheme: dark;
+      -moz-color-scheme: dark;
+      --page-background-color: #121212;
+      --widget-background-color: #1e1e1e;
+      --font-default-color: #ffffff;
+      --title-font-color: #ffffff;
+      --font-light-color: #a1a1aa;
+      --icon-default-color: #a1a1aa;
+      --link-color: #b5e941;
+      --base-focus-color: #b5e941;
+      --transparency-focus-color: rgba(181, 233, 65, 0.15);
+      --input-background-color: #2c2c2c;
+      --input-border-color: #555555;
+      --input-text-color: #ffffff;
+      --input-label-color: #a1a1aa;
+      --box-border-color: #333333;
+      --secondary-button-border-color: #555555;
+      --social-button-border-color: #555555;
+      --radio-button-border-color: #555555;
+      --error-color: #ff5a5f;
+      --success-color: #4ade80;
+      --ulp-captcha-widget-theme: dark;
+
+      /* Define Assets for Dark Mode */
+      --lock-icon-bg: url("https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-bimi.svg");
+      --error-icon-bg: url("data:image/svg+xml;utf8,<svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' fill='none'><path d='M11 10C11 9.44772 11.4477 9 12 9 12.5523 9 13 9.44772 13 10V14C13 14.5523 12.5523 15 12 15 11.4477 15 11 14.5523 11 14V10ZM13 17C13 17.5523 12.5523 18 12 18 11.4477 18 11 17.5523 11 17 11 16.4477 11.4477 16 12 16 12.5523 16 13 16.4477 13 17Z' fill='%23ff5a5f'/><path fill-rule='evenodd' clip-rule='evenodd' d='M11.1345 3.49481C11.5197 2.82953 12.4802 2.82953 12.8654 3.49481L22.1309 19.499C22.5169 20.1656 22.0358 21 21.2655 21H2.73441C1.96407 21 1.48302 20.1656 1.86898 19.499L11.1345 3.49481ZM4.46885 19L12 5.99171L19.5311 19H4.46885Z' fill='%23ff5a5f'/></svg>");
+    }
+    :root[data-color-scheme="dark"] .knz-header {
+      border-bottom: 1px solid #555555;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root[data-color-scheme="system"] {
+        color-scheme: dark;
+        --page-background-color: #121212;
+        --widget-background-color: #1e1e1e;
+        --font-default-color: #ffffff;
+        --title-font-color: #ffffff;
+        --font-light-color: #a1a1aa;
+        --icon-default-color: #a1a1aa;
+        --link-color: #b5e941;
+        --base-focus-color: #b5e941;
+        --transparency-focus-color: rgba(181, 233, 65, 0.15);
+        --input-background-color: #2c2c2c;
+        --input-border-color: #555555;
+        --input-text-color: #ffffff;
+        --input-label-color: #a1a1aa;
+        --box-border-color: #333333;
+        --secondary-button-border-color: #555555;
+        --social-button-border-color: #555555;
+        --radio-button-border-color: #555555;
+        --error-color: #ff5a5f;
+        --success-color: #4ade80;
+        --ulp-captcha-widget-theme: dark;
+
+        /* System Dark Assets */
+        --lock-icon-bg: url("https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-bimi.svg");
+        --error-icon-bg: url("data:image/svg+xml;utf8,<svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' fill='none'><path d='M11 10C11 9.44772 11.4477 9 12 9 12.5523 9 13 9.44772 13 10V14C13 14.5523 12.5523 15 12 15 11.4477 15 11 14.5523 11 14V10ZM13 17C13 17.5523 12.5523 18 12 18 11.4477 18 11 17.5523 11 17 11 16.4477 11.4477 16 12 16 12.5523 16 13 16.4477 13 17Z' fill='%23ff5a5f'/><path fill-rule='evenodd' clip-rule='evenodd' d='M11.1345 3.49481C11.5197 2.82953 12.4802 2.82953 12.8654 3.49481L22.1309 19.499C22.5169 20.1656 22.0358 21 21.2655 21H2.73441C1.96407 21 1.48302 20.1656 1.86898 19.499L11.1345 3.49481ZM4.46885 19L12 5.99171L19.5311 19H4.46885Z' fill='%23ff5a5f'/></svg>");
+      }
+      :root[data-color-scheme="dark"] .knz-header {
+        border-bottom: 1px solid #555555;
+      }
+    }
+    body {
+      --logo-height: 30px;
+    }
+    html,
+    body {
+      background: var(--page-background-color);
+      color: var(--font-default-color);
+    }
+    input,
+    select,
+    textarea {
+      background: var(--input-background-color);
+      border-color: var(--input-border-color);
+      color: var(--input-text-color);
+    }
+    a {
+      color: var(--link-color);
+    }
+    h1 {
+      font-weight: var(--font-bold-weight);
+    }
+    .ulp-error-info[data-is-error="true"]::before,
+    .ulp-input-error-icon {
+      background-image: var(--error-icon-bg) !important;
+    }
+    .success-lock {
+      --image: url("https://static.kleinanzeigen.de/static/img/common/illustrations/success.svg") !important;
+      background-image: var(--image) !important;
+      background-size: 118px !important;
+      width: 140px !important;
+      height: 140px !important;
+      background-color: unset !important;
+      -webkit-mask-image: none !important;
+      mask-image: none !important;
+    }
+    #prompt-logo-center {
+      display: none; /* not add !important — JS inline style and illustration rule must be able to override */
+      margin-bottom: 24px;
+    }
+    html[data-illustration]:not([data-illustration=""]) #prompt-logo-center {
+      display: block !important; /* keep !important - illustration is always shown in mobile/desktop - win over the desktop media query display: none !important */
+      content: unset !important;
+      height: 120px !important;
+      max-height: 120px !important;
+    }
+    main._widget {
+      margin-top: var(--knz-header-height) !important;
+      min-height: fit-content !important;
+    }
+    .knz-header {
+      display: block;
+      position: fixed;
+      top: 0;
+      z-index: 999;
+      background: var(--widget-background-color);
+      text-align: center;
+      height: var(--knz-header-height);
+      width: 100%;
+      padding: 12px 0;
+      border-bottom: 1px solid #dddbd5;
+    }
+    .knz-header__logo-link {
+      display: none;
+    }
+    .knz-header__arrow {
+      height: 24px;
+    }
+    .knz-header__back {
+      display: inline-block;
+      cursor: pointer;
+      position: absolute;
+      left: 0;
+      margin-left: 12px;
+      width: 24px;
+      height: 24px;
+      color: var(--link-color);
+    }
+    .knz-header__back svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .knz-header__help-link {
+      position: absolute;
+      right: 0;
+      margin-right: 12px;
+    }
+    button[value^="back"] {
+      width: 100%;
+      min-height: var(--button-height);
+      border: 2px solid var(--input-border-color);
+      text-decoration: none;
+    }
+    #password-security-popover {
+      border-radius: 8px;
+    }
+    @media (min-width: 601px) {
+      :root {
+        --prompt-width: 500px;
+        --prompt-min-height: auto;
+        --knz-header-height: 72px;
+      }
+      #prompt-logo-center {
+        display: none !important; /* keep !important - KA logo is never displayed on desktop inside the widget */
+      }
+      .knz-header__logo-link {
+        display: inline-block;
+        outline: none !important;
+      }
+      .knz-header__logo-img {
+        height: 48px;
+      }
+      .knz-header__back {
+        margin-top: 12px;
+      }
+      .knz-header__help-link {
+        font-size: 14px;
+        margin-top: 12px;
+      }
+    }
+  </style>
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  <script type="text/javascript">
+    document.addEventListener("DOMContentLoaded", function () {
+      var navEntries = performance.getEntriesByType("navigation");
+      var navType = navEntries[0].type;
+      if (navType === "navigate" || navType === "reload" || navType === "back_forward") {
+        var payload = {
+          app: {
+            name: "DESKTOP",
+            version: "1.48.2",
+          },
+          event_type: "login_page_shown"
+        };
+
+        var LOGIN_PAGE_SHOWN_API_URL = "https://gateway.kleinanzeigen.de/idp-events-telemetry/api/v1/login-page";
+
+        fetch(LOGIN_PAGE_SHOWN_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          keepalive: true
+        }).catch(function (err) {
+          console.error("Login page shown error:", err);
+        });
+      }
+    });
+  </script>
+
+  
+    
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({
+        event: "page_meta",
+        page_type: "Login",
+        screenName: "login-id"
+      });
+    </script>
+    
+    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0], j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://server.sgtm-legacy.kleinanzeigen.de/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-WHRTL83');</script>
+  
+
+  
+  <script>
+    function fireAndNavigate(eventName, url) {
+      const fallback = setTimeout(function () { window.location.href = url; }, 2500);
+      window.dataLayer.push({
+        'event': 'gaEvent',
+        'eventAction': eventName,
+        eventCallback: function () { clearTimeout(fallback); window.location.href = url; },
+        eventTimeout: 2000
+      });
+    }
+
+    function watchForLoginError() {
+      let timeoutId;
+      const root = document.querySelector("form[data-form-primary='true']") || document.body;
+      const obs = new MutationObserver(function () {
+        if (root.querySelector("[data-error-code]")) {
+          obs.disconnect();
+          clearTimeout(timeoutId);
+          window.dataLayer.push({ 'event': 'gaEvent', 'eventAction': 'LoginFail' });
+        }
+      });
+      timeoutId = setTimeout(function () { obs.disconnect(); }, 5000);
+      obs.observe(root, { childList: true, subtree: true, attributeFilter: ["data-error-code"] });
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      try {
+        const backBtn = document.querySelector(".knz-header__back");
+        if (backBtn) {
+          backBtn.addEventListener("click", function (ev) {
+            const dest = backBtn.getAttribute("href");
+            try {
+              ev.preventDefault();
+              fireAndNavigate("LoginCancel", dest);
+            } catch (e) {
+              window.location.href = dest;
+            }
+          });
+        }
+
+        const helpLink = document.querySelector(".knz-header__help-link");
+        if (helpLink) {
+          helpLink.addEventListener("click", function () {
+            window.dataLayer.push({ 'event': 'gaEvent', 'eventAction': 'FooterClick', event_label: "Help" });
+          });
+        }
+
+        document.body.addEventListener("click", function (e) {
+          try {
+            const link = e.target.closest("a");
+            if (!link) return;
+
+            const href = link.getAttribute("href") || "";
+
+            if (href.includes("/login/password-reset-start/")) {
+              e.preventDefault();
+              fireAndNavigate("PasswordRequestResetBegin", href);
+              return;
+            }
+
+            if (href.includes("m-benutzer-anmeldung")) {
+              e.preventDefault();
+              fireAndNavigate("UserRegistrationBegin", href);
+              return;
+            }
+          } catch (e) {}
+        });
+
+        if ("login-id" === "login-password") {
+          if (document.querySelector("[data-error-code]")) {
+            window.dataLayer.push({ 'event': 'gaEvent', 'eventAction': 'LoginFail' });
+          } else {
+            watchForLoginError();
+          }
+
+          const submitBtn = document.querySelector("button[type='submit']");
+          if (submitBtn) {
+            let attemptSent = false;
+            submitBtn.addEventListener("click", function () {
+              try {
+                if (!attemptSent) {
+                  attemptSent = true;
+                  window.dataLayer.push({ 'event': 'gaEvent', 'eventAction': 'LoginAttempt' });
+                  setTimeout(function () { attemptSent = false; }, 2000);
+                }
+              } catch (e) {}
+            });
+          }
+        }
+      } catch (e) {}
+    });
+  </script>
+  
+
+</head>
+<body class="_widget-auto-layout">
+<noscript><iframe src="https://server.sgtm-legacy.kleinanzeigen.de/ns.html?id=GTM-WHRTL83" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<link rel="preload" as="image" href="https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-bimi-green.svg"><main class="_widget login-id"><section class="c72b49ac4 _prompt-box-outer c042b26fe"><div class="cccfc2030 c84c8bb91"><div class="c731624c3"><header class="cedb07813 c4352833b" id="screen-header" tabindex="-1"><div title="kleinanzeigen.de" id="custom-prompt-logo" style="width:auto !important;height:60px !important;position:static !important;margin:auto !important;padding:0 !important;background-color:transparent !important;background-position:center !important;background-size:contain !important;background-repeat:no-repeat !important"></div><img class="c8ae6d9f3 c2e1ce09a" id="prompt-logo-center" src="https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-horizontal.svg" alt="kleinanzeigen.de" style="content: unset !important; display: block;"><h1 class="c63b6ec4a cd0f709b7">Willkommen bei Kleinanzeigen!</h1><div class="c8ca42957 c7df6ecec"><p class="cc7454072 c207a98ba">Gut für deinen Geldbeutel, gut für die Umwelt - jetzt einloggen.</p></div></header><div class="c7d4418d9 cadff8d7d"><div class="c24497e4b c8656cf7f"><div class="c07ce0347"><form class="c92935a96 _form-login-id" data-form-primary="true" data-disable-html-validations="true" method="POST" novalidate=""><div id="ulp-error-announcer" class="screen-reader-only" aria-live="assertive" aria-atomic="true"></div><button type="submit" class="c2421978c" style="opacity:0 !important;position:absolute !important;pointer-events:none !important" value="default" aria-hidden="true" tabindex="-1" name="action">Weiter</button><input type="hidden" name="state" value="STATE"><div id="ulp-container-form-content-start"></div><div class="c24497e4b c8656cf7f"><div class="c07ce0347"><div class="input-wrapper _input-wrapper"><div class="c629135ce c4031a297 c1f3389ed cc39915d6 ulp-field cf48edfdc focus" data-action-text="" data-alternate-action-text=""><label id="username-label" class="cab4e2a69 c8bc991c2 ce620d8d1" for="username">E-mail <span class="required" aria-hidden="true">*</span></label><input class="input cf2cd3e94 cc9592596" inputmode="email" id="username" type="email" aria-labelledby="username-label" aria-required="true" required="" autocomplete="email" autocapitalize="none" spellcheck="false" name="username" value=""></div><div id="error-cs-username-required" class="ulp-error-info aria-error-check" data-ulp-validation-function="ulpRequiredFunction" data-ulp-validation-event-listeners="blur,change,input,focus" data-ulp-validation-target="username" aria-live="polite" aria-atomic="true">Das ist ein Pflichtfeld.</div><div id="error-cs-email-invalid" class="ulp-error-info aria-error-check" data-ulp-validation-function="ulpEmailValidationFunction" data-ulp-validation-event-listeners="blur,change,input,focus" data-ulp-validation-target="username" aria-live="polite" aria-atomic="true">Bitte überprüfe, ob deine E-Mail Adresse das korrekte Format hat.</div><div id="error-cs-pattern-mismatch" class="ulp-error-info aria-error-check" data-ulp-validation-function="ulpPatternCheckFunction" data-ulp-validation-event-listeners="blur,change,input,focus" data-ulp-validation-target="username" aria-live="polite" aria-atomic="true"></div></div></div></div><input class="hide" hidden="" type="password" autocomplete="off" tabindex="-1" aria-hidden="true"><input type="hidden" id="js-available" name="js-available" value="true"><input type="hidden" id="webauthn-available" name="webauthn-available" value="true"><input type="hidden" id="is-brave" name="is-brave" value="false"><input type="hidden" id="webauthn-platform-available" name="webauthn-platform-available" value="false"><div id="ulp-container-form-content-end"></div><div class="cc39a184d"><button type="submit" value="default" class="cb10dac59 cf6920a3e cab59f089 c3a12ac9d _button-login-id" data-action-button-primary="true" name="action">Weiter</button></div></form></div></div><div id="ulp-container-form-footer-start">
+
+<p>&nbsp;</p><p>Noch nicht registriert? <a style="text-decoration: underline;" id="signup-link-legacy" href="https://www.kleinanzeigen.de/m-benutzer-anmeldung.html">Erstelle ein Konto</a></p>
+</div><div id="ulp-container-form-footer-end"></div></div></div></div></section></main>
+<script id="client-scripts">
+window.ulpFlags = {"custom_prompts_passkeys":true,"ulp_field_validation_double_submit_fix":true,"enable_ulp_wcag_compliance":true,"enable_ulp_rtl_support":false,"disable_ulp_form_submission_fix":false,"disable_back_button_block_submit_fix":false,"enable_ulp_separate_login_display":false,"enable_ulp_separate_signup_identifiers":false};!function(){var e,t,P,N,q,R,D,I,n,O,j,M,U,H,B,r,a,i,o,u,c,l,s,d={exports:function(e,t){return"object"==typeof e.ulpFlags&&null!==e.ulpFlags?e.ulpFlags:{}}}.exports(window,document),f=((e={}).exports=function(n,l){var r={},a={};function u(e,t){if(e.classList)return e.classList.add(t);var n=e.className.split(" ");-1===n.indexOf(t)&&(n.push(t),e.className=n.join(" "))}function i(e,t,n,r){return e.addEventListener(t,n,r)}function o(e){return"string"==typeof e}function c(e,t){return o(e)?l.querySelector(e):e.querySelector(t)}function s(e,t){var n=o(e)?l.querySelectorAll(e):e.querySelectorAll(t);return Array.prototype.slice.call(n)}function d(e,t){if(e.classList)return e.classList.remove(t);var n=e.className.split(" "),r=n.indexOf(t);-1!==r&&(n.splice(r,1),e.className=n.join(" "))}function f(e,t){return e.getAttribute(t)}function p(e,t,n){return e.setAttribute(t,n)}function v(e){return e.remove()}var e=["text","number","email","password","tel","url"],t="select,textarea,"+e.map(function(e){return'input[type="'+e+'"]'}).join(",");return{addClass:u,toggleClass:function(e,t,n){if(!0===n||!1===n)return r=e,a=t,!0!==n?d(r,a):u(r,a);var r,a;if(e.classList)return e.classList.toggle(t);var i=e.className.split(" "),o=i.indexOf(t);-1!==o?i.splice(o,1):i.push(t),e.className=i.join(" ")},hasClass:function(e,t){return e.classList?e.classList.contains(t):-1!==e.className.split(" ").indexOf(t)},addClickListener:function(e,t){return i(e,"click",t)},addEventListener:i,getAttribute:f,hasAttribute:function(e,t){return e.hasAttribute(t)},getElementById:function(e){return l.getElementById(e)},getParent:function(e){return e.parentNode},isString:o,loadScript:function(e,t){var n=l.createElement("script");for(var r in t)r.startsWith("data-")?n.dataset[r.replace("data-","")]=t[r]:n[r]=t[r];n.src=e,l.body.appendChild(n)},removeScript:function(e){l.querySelectorAll('script[src="'+e+'"]').forEach(function(e){e.remove()})},poll:function(e){var i=e.interval||2e3,t=e.url||n.location.href,o=e.condition||function(){return!0},u=e.onSuccess||function(){},c=e.onError||function(){};return setTimeout(function r(){if(l.hidden)return setTimeout(r,i);var a=new XMLHttpRequest;return a.open("GET",t),a.setRequestHeader("Accept","application/json"),a.onload=function(){if(200===a.status){var e="application/json"===a.getResponseHeader("Content-Type").split(";")[0]?JSON.parse(a.responseText):a.responseText;return o(e)?u():setTimeout(r,i)}if(429!==a.status)return c({status:a.status,responseText:a.responseText});var t=1e3*Number.parseInt(a.getResponseHeader("X-RateLimit-Reset")),n=t-(new Date).getTime();return setTimeout(r,i<n?n:i)},a.send()},i)},querySelector:c,querySelectorAll:s,removeClass:d,removeElement:v,setAttribute:p,removeAttribute:function(e,t){return e.removeAttribute(t)},swapAttributes:function(e,t,n){var r=f(e,t),a=f(e,n);p(e,n,r),p(e,t,a)},setGlobalFlag:function(e,t){r[e]=!!t},getGlobalFlag:function(e){return!!r[e]},setSubmittedForm:function(e,t){a[e]=t},getSubmittedForm:function(e){return a[e]},preventFormSubmit:function(e){e.stopPropagation(),e.preventDefault()},getUlpFields:function(e){var t=[];return s(e,'input[name^="ulp-"], textarea[name^="ulp-"], select[name^="ulp-"]').forEach(function(e){t.push({name:f(e,"name"),value:e.value})}),t},appendUlpFieldsToForm:function(n,e){e&&e.length&&(s(n,'input[type="hidden"][name^="ulp-"], textarea[name^="ulp-"], select[name^="ulp-"]').forEach(function(e){v(e)}),e.forEach(function(e){var t=l.createElement("input");p(t,"type","hidden"),p(t,"name",e.name),p(t,"value",e.value),n.appendChild(t)}))},matchMedia:function(e){return"function"==typeof n.matchMedia&&n.matchMedia(e).matches},dispatchEvent:function(e,t,n){var r;"function"!=typeof Event?(r=l.createEvent("Event")).initCustomEvent(t,n,!1):r=new Event(t,{bubbles:n}),e.dispatchEvent(r)},timeoutPromise:function(e,a){return new Promise(function(t,n){var r=setTimeout(function(){n(new Error("timeoutPromise: promise timed out"))},e);a.then(function(e){clearTimeout(r),t(e)},function(e){clearTimeout(r),n(e)})})},createMutationObserver:function(e){return"undefined"==typeof MutationObserver?null:new MutationObserver(e)},consoleWarn:function(){(console.warn||console.log).apply(console,arguments)},getConfigJson:function(e){try{var t=c(e);if(!t)return null;var n=t.value;return n?JSON.parse(n):null}catch(e){return null}},getCSSVariable:function(e){return getComputedStyle(l.documentElement).getPropertyValue(e)},removeAndTrimString:function(e,t){var n=new RegExp(t,"g"),r=e.replace(n,"");return r=r.replace(/\s+/g,"  ").trim()},htmlEncode:function(e){var t=l.createTextNode(e),n=l.createElement("span");return n.appendChild(t),n.innerHTML||""},cleanServerErrorMessage:function(e,t){0<e.length&&0<t.length&&t.forEach(function(e){v(e)})},arrayFrom:function(e){return Array.prototype.slice.call(e)},arrayIncludes:function(e,t){return-1!==e.indexOf(t)},stringStartsWith:function(e,t){return 0===e.indexOf(t)},stringEndsWith:function(e,t){return-1!==e.indexOf(t,e.length-t.length)},setTimeout:setTimeout,globalWindow:n,SUPPORTED_INPUT_TYPES:e,ELEMENT_TYPE_SELECTOR:t,RUN_INIT:!0}},e.exports)(window,document),p=function(){var e={};function b(e){if(!("string"==typeof e||e instanceof String)){var t=typeof e;throw null===e?t="null":"object"===t&&(t=e.constructor.name),new TypeError("Expected a string but received a "+t)}}function g(e,t){var n,r;b(e),r="object"==typeof t?(n=t.min||0,t.max):(n=t,arguments[2]);var a=encodeURI(e).split(/%..|./).length-1;return n<=a&&(void 0===r||a<=r)}function y(e,t){for(var n in void 0===e&&(e={}),t)void 0===e[n]&&(e[n]=t[n]);return e}var _={require_tld:!0,allow_underscores:!1,allow_trailing_dot:!1,allow_numeric_tld:!1,allow_wildcard:!1,ignore_max_length:!1},t="(?:[0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])",n="("+t+"[.]){3}"+t,r=new RegExp("^"+n+"$"),a="(?:[0-9a-fA-F]{1,4})",i=new RegExp("^((?:"+a+":){7}(?:"+a+"|:)|(?:"+a+":){6}(?:"+n+"|:"+a+"|:)|(?:"+a+":){5}(?::"+n+"|(:"+a+"){1,2}|:)|(?:"+a+":){4}(?:(:"+a+"){0,1}:"+n+"|(:"+a+"){1,3}|:)|(?:"+a+":){3}(?:(:"+a+"){0,2}:"+n+"|(:"+a+"){1,4}|:)|(?:"+a+":){2}(?:(:"+a+"){0,3}:"+n+"|(:"+a+"){1,5}|:)|(?:"+a+":){1}(?:(:"+a+"){0,4}:"+n+"|(:"+a+"){1,6}|:)|(?::((?::"+a+"){0,5}:"+n+"|(?::"+a+"){1,7}|:)))(%[0-9a-zA-Z-.:]{1,})?$");function w(e,t){return void 0===t&&(t=""),b(e),(t=String(t))?"4"===t?r.test(e):"6"===t&&i.test(e):w(e,4)||w(e,6)}var x={allow_display_name:!1,allow_underscores:!1,require_display_name:!1,allow_utf8_local_part:!0,require_tld:!0,blacklisted_chars:"",ignore_max_length:!1,host_blacklist:[],host_whitelist:[]},C=/^([^\x00-\x1F\x7F-\x9F\cX]+)</i,E=/^[a-z\d!#\$%&'\*\+\-\/=\?\^_`{\|}~]+$/i,A=/^[a-z\d]+$/,S=/^([\s\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x21\x23-\x5b\x5d-\x7e]|(\\[\x01-\x09\x0b\x0c\x0d-\x7f]))*$/i,T=/^[a-z\d!#\$%&'\*\+\-\/=\?\^_`{\|}~\u00A1-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF]+$/i,k=/^([\s\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x21\x23-\x5b\x5d-\x7e\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF]|(\\[\x01-\x09\x0b\x0c\x0d-\x7f\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF]))*$/i,L=254;function u(e,t,n,r,a){if(b(e),e=e.trim(),(t=y(t,x)).require_display_name||t.allow_display_name){var i=e.match(C);if(i){var o=i[1];if(e=e.replace(o,"").replace(/(^<|>$)/g,""),a(o," ")&&(o=o.slice(0,-1)),!function(e){var t=e.replace(/^"(.+)"$/,"$1");if(!t.trim())return!1;if(/[\.";<>]/.test(t)){if(t===e)return!1;if(t.split('"').length!==t.split('\\"').length)return!1}return!0}(o))return!1}else if(t.require_display_name)return!1}if(!t.ignore_max_length&&e.length>L)return!1;var u=e.split("@"),c=u.pop(),l=c.toLowerCase();if(n(t.host_blacklist,l))return!1;if(0<t.host_whitelist.length&&!n(t.host_whitelist,l))return!1;var s=u.join("@");if(t.domain_specific_validation&&("gmail.com"===l||"googlemail.com"===l)){var d=(s=s.toLowerCase()).split("+")[0];if(!g(d.replace(/\./g,""),{min:6,max:30}))return!1;for(var f=d.split("."),p=0;p<f.length;p++)if(!A.test(f[p]))return!1}if(!(!1!==t.ignore_max_length||g(s,{max:64})&&g(c,{max:254})))return!1;if(!function(e,t){b(e),(t=y(t,_)).allow_trailing_dot&&"."===e[e.length-1]&&(e=e.substring(0,e.length-1)),!0===t.allow_wildcard&&0===e.indexOf("*.")&&(e=e.substring(2));var n=e.split("."),r=n[n.length-1];if(t.require_tld){if(n.length<2)return!1;if(!t.allow_numeric_tld&&!/^([a-z\u00A1-\u00A8\u00AA-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF]{2,}|xn[a-z0-9-]{2,})$/i.test(r))return!1;if(/\s/.test(r))return!1}return!(!t.allow_numeric_tld&&/^\d+$/.test(r))&&n.every(function(e){return!(63<e.length&&!t.ignore_max_length||!/^[a-z_\u00a1-\uffff0-9-]+$/i.test(e)||/[\uff01-\uff5e]/.test(e)||/^-|-$/.test(e)||!t.allow_underscores&&/_/.test(e))})}(c,{require_tld:t.require_tld,ignore_max_length:t.ignore_max_length,allow_underscores:t.allow_underscores})){if(!t.allow_ip_domain)return!1;if(!w(c)){if(!r(c,"[")||!a(c,"]"))return!1;var v=c.slice(1,-1);if(0===v.length||!w(v))return!1}}if('"'===s[0])return s=s.slice(1,s.length-1),t.allow_utf8_local_part?k.test(s):S.test(s);for(var h=t.allow_utf8_local_part?T:E,m=(f=s.split("."),0);m<f.length;m++)if(!h.test(f[m]))return!1;return!t.blacklisted_chars||-1===s.search(new RegExp("["+t.blacklisted_chars+"]+","g"))}return e.exports=function(r,a,n,i,o){return{ulpRequiredFunction:function(e,t){return!t||!!e.value},ulpPasswordPolicyFunction:function(e,t){if(r&&r.ulpFlags&&r.ulpFlags.disable_ulp_form_submission_fix)return!0;if(!e||"password"!==e.name)return!0;if(!a.querySelector(".c470e49c4.c0e06dd20"))return!0;if(!e.value)return!0;var n=e.classList&&e.classList.contains("c41a2457c");return!t&&!n||!n},ulpEmailValidationFunction:function(e,t){return!t||!e.value||!!u(e.value,void 0,n,i,o)},ulpPatternCheckFunction:function(e,t){return!t||!e.value||function(e){if("password"===e.name)return!0;var t=e.getAttribute("pattern");return!t||null!==e.value.match(t)}(e)}}},e.exports}()(window,document,f.arrayIncludes,f.stringStartsWith,f.stringEndsWith),v={exports:function(e,t){for(var i="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",s=new Uint8Array(256),o=0;o<i.length;o++)s[i.charCodeAt(o)]=o;function u(e){var t,n=new Uint8Array(e),r=n.length,a="";for(t=0;t<r;t+=3)a+=i[n[t]>>2],a+=i[(3&n[t])<<4|n[t+1]>>4],a+=i[(15&n[t+1])<<2|n[t+2]>>6],a+=i[63&n[t+2]];return r%3==2?a=a.substring(0,a.length-1):r%3==1&&(a=a.substring(0,a.length-2)),a}function n(){return navigator&&navigator.credentials&&"undefined"!=typeof PublicKeyCredential}return{base64URLEncode:u,base64URLDecode:function(e){var t,n,r,a,i,o=.75*e.length,u=e.length,c=0,l=new Uint8Array(o);for(t=0;t<u;t+=4)n=s[e.charCodeAt(t)],r=s[e.charCodeAt(t+1)],a=s[e.charCodeAt(t+2)],i=s[e.charCodeAt(t+3)],l[c++]=n<<2|r>>4,l[c++]=(15&r)<<4|a>>2,l[c++]=(3&a)<<6|63&i;return l.buffer},publicKeyCredentialToJSON:function e(t){if(t instanceof Array){var n=[];for(o=0;o<t.length;o+=1)n.push(e(t[o]));return n}if(t instanceof ArrayBuffer)return u(t);if(t instanceof Object){var r={};for(var a in t)r[a]=e(t[a]);return r}return t},str2ab:function(e){for(var t=new ArrayBuffer(e.length),n=new Uint8Array(t),r=0,a=e.length;r<a;r++)n[r]=e.charCodeAt(r);return t},isWebAuthnAvailable:n,isWebauthnPlatformAuthenticatorAvailableAsync:function(e){return n()?e(1e3,PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()):Promise.resolve(!1)}}}}.exports(window,document);({exports:function(e,r,a,t){var n=e(".cc258c793"),i=e("#alert-trigger"),o=e(".c10e6ec88"),u=e(".c8e6c0d0d"),c=!1;i&&u&&n&&t(n,function(e){var t=e.target===i,n=u.contains(e.target);return t&&!c?(r(o,"show"),void(c=!0)):t&&c||c&&!n?(a(o,"show"),void(c=!1)):void 0})}}).exports(f.querySelector,f.addClass,f.removeClass,f.addClickListener),(P="recaptcha_v2",N="recaptcha_enterprise",q="hcaptcha",R="friendly_captcha",D="arkose",I="auth0_v2",(t={}).exports=function(i,u,c,l,s,d,f,p,n,a){if(!n.enable_ulp_rtl_support){var v=500,h=3,m=0,b=c("div[data-captcha-sitekey]"),g=c(".ulp-captcha-client-error"),r=g?g.innerHTML:"",y=c("div[data-captcha-sitekey] input");if(b){var e=C(),t=E();e&&t&&function(){var e="captchaCallback_"+Math.floor(1000001*Math.random()),t=C(),n={async:!0,defer:!0},r=function(e,t,n,r){switch(C()){case P:return"https://www.recaptcha.net/recaptcha/api.js?render=explicit&hl="+e+"&onload="+t;case N:return"https://www.recaptcha.net/recaptcha/enterprise.js?render=explicit&hl="+e+"&onload="+t;case q:return"https://js.hcaptcha.com/1/api.js?render=explicit&hl="+e+"&onload="+t;case R:return"https://cdn.jsdelivr.net/npm/friendly-challenge@0.9.14/widget.min.js";case D:return"https://"+n+".arkoselabs.com/v2/"+r+"/api.js";case I:return"https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload="+t}}(x(),e,b?b.getAttribute("data-captcha-client-subdomain"):null,E());if(t===D||t===I){n["data-callback"]=e;var o=!(n.onerror=function(){if(m<h)return u(r),i(r,n),void m++;u(r),S("BYPASS_CAPTCHA")}),a=function(e){o=!0;try{if(!e||"function"!=typeof e.run||"function"!=typeof e.setConfig)return void L("INVALID_CREDENTIALS");r=e,a=A(),i=function(e){var t=y?y.value:"";t&&""!==t||(e.preventDefault(),e.stopPropagation(),setTimeout(function(){r.run()},v))},a&&(a.addEventListener("submit",i,!0),r.setConfig({onCompleted:function(e){if(!e||!e.token)return a&&a.removeEventListener("submit",i,!0),void L("INVALID_CREDENTIALS");S(e.token),a&&(a.removeEventListener("submit",i,!0),a.requestSubmit?a.requestSubmit():a.submit())},onError:function(n){return fetch("https://status.arkoselabs.com/api/v2/status.json").then(function(e){return e.json()}).then(function(e){var t=e.status.indicator;return"none"===t}).catch(function(e){return!1}).then(function(e){if(e&&m<h)return r.reset(),new Promise(function(e){setTimeout(function(){e(r.run())},v),m++});var t=n&&n.c14a0b6d2?n.c14a0b6d2:"RUNTIME_ERROR";g.innerHTML=g.innerHTML.replace("#{errorCode}",p(t)),l(b,"c14a0b6d2"),s(g,"hide"),S("BYPASS_CAPTCHA"),a.removeEventListener("submit",i,!0)})}}))}catch(e){L("INIT_ERROR")}var r,a,i};t===I&&(a=function(){F()}),window[e]=a,t===D&&(n.onload=function(){setTimeout(function(){o||L("INVALID_CREDENTIALS")},250)})}else window[e]=function(){delete window[e],F()},t===R&&(l(w(),"frc-captcha"),f(w(),"data-sitekey",E()),n.onload=window[e]);i(r,n)}()}}function _(){switch(C()){case P:return window.grecaptcha;case N:return window.grecaptcha.enterprise;case q:return window.hcaptcha;case R:return window.friendlyChallenge;case D:return window.arkose;case I:return window.turnstile}}function w(){return c(function(){switch(C()){case P:case N:return"#ulp-recaptcha";case q:return"#ulp-hcaptcha";case R:return"#ulp-friendly-captcha";case D:return"#ulp-arkose";case I:return"#ulp-auth0-v2-captcha"}}())}function x(){return b?b.getAttribute("data-captcha-lang"):null}function C(){return b?b.getAttribute("data-captcha-provider"):null}function E(){return b?b.getAttribute("data-captcha-sitekey"):null}function A(){return c('form[data-form-primary="true"]')}function S(e){return y.value=e}function o(){return c("#error-element-captcha-required")}function T(){var e=o();e&&l(e,"hide");var t=c("#captcha-required-status");t&&(t.textContent=""),a&&a("invalidCaptcha",!1)}function k(t){if(n.enable_ulp_wcag_compliance){var e=A();e&&y&&t&&e.addEventListener("submit",function(e){y.value?T():(e.preventDefault(),l(b,"c14a0b6d2"),function(){var e=o();e&&s(e,"hide");var t=c("#captcha-required-status");if(t){var n=t.getAttribute("data-captcha-required-error");if(n){var r=-1!==t.textContent.indexOf("​");t.textContent=n+(r?"":"​")}}a&&a("invalidCaptcha",!0)}(),t.focus())},!0)}}function L(e){if(g&&b){g.innerHTML=r.replace("#{errorCode}",p(e||"INIT_ERROR")),l(b,"c14a0b6d2"),s(g,"hide");var t=c("#error-element-captcha");t&&l(t,"hide")}}function F(){var e=_(),t=d("--ulp-captcha-widget-theme");t=t?t.trim():"light";var n=c("#captcha-status"),r=n?n.getAttribute("data-captcha-expired-error"):"";if(C()===R)"dark"===t&&l(c(".frc-captcha"),"dark"),(o=e.autoWidget).opts.language=x(),o.opts.doneCallback=function(e){S(e)};else{var a=w();f(a,"tabindex","-1");var i={sitekey:E(),theme:t,"expired-callback":function(){S(""),l(b,"c14a0b6d2"),e.reset(o),n&&(n.textContent=r),a.focus()},callback:function(e){S(e),s(b,"c14a0b6d2"),n&&(n.textContent=""),T()}};C()===I&&(i.language=x(),i.retry="never",i.size="flexible",i["response-field"]=!1,i["error-callback"]=function(e){return console.error("ERROR: Auth Challenge Error Code",e),S(""),m<h?(m++,_().reset(o)):(g.innerHTML=g.innerHTML.replace("#{errorCode}",p(e)),l(b,"c14a0b6d2"),s(g,"hide")),!0});var o=e.render(a,i);n&&(n.textContent=""),C()===P&&k(a)}}},t.exports)(f.loadScript,f.removeScript,f.querySelector,f.addClass,f.removeClass,f.getCSSVariable,f.setAttribute,f.htmlEncode,d,f.setGlobalFlag),(O="recaptcha_v2",j="recaptcha_enterprise",M="hcaptcha",U="friendly_captcha",H="arkose",B="auth0_v2",(n={}).exports=function(i,u,c,l,s,d,f,p,n,a){if(n.enable_ulp_rtl_support){var v=500,h=3,m=0,b=c("div[data-captcha-sitekey]"),g=c(".ulp-captcha-client-error"),r=g?g.innerHTML:"",y=c("div[data-captcha-sitekey] input");if(b){var e=C(),t=E();e&&t&&function(){var e="captchaCallback_"+Math.floor(1000001*Math.random()),t=C(),n={async:!0,defer:!0},r=function(e,t,n,r){switch(C()){case O:return"https://www.recaptcha.net/recaptcha/api.js?render=explicit&hl="+e+"&onload="+t;case j:return"https://www.recaptcha.net/recaptcha/enterprise.js?render=explicit&hl="+e+"&onload="+t;case M:return"https://js.hcaptcha.com/1/api.js?render=explicit&hl="+e+"&onload="+t;case U:return"https://cdn.jsdelivr.net/npm/friendly-challenge@0.9.14/widget.min.js";case H:return"https://"+n+".arkoselabs.com/v2/"+r+"/api.js";case B:return"https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload="+t}}(x(),e,b?b.getAttribute("data-captcha-client-subdomain"):null,E());if(t===H||t===B){n["data-callback"]=e;var o=!(n.onerror=function(){if(m<h)return u(r),i(r,n),void m++;u(r),S("BYPASS_CAPTCHA")}),a=function(e){o=!0;try{if(!e||"function"!=typeof e.run||"function"!=typeof e.setConfig)return void L("INVALID_CREDENTIALS");r=e,a=A(),i=function(e){var t=y?y.value:"";t&&""!==t||(e.preventDefault(),e.stopPropagation(),setTimeout(function(){r.run()},v))},a&&(a.addEventListener("submit",i,!0),r.setConfig({language:x(),onCompleted:function(e){if(!e||!e.token)return a&&a.removeEventListener("submit",i,!0),void L("INVALID_CREDENTIALS");S(e.token),a&&(a.removeEventListener("submit",i,!0),a.requestSubmit?a.requestSubmit():a.submit())},onError:function(n){return fetch("https://status.arkoselabs.com/api/v2/status.json").then(function(e){return e.json()}).then(function(e){var t=e.status.indicator;return"none"===t}).catch(function(e){return!1}).then(function(e){if(e&&m<h)return r.reset(),new Promise(function(e){setTimeout(function(){e(r.run())},v),m++});var t=n&&n.c14a0b6d2?n.c14a0b6d2:"RUNTIME_ERROR";g.innerHTML=g.innerHTML.replace("#{errorCode}",p(t)),l(b,"c14a0b6d2"),s(g,"hide"),S("BYPASS_CAPTCHA"),a.removeEventListener("submit",i,!0)})}}))}catch(e){L("INIT_ERROR")}var r,a,i};t===B&&(a=function(){F()}),window[e]=a,t===H&&(n.onload=function(){setTimeout(function(){o||L("INVALID_CREDENTIALS")},250)})}else window[e]=function(){delete window[e],F()},t===U&&(l(w(),"frc-captcha"),f(w(),"data-sitekey",E()),f(w(),"data-lang",x()),n.onload=window[e]);i(r,n)}()}}function _(){switch(C()){case O:return window.grecaptcha;case j:return window.grecaptcha.enterprise;case M:return window.hcaptcha;case U:return window.friendlyChallenge;case H:return window.arkose;case B:return window.turnstile}}function w(){return c(function(){switch(C()){case O:case j:return"#ulp-recaptcha";case M:return"#ulp-hcaptcha";case U:return"#ulp-friendly-captcha";case H:return"#ulp-arkose";case B:return"#ulp-auth0-v2-captcha"}}())}function x(){return b?b.getAttribute("data-captcha-lang"):null}function C(){return b?b.getAttribute("data-captcha-provider"):null}function E(){return b?b.getAttribute("data-captcha-sitekey"):null}function A(){return c('form[data-form-primary="true"]')}function S(e){return y.value=e}function o(){return c("#error-element-captcha-required")}function T(){var e=o();e&&l(e,"hide");var t=c("#captcha-required-status");t&&(t.textContent=""),a&&a("invalidCaptcha",!1)}function k(t){if(n.enable_ulp_wcag_compliance){var e=A();e&&y&&t&&e.addEventListener("submit",function(e){y.value?T():(e.preventDefault(),l(b,"c14a0b6d2"),function(){var e=o();e&&s(e,"hide");var t=c("#captcha-required-status");if(t){var n=t.getAttribute("data-captcha-required-error");if(n){var r=-1!==t.textContent.indexOf("​");t.textContent=n+(r?"":"​")}}a&&a("invalidCaptcha",!0)}(),t.focus())},!0)}}function L(e){if(g&&b){g.innerHTML=r.replace("#{errorCode}",p(e||"INIT_ERROR")),l(b,"c14a0b6d2"),s(g,"hide");var t=c("#error-element-captcha");t&&l(t,"hide")}}function F(){var e=_(),t=d("--ulp-captcha-widget-theme");t=t?t.trim():"light";var n=c("#captcha-status"),r=n?n.getAttribute("data-captcha-expired-error"):"";if(C()===U)"dark"===t&&l(c(".frc-captcha"),"dark"),(o=e.autoWidget).opts.language=x(),o.opts.doneCallback=function(e){S(e)};else{var a=w();f(a,"tabindex","-1");var i={sitekey:E(),theme:t,"expired-callback":function(){S(""),l(b,"c14a0b6d2"),e.reset(o),n&&(n.textContent=r),a.focus()},callback:function(e){S(e),s(b,"c14a0b6d2"),n&&(n.textContent=""),T()}};C()===B&&(i.language=x(),i.retry="never",i.size="flexible",i["response-field"]=!1,i["error-callback"]=function(e){return console.error("ERROR: Auth Challenge Error Code",e),S(""),m<h?(m++,_().reset(o)):(g.innerHTML=g.innerHTML.replace("#{errorCode}",p(e)),l(b,"c14a0b6d2"),s(g,"hide")),!0});var o=e.render(a,i);n&&(n.textContent=""),C()===O&&k(a)}}},n.exports)(f.loadScript,f.removeScript,f.querySelector,f.addClass,f.removeClass,f.getCSSVariable,f.setAttribute,f.htmlEncode,d,f.setGlobalFlag),((r={}).exports=function(r,e,a,i,o,u,c,l,n,s,t){if(!t.enable_ulp_wcag_compliance){if(r("body._simple-labels"))return e(".cab4e2a69.no-js").forEach(function(e){o(e,"no-js")}),void e(".cab4e2a69.js-required").forEach(function(e){i(e,"hide")});e(".c629135ce:not(.c05925730):not(disabled)").forEach(function(e){i(e,"cf48edfdc");var t,n=r(e,".input");n.value&&i(e,"ca5c1bb7b"),a(e,"change",d),a(n,"blur",d),a(n,"animationstart",f),t=n,c(function(){t.value&&l(t,"change",!0)},100)})}function d(e){var t=e.target,n=u(t);t.value||s(t,"data-autofilled")?i(n,"ca5c1bb7b"):o(n,"ca5c1bb7b")}function f(e){var t=e.target;"onAutoFillStart"===e.animationName&&(n(t,"data-autofilled",!0),l(e.target,"change",!0),a(t,"keyup",p,{once:!0}))}function p(e){var t=e.target;n(t,"data-autofilled","")}},r.exports)(f.querySelector,f.querySelectorAll,f.addEventListener,f.addClass,f.removeClass,f.getParent,f.setTimeout,f.dispatchEvent,f.setAttribute,f.getAttribute,d),{exports:function(e,t,r,a,i,o,u,c,n,l){function s(e){var t=r("submitted"),n=i("submittedForm");a("submitted",!0),o("submittedForm",e.currentTarget),t&&n&&n===e.currentTarget?u(e):"apple"===c(e.target,"data-provider")&&setTimeout(function(){a("submitted",!1)},2e3)}l=l||{};var d=e("form");d&&(d.forEach(function(e){t(e,"submit",s)}),t(n,"pageshow",function(){l.disable_back_button_block_submit_fix||a("submitted",!1)}))}}.exports(f.querySelectorAll,f.addEventListener,f.getGlobalFlag,f.setGlobalFlag,f.getSubmittedForm,f.setSubmittedForm,f.preventFormSubmit,f.getAttribute,f.globalWindow,d),{exports:function(t,e,n){var r=t("form._form-detect-browser-capabilities"),a=t("main.login-id"),i=t("main.signup-with-passkeys"),o=t("div#passkey-detect-browser-capabilities");if(r||a||i||o){var u=e.isWebAuthnAvailable();t("#webauthn-available").value=u?"true":"false",t("#js-available").value="true",navigator.brave?navigator.brave.isBrave().then(function(e){t("#is-brave").value=e,c()}):c()}function c(){u?e.isWebauthnPlatformAuthenticatorAvailableAsync(n).then(function(e){t("#webauthn-platform-available").value=e?"true":"false",r&&r.submit()}).catch(function(e){t("#webauthn-platform-available").value="false",r&&r.submit()}):(t("#webauthn-platform-available").value="false",r&&r.submit())}}}.exports(f.querySelector,v,f.timeoutPromise),function(){var e={};function s(e,a,n,t,r,i,o,u,c){var l="user-initiated-passkey-challenge",s=a("#allow-passkeys");if(s&&s.value){var d=r("#passkey-config-json");if(d){var f=a(".passkey-begin-button"),p=n.isWebauthnPlatformAuthenticatorAvailableAsync(t),v=a("#username"),h=(navigator.userAgent||"").toLowerCase(),m=!!window.safari||!!h.match(/safari/)&&!h.match(/chrome/)&&!h.match(/chromium/),b=-1!==(v&&v.getAttribute("autocomplete")||"").indexOf("webauthn"),g=d,y=new AbortController;g.publicKey.challenge=n.base64URLDecode(g.publicKey.challenge);var _=a('form[data-form-primary="true"]');f&&e(f,function(e){f.disabled=!0,y.abort(l),navigator.credentials.get(g).then(function(e){var r=E(e);p.then(function(e){if(r.isUserVerifyingPlatformAuthenticatorAvailable=e,C(JSON.stringify(r)),c.custom_prompts_passkeys){var t=_?o(_):[];if(t.length){var n=a("form._form-passkey-challenge");u(n,t)}}w()})}).catch(function(e){x(e)})}),(!m||b)&&window.PublicKeyCredential&&window.PublicKeyCredential.isConditionalMediationAvailable&&window.PublicKeyCredential.isConditionalMediationAvailable().then(function(e){if(e){var t=Object.assign({},g,{mediation:"conditional",signal:y.signal});navigator.credentials.get(t).then(function(e){v.blur();var r=E(e);p.then(function(e){if(r.isUserVerifyingPlatformAuthenticatorAvailable=e,C(JSON.stringify(r)),c.custom_prompts_passkeys){var t=_?o(_):[];if(t.length){var n=a("form._form-passkey-challenge");u(n,t)}}w()})}).catch(function(e){e!==l&&"AbortError"!==e.name&&i("autofill UI error",e)})}}).catch(function(){})}}function w(){a("form._form-passkey-challenge").submit()}function x(e){var t;a("#action").value="showError::"+(t=e,JSON.stringify({name:t.name,message:t.message,stack:t.stack})),a("form._form-passkey-challenge").submit()}function C(e){a("#passkey").value=e}function E(e){var t={id:e.id,rawId:n.base64URLEncode(e.rawId),type:e.type,response:{clientDataJSON:n.base64URLEncode(e.response.clientDataJSON),authenticatorData:n.base64URLEncode(e.response.authenticatorData),signature:n.base64URLEncode(e.response.signature),userHandle:e.response.userHandle?n.base64URLEncode(e.response.userHandle):null}};return e.authenticatorAttachment&&(t.authenticatorAttachment=e.authenticatorAttachment),t}}return e.exports=function(e,t,n,r,a,i,o,u,c,l){return e(window,"load",function(e){s(t,n,r,a,i,o,u,c,l)}),{configurePasskeys:s}},e.exports}()(f.addEventListener,f.addClickListener,f.querySelector,v,f.timeoutPromise,f.getConfigJson,f.consoleWarn,f.getUlpFields,f.appendUlpFieldsToForm,d),{exports:function(t,e,n){var r=e(".passkey-hidden-ui"),a=navigator.userAgent.toLowerCase(),i=!!window.safari||a.match(/safari/)&&!a.match(/chrome/)&&!a.match(/chromium/);!r||r.length<=0||(i?r.forEach(function(e){t(e,"passkey-hidden-ui")}):window.PublicKeyCredential&&window.PublicKeyCredential.isConditionalMediationAvailable&&window.PublicKeyCredential.isConditionalMediationAvailable().then(function(e){e?r.forEach(function(e){n(e)}):r.forEach(function(e){t(e,"passkey-hidden-ui")})}).catch(function(e){r.forEach(function(e){t(e,"passkey-hidden-ui")})}))}}.exports(f.removeClass,f.querySelectorAll,f.removeElement),{exports:function(n,e,r,a,i,o,u,c,l,t,s,d){if(d.enable_ulp_wcag_compliance){var f=e("[id^='ulp-container-']");if(f&&f.length){var p=t(w);if(p)for(var v=0;v<f.length;v++)p.observe(f[v],{childList:!0,subtree:!0})}w()}function h(e){var t=e.target,n=o(t);t.value||c(t,"data-autofilled")?a(n,"ca5c1bb7b"):i(n,"ca5c1bb7b")}function m(e){var t=e.target,n=o(t);a(n,"focus"),_(t,n)}function b(e){var t=e.target,n=o(t);i(n,"focus"),h(e),_(t,n)}function g(e){var t=e.target;l(t,"data-autofilled","")}function y(e){var t=e.target;"onAutoFillStart"===e.animationName&&(l(t,"data-autofilled",!0),dispatchEvent(e.target,"change",!0),r(t,"keyup",g,{once:!0}))}function _(e,t){e.value?a(t,"ca5c1bb7b"):i(t,"ca5c1bb7b")}function w(){e(".ulp-field").forEach(function(e){if(!u(e,"cf48edfdc")){var t=n(e,s);t&&(a(e,"cf48edfdc"),_(t,e),setTimeout(function(){_(t,e)},50),t===document.activeElement&&a(e,"focus"),r(t,"change",h),r(t,"focus",m),r(t,"blur",b),r(t,"animationstart",y))}})}}}.exports(f.querySelector,f.querySelectorAll,f.addEventListener,f.addClass,f.removeClass,f.getParent,f.hasClass,f.getAttribute,f.setAttribute,f.createMutationObserver,f.ELEMENT_TYPE_SELECTOR,d),{exports:function(n,e,r,a,i,o,u,t,c,l){if(!l.enable_ulp_wcag_compliance){var s=e("[id^='ulp-container-']");if(s&&s.length){var d=t(b);if(d)for(var f=0;f<s.length;f++)d.observe(s[f],{childList:!0,subtree:!0});b()}}function p(e){var t=e.target,n=o(t);t.value?a(n,"ca5c1bb7b"):i(n,"ca5c1bb7b")}function v(e){var t=e.target,n=o(t);a(n,"focus"),m(t,n)}function h(e){var t=e.target,n=o(t);i(n,"focus"),m(t,n)}function m(e,t){e.value?a(t,"ca5c1bb7b"):i(t,"ca5c1bb7b")}function b(){e("[id^='ulp-container-'] .ulp-field").forEach(function(e){if(!u(e,"cf48edfdc")){var t=n(e,c);t&&(a(e,"cf48edfdc"),m(t,e),setTimeout(function(){m(t,e)},50),t===document.activeElement&&a(e,"focus"),r(t,"change",p),r(t,"focus",v),r(t,"blur",h))}})}}}.exports(f.querySelector,f.querySelectorAll,f.addEventListener,f.addClass,f.removeClass,f.getParent,f.hasClass,f.createMutationObserver,f.ELEMENT_TYPE_SELECTOR,d),((a={}).exports=function(i,o,r,a,l,u,c,s,d,f,p,v,t,h,m,e,n,b,g,y,_,w){if(y.enable_ulp_wcag_compliance){var x=!1,C=e+',input[type="checkbox"]',E=50,A=2e3,S=[];return U(),[C,F,P,N,q,I,j,O,M,L,U]}function T(e){u(e,"disabled",!0),y.disable_back_button_block_submit_fix?y.ulp_field_validation_double_submit_fix&&setTimeout(function(){c(e,"disabled")},A):S.push(e)}function k(e){o(e,'button[data-action-button-primary="true"]').forEach(function(e){T(e)})}function L(){y.disable_back_button_block_submit_fix||r(v,"pageshow",function(){S.forEach(function(e){c(e,"disabled")}),S=[]})}function F(e){var t=l(e,"data-ulp-validation-function"),n=a(e);return{functionName:t,element:i(n,C),parent:n}}function P(e){var a=[],i=[];return o(e,"[data-ulp-validation-function]").forEach(function(e){var t=F(e),n=[];if(t.element){if("input"===t.element.tagName.toLowerCase()){var r=l(t.element,"type");"checkbox"!==r&&-1===m.indexOf(r)&&n.push("Unsupported input type: "+r)}}else n.push("Could not find element");v[t.functionName]||n.push("Could not find function with name: "+t.functionName),n.length?i=i.concat(n):a.push(e)}),i.length&&t(i.join("\r\n")),a}function N(e,t,n){var r=F(e),a=(0,v[r.functionName])(r.element,t,n);a?s(e,"ulp-validator-error")&&(f(e,"ulp-validator-error"),c(e,"data-is-error")):s(e,"ulp-validator-error")||(d(e,"ulp-validator-error"),u(e,"data-is-error",!0));var i=o(r.parent,".ulp-validator-error");return p(r.parent,"ulp-error",!!i.length),a}function q(t){var n=F(t),e=(l(t,"data-ulp-validation-event-listeners")||"").replace(/\s/g,"").split(",").filter(function(e){return!!e});e.length&&e.forEach(function(e){r(n.element,e,function(){N(t,x,e)})})}function R(e){e.forEach(function(e){var t=e.id,n=l(e,"data-ulp-validation-target"),r=i('[id="'+n+'"]');if(r){var a=l(r,"aria-describedby");a&&-1!==a.indexOf(t)||u(r,"aria-describedby",a?a+" "+t:t),u(r,"aria-invalid","true")}})}function D(e,t){var n=i("#ulp-error-announcer");if(n){n.textContent="";var r=[];if(e.forEach(function(e){var t=e.textContent;t&&t.trim()&&r.push(t.trim())}),t){var a=function(){var e=i(".c470e49c4.c0e06dd20");if(!e)return[];var a=[],t=i(e,".c836370aa");t&&t.textContent&&t.textContent.trim()&&a.push(t.textContent.trim());var n=o(e,"li.cbea4624a");return n&&n.length&&n.forEach(function(e){var t="";if(s(e,"c050440fc")){var n=i(e,".c98bb62c2");n&&(t=n.textContent)}else if(s(e,"c14a0b6d2")){var r=i(e,".c5c44cdf1");r&&(t=r.textContent)}t&&t.trim()&&a.push(t.trim())}),a}();a.length&&(r=r.concat(a))}r.length&&v.setTimeout(function(){n.textContent=r.map(function(e){return e.replace(/\.+$/,"")}).join(". ")},E)}}function I(e,t,n){var r=_&&_("submitted");if(!(y.ulp_field_validation_double_submit_fix&&t.defaultPrevented&&r)){x=!0;var a=n.filter(function(e){return!N(e,x,"submit")});if(y.disable_ulp_form_submission_fix){if(!a.length&&!t.defaultPrevented)return t.submitter&&"default"==l(t.submitter,"value")&&T(t.submitter),y.ulp_field_validation_double_submit_fix&&k(e),void e.submit();if(h(t),R(a),D(a,!1),y.ulp_field_validation_double_submit_fix&&w("submitted",!1),a.length){var i=F(a[0]);i.element.focus({preventScroll:!0}),i.parent.scrollIntoView({behavior:"smooth"})}}else{var o=_&&_("invalidPasswordPolicy"),u=_&&_("invalidCaptcha");if(!a.length&&!o&&!u)return t.submitter&&"default"==l(t.submitter,"value")&&T(t.submitter),y.ulp_field_validation_double_submit_fix&&k(e),void e.submit();if(h(t),R(a),D(a,!!o),y.ulp_field_validation_double_submit_fix&&w&&w("submitted",!1),a.length){var c=F(a[0]);c.element.focus({preventScroll:!0}),c.parent.scrollIntoView({behavior:"smooth"})}}}}function O(){var t=i('form[data-form-primary="true"]'),n=P(t);0!==n.length&&(n.forEach(function(e){q(e)}),r(t,"submit",function(e){I(t,e,n)}))}function j(){var n=i('form[data-form-primary="true"]'),e=o('form[data-form-secondary="true"]');n&&e.length&&e.forEach(function(t){r(t,"submit",function(){var e=b(n);e.length&&g(t,e)})})}function M(){if(n)for(var e in n)n.hasOwnProperty(e)&&(v[e]=n[e])}function U(){var e=i("form[data-disable-html-validations]");e&&(M(),u(e,"novalidate",""),O(),L(),y.custom_prompts_passkeys&&j())}},a.exports)(f.querySelector,f.querySelectorAll,f.addEventListener,f.getParent,f.getAttribute,f.setAttribute,f.removeAttribute,f.hasClass,f.addClass,f.removeClass,f.toggleClass,f.globalWindow,f.consoleWarn,f.preventFormSubmit,f.SUPPORTED_INPUT_TYPES,f.ELEMENT_TYPE_SELECTOR,p,f.getUlpFields,f.appendUlpFieldsToForm,d,f.getGlobalFlag,f.setGlobalFlag),{exports:function(r,o,a,i,u,c,l,t,s,d,e,n){if(!n.enable_ulp_wcag_compliance){var f=!1,p=e+',input[type="checkbox"]';return _(),[p,v,h,m,b,g,y,_]}function v(e){var t=u(e,"data-ulp-validation-function"),n=i(e);return{functionName:t,element:r(n,p),parent:n}}function h(e){var a=[],i=[];return o(e,"[data-ulp-validation-function]").forEach(function(e){var t=v(e),n=[];if(t.element){if("input"===t.element.tagName.toLowerCase()){var r=u(t.element,"type");"checkbox"!==r&&-1===d.indexOf(r)&&n.push("Unsupported input type: "+r)}}else n.push("Could not find element");l[t.functionName]||n.push("Could not find function with name: "+t.functionName),n.length?i=i.concat(n):a.push(e)}),i.length&&t(i.join("\r\n")),a}function m(e,t,n){var r=v(e),a=(0,l[r.functionName])(r.element,t,n);c(e,"ulp-validator-error",!a);var i=o(r.parent,".ulp-validator-error");return c(r.parent,"ulp-error",!!i.length),a}function b(t){var n=v(t),e=(u(t,"data-ulp-validation-event-listeners")||"").replace(/\s/g,"").split(",").filter(function(e){return!!e});e.length&&e.forEach(function(e){a(n.element,e,function(){m(t,f,e)})})}function g(e,t,n){f=!0;var r=n.filter(function(e){return!m(e,f,"submit")});if(r.length){s(t);var a=v(r[0]);a.element.focus({preventScroll:!0}),a.parent.scrollIntoView({behavior:"smooth"})}else e.submit()}function y(){var t=r('form[data-form-primary="true"]'),n=h(t);0!==n.length&&(n.forEach(function(e){b(e)}),a(t,"submit",function(e){g(t,e,n)}))}function _(){var e=o("[id^='ulp-container-']");e&&e.length&&y()}}}.exports(f.querySelector,f.querySelectorAll,f.addEventListener,f.getParent,f.getAttribute,f.toggleClass,f.globalWindow,f.consoleWarn,f.preventFormSubmit,f.SUPPORTED_INPUT_TYPES,f.ELEMENT_TYPE_SELECTOR,d),{exports:function(e,t,n){function r(n){t(n,"click",function(e){e.preventDefault();var t=document.createElement("input");t.name="action",t.type="hidden",t.value=n.value,n.form.appendChild(t),n.form.submit(),n.form.removeChild(t)})}function a(){e('form button[type="submit"][formnovalidate], form input[type="submit"][formnovalidate]').forEach(function(e){r(e)})}return n&&a(),[a,r]}}.exports(f.querySelectorAll,f.addEventListener,f.RUN_INIT),((i={}).exports=function(o,e,u,c,l,s,t,d,n){if(n.enable_ulp_wcag_compliance){var r=e('[class*="aria-error-check"]');if(r&&r.length){var a=t(function(e){e&&e.length&&e.map(function(e){if(e.target&&u(e.target,"aria-error-check")){var t=o('[id="'+c(e.target,"data-ulp-validation-target")+'"');if(t){var n=c(t,"aria-describedby");c(e.target,"data-is-error")?(r=t,a=n,i=e.target.id,a&&-1!==a.search(i)||l(r,"aria-describedby",a?a+" "+i:i),l(r,"aria-invalid",!0)):function(e,t,n){if(t){var r=d(t,n);r.length?l(e,"aria-describedby",r):(s(e,"aria-invalid"),s(e,"aria-describedby"))}else s(e,"aria-invalid"),s(e,"aria-describedby")}(t,n,e.target.id)}}var r,a,i})});a&&r.map(function(e){a.observe(e,{attributes:!0,attributeFilter:["class","data-is-error"]})})}}},i.exports)(f.querySelector,f.querySelectorAll,f.hasClass,f.getAttribute,f.setAttribute,f.removeAttribute,f.createMutationObserver,f.removeAndTrimString,d),(u="https://accounts.google.com/gsi/client",(o={}).exports=function(t,n,c,e){var r=e("#one-tap-config-json");if(r&&r.clientId){var a=0;!function e(){t(u,{async:!0,defer:!0,onload:function(){!function(){var e=window.google;if(e&&e.accounts&&e.accounts.id){var t={client_id:r.clientId,callback:i,auto_select:!!r.autoSelect,nonce:r.nonce,cancel_on_tap_outside:!!r.cancelOnTapOutside,itp_support:!!r.itpSupport};r.context&&(t.context=r.context),e.accounts.id.initialize(t),e.accounts.id.prompt()}}()},onerror:function(){n(u),a<2&&(a++,e())}})}()}function i(e){if(e&&e.credential){var t,n=document.createElement("form");n.method="POST",n.action=(t=c('form[data-form-primary="true"]'))&&t.getAttribute("action")?t.getAttribute("action"):window.location.pathname,n.style.display="none";var r=document.createElement("input");r.type="hidden",r.name="action",r.value="google-one-tap",n.appendChild(r);var a=document.createElement("input");a.type="hidden",a.name="one_tap_credential",a.value=e.credential,n.appendChild(a);var i=c('form[data-form-primary="true"]'),o=i?c(i,'input[name="state"]'):null;if(o){var u=document.createElement("input");u.type="hidden",u.name="state",u.value=o.value,n.appendChild(u),document.body.appendChild(n),n.submit()}}}},o.exports)(f.loadScript,f.removeScript,f.querySelector,f.getConfigJson),function(){var e={},p=['input[type="text"]','input[type="email"]','input[type="tel"]','input[type="number"]','input[type="url"]','input[type="password"]',"input:not([type])"].join(", "),v=['input:not([type="hidden"]):not([aria-hidden="true"]):not([disabled])','select:not([aria-hidden="true"]):not([disabled])','textarea:not([aria-hidden="true"]):not([disabled])','button:not([aria-hidden="true"]):not([disabled])'].join(", ");function h(e){var t=window.getComputedStyle(e);return"none"!==t.display&&"hidden"!==t.visibility}return e.exports=function(t,e,n,r){if(e.enable_ulp_wcag_compliance&&!t("#prompt-alert")){var a=r("(pointer: coarse), (pointer: fine), (pointer: none)"),i=r("(hover: hover), (hover: none)");if(a&&i&&(r("(pointer: coarse)")||!r("(hover: hover)")))return;var o=t(".c72b49ac4");if(o){for(var u=n(o.querySelectorAll(v)),c=null,l=0;l<u.length;l++)if(h(u[l])){c=u[l];break}if(c){for(var s=n(o.querySelectorAll(p)),d=null,f=0;f<s.length;f++)if(h(s[f])){d=s[f];break}setTimeout(function(){if(d&&d===c)d.focus();else{var e=t("#screen-header");e&&e.focus()}},250)}}}},e.exports}()(f.querySelector,d,f.arrayFrom,f.matchMedia),{exports:function(c,l,s,d,e,f,p,t){if(t.enable_ulp_separate_login_display||t.enable_ulp_separate_signup_identifiers){var v=c('[data-identifier-group="panels"]'),h=c('[data-identifier-group="selector"]');if(v){var n=h?l(h,".ulp-identifier-selector-item"):[],m=c(v,'input[name="identifier_type"]'),r=p(v,"data-active-type");r&&i(r);for(var a=0;a<n.length;a++)e(n[a],"click",function(e){var t=p(e.currentTarget,"data-identifier-type");t&&i(t)})}}function i(e){for(var t=l(v,".ulp-identifier-panel"),n=0;n<t.length;n++)d(t[n],"_active");var r=c(v,"._identifier-panel-"+e);if(r&&s(r,"_active"),f(v,"data-active-type",e),m&&(m.value=e),h){f(h,"data-active-type",e);for(var a=l(h,".ulp-identifier-selector-item"),i=0;i<a.length;i++){var o=a[i];p(o,"data-identifier-type")===e?(s(o,"_active"),f(o,"aria-current","true")):(d(o,"_active"),f(o,"aria-current","false"))}}if(r){var u=c(r,'input:not([type="hidden"])');u&&u.focus()}}}}.exports(f.querySelector,f.querySelectorAll,f.addClass,f.removeClass,f.addEventListener,f.setAttribute,f.getAttribute,d),((c={}).exports=function(e,t,n,r,a,i,o,u){if(u.enable_ulp_separate_login_display||u.enable_ulp_separate_signup_identifiers){var c=e("[data-composite-phone-input]");if(c){n(c,"js-enhanced");var l=e(c,"[data-composite-phone-trigger]"),s=e(c,"[data-composite-phone-dropdown]"),d=e(c,'select[name="identifier_phone_country_code"]'),f=e(c,'input[name="identifier_phone"]');if(l&&s&&d){var p,v=e(s,"[data-composite-phone-search]"),h=e(s,"[data-composite-phone-list]"),m=e(s,"[data-composite-phone-no-results]"),b=t(s,"[data-country-code]"),g=e(l,"[data-composite-phone-trigger-label]"),y=e(c,"[data-composite-phone-live-region]"),_=e(l,"[data-composite-phone-trigger-sr-label]");for(h&&!h.id&&i(h,"id","composite-phone-list"),p=0;p<b.length;p++){b[p].id||i(b[p],"id","composite-phone-option-"+b[p].getAttribute("data-country-code"));var w=b[p].getAttribute("data-country-name");if(w){var x=(b[p].textContent||"").replace(/\s+/g," ").trim();i(b[p],"aria-label",x?w+" "+x:w)}}if(v&&(i(v,"role","combobox"),i(v,"aria-autocomplete","list"),i(v,"aria-expanded","false"),h&&h.id&&i(v,"aria-controls",h.id)),y&&f){y.id||i(y,"id","composite-phone-country-status");var C=(f.getAttribute("aria-describedby")||"").split(/\s+/),E=[];for(p=0;p<C.length;p++)C[p]&&E.push(C[p]);-1===E.indexOf(y.id)&&(E.push(y.id),i(f,"aria-describedby",E.join(" ")))}var A=null;a(l,"click",function(){!1===s.hidden?k(!1):(s.hidden=!1,n(c,"_composite-phone-open"),i(l,"aria-expanded","true"),v&&i(v,"aria-expanded","true"),S(null),v&&(v.value=""),F(""),v&&v.focus())}),v&&(a(v,"input",function(e){F(e.target.value),S(null)}),a(v,"keydown",function(e){"ArrowDown"===e.c7b97448a||40===e.keyCode?(e.preventDefault(),T(1)):"ArrowUp"===e.c7b97448a||38===e.keyCode?(e.preventDefault(),T(-1)):"Enter"!==e.c7b97448a&&13!==e.keyCode||A&&(e.preventDefault(),L(A.getAttribute("data-country-code")))})),a(h,"click",function(e){for(var t=e.target;t&&t!==h&&(!t.getAttribute||!t.getAttribute("data-country-code"));)t=t.parentNode;t&&t!==h&&t.getAttribute&&L(t.getAttribute("data-country-code"))}),a(h,"keydown",function(e){var t=e.target;t&&t.getAttribute&&t.getAttribute("data-country-code")&&("Enter"!==e.c7b97448a&&13!==e.keyCode&&" "!==e.c7b97448a&&32!==e.keyCode||(e.preventDefault(),L(t.getAttribute("data-country-code"))))}),a(s,"keydown",function(e){if("Escape"===e.c7b97448a||27===e.keyCode)return e.preventDefault(),void k(!0);"Tab"!==e.c7b97448a&&9!==e.keyCode||(e.preventDefault(),e.shiftKey?k(!0):(k(!1),f&&f.focus()))})}}}function S(e){A&&r(A,"_composite-phone-option--active"),(A=e||null)?(n(A,"_composite-phone-option--active"),v&&i(v,"aria-activedescendant",A.id),"function"==typeof A.scrollIntoView&&A.scrollIntoView({block:"nearest"})):v&&i(v,"aria-activedescendant","")}function T(e){var t=function(){for(var e=[],t=0;t<b.length;t++)b[t].hidden||e.push(b[t]);return e}();if(0!==t.length){for(var n=-1,r=0;r<t.length;r++)if(t[r]===A){n=r;break}(n+=e)<0?n=t.length-1:n>=t.length&&(n=0),S(t[n])}else S(null)}function k(e){s.hidden=!0,r(c,"_composite-phone-open"),i(l,"aria-expanded","false"),v&&i(v,"aria-expanded","false"),S(null),e&&l.focus()}function L(e){d.value=e,o(d,"change",!0);var t=function(e){for(var t=0;t<b.length;t++)if(b[t].getAttribute("data-country-code")===e)return b[t];return null}(e);if(g&&t&&(g.innerHTML=t.innerHTML),t){var n=t.getAttribute("data-country-name")||e;if(y&&(y.textContent=n),_){var r=_.getAttribute("data-sr-label-template")||"Selected country: #{country}, change country";_.textContent=r.replace(/#\{country\}/g,n)}}k(!0),f&&f.focus()}function F(e){for(var t=e.trim().toLowerCase(),n=0,r=0;r<b.length;r++){var a=b[r],i=(a.getAttribute("data-country-search")||"")+" "+(a.textContent||"").toLowerCase(),o=""===t||-1<i.indexOf(t);a.hidden=!o,o&&n++}m&&(m.hidden=0<n)}},c.exports)(f.querySelector,f.querySelectorAll,f.addClass,f.removeClass,f.addEventListener,f.setAttribute,f.dispatchEvent,d),((l={}).exports=function(L,F,P,N,q,R,e,D,I){function t(){var i=L("[data-composite-phone-input]");if(i){var e=L(i,'select[name="identifier_phone_country_code"]')||L(i,'input[name="identifier_phone_country_code"]'),u=L(i,'input[name="identifier_phone"]');if(e&&u){var a=u.form,o=L(i,"._composite-phone-field"),c="error-element-identifier_phone",l=window.libphonenumberJsBundle;if(l){var s="error-cs-identifier_phone-invalid-format",d="error-cs-identifier_phone-required",f=i.ownerDocument.getElementById(s),n=f?f.textContent:"",p=!n,v=i.ownerDocument.getElementById(d),h=!(v&&v.textContent),t=u.getAttribute("placeholder")||"",m=0,b=0;r(),u.value&&x(!1,!1),N(u,"input",function(e){E(),A(),T(),x(!(!e||!e.inputType||"deleteContentBackward"!==e.inputType&&"deleteContentForward"!==e.inputType&&"deleteByCut"!==e.inputType&&"deleteByDrag"!==e.inputType),!(!e||!e.inputType))}),N(e,"change",function(){E(),A(),T(),r(),x(!1,!1)}),a&&(N(a,"submit",function(e){var t=L(a,'input[name="identifier_type"]');if(!(t&&"phone"!==t.value||e.defaultPrevented)){var n=g(),r=w(u.value);if(r)return p||function(e,t){if(!t||!e)return!1;try{return l.isValidPhoneNumber(e,t)}catch(e){return!0}}(r,n)?void(u.value=r):(e.preventDefault(),e.stopPropagation(),void function(e){var t=C();if(t){t.textContent=e,F(t,"ulp-validator-error"),q(t,"data-is-error","true"),q(u,"aria-invalid","true");var n=(u.getAttribute("aria-describedby")||"").split(/\s+/).filter(Boolean);-1===n.indexOf(s)&&n.push(s),q(u,"aria-describedby",n.join(" ")),F(u,"_input-error--client"),o&&F(o,"error--client")}}(k(n)));h||(e.preventDefault(),e.stopPropagation(),function(){if(v){F(v,"ulp-validator-error"),q(v,"data-is-error","true"),q(u,"aria-invalid","true");var e=(u.getAttribute("aria-describedby")||"").split(/\s+/).filter(Boolean);-1===e.indexOf(d)&&e.push(d),q(u,"aria-describedby",e.join(" ")),F(u,"_input-error--client"),o&&F(o,"error--client")}}())}},!0),I&&D&&N(I,"pageshow",function(){D("submitted",!1)}))}}}function g(){return(e.value||"").trim().toUpperCase()}function y(e){if(!e)return"";try{var t=l.getCountryCallingCode(e);return t?"+"+t:""}catch(e){return""}}function _(t,n){if(!t)return"";if(!n)return t;try{var e=new l.AsYouType(n).input(t);if(e)return e;var r=y(n);return r?r+" "+t:t}catch(e){var a=y(n);return a?a+" "+t:t}}function r(){var e=function(e){if(!e||!l.examples)return"";try{var t=l.getExampleNumber(e,l.examples);return t?t.formatNational():""}catch(e){return""}}(g());e?q(u,"placeholder",e):t?q(u,"placeholder",t):R(u,"placeholder")}function w(e){return(e||"").replace(/[^0-9]/g,"")}function x(e,t){var n=g(),r=u.value,a=w(r);!e&&!t&&r.length<b&&(e=!0);var i=u.selectionStart===r.length,o=_(a,n);if(e&&(a.length===m&&r.length<o.length&&(o=_(a=a.slice(0,-1),n)),o=o.replace(/[^0-9]+$/,"")),m=a.length,b=o.length,o!==r&&(u.value=o,i&&u.setSelectionRange))try{u.setSelectionRange(o.length,o.length)}catch(e){}}function C(){return i.ownerDocument.getElementById(s)}function E(){var e=C();e&&(P(e,"ulp-validator-error"),R(e,"data-is-error"),S(s))}function A(){v&&(P(v,"ulp-validator-error"),R(v,"data-is-error"),S(d))}function S(t){var e=(u.getAttribute("aria-describedby")||"").split(/\s+/).filter(function(e){return e&&e!==t});e.length?q(u,"aria-describedby",e.join(" ")):R(u,"aria-describedby");var n=f&&f.classList.contains("ulp-validator-error"),r=v&&v.classList.contains("ulp-validator-error");n||r||(P(u,"_input-error--client"),o&&P(o,"error--client"));var a=!!i.ownerDocument.getElementById(c);n||r||a||R(u,"aria-invalid")}function T(){var e=i.ownerDocument.getElementById(c);if(e){F(e,"hide"),o&&(P(o,"c14a0b6d2"),P(o,"c0650208a"));var t=(u.getAttribute("aria-describedby")||"").split(/\s+/).filter(function(e){return e&&e!==c});t.length?q(u,"aria-describedby",t.join(" ")):R(u,"aria-describedby"),o&&o.classList.contains("error--client")||R(u,"aria-invalid")}}function k(e){var t=function(e){if(!e)return"";var t=L(i,'[data-country-code="'+e+'"]');return t?t.getAttribute("data-country-name"):e}(e);return n.replace(/#\{country\}/g,t)}}(e.enable_ulp_separate_login_display||e.enable_ulp_separate_signup_identifiers)&&("loading"===document.readyState?document.addEventListener("DOMContentLoaded",t):t())},l.exports)(f.querySelector,f.addClass,f.removeClass,f.addEventListener,f.setAttribute,f.removeAttribute,d,f.setGlobalFlag,f.globalWindow),((s={}).exports=function(v,h,e,m,t){function n(){var u=v("[data-composite-phone-input]");if(u){var t=v(u,'input[name="identifier_phone"]'),c=v(u,'select[name="identifier_phone_country_code"]')||v(u,'input[name="identifier_phone_country_code"]');if(t&&c){var r=window.libphonenumberJsBundle;r&&"function"==typeof r.AsYouType&&e(t,"paste",function(e){var t=e.clipboardData;if(t&&"function"==typeof t.getData){var n=t.getData("text");if("string"==typeof n&&n){var r=n.replace(/^\s+|\s+$/g,"");if(r){var a=function(){for(var e=h(c,"option"),t=[],n=0;n<e.length;n++){var r=(e[n].value||"").trim().toUpperCase();r&&t.push(r)}if(!t.length){var a=s();a&&t.push(a)}return t}();if("+"===r.charAt(0)){var i=function(e,t){var n=l(e,null);if(!n)return null;var r=n.nationalNumber||"",a=n.country||"";if(!a&&"function"==typeof n.getPossibleCountries){var i=n.getPossibleCountries()||[];1<i.length&&(a=f(i,t))}return a&&d(a,t)&&r?{country:a,national:r}:null}(r,a);if(!i)return;return e.preventDefault(),function(e){if("SELECT"===c.tagName&&c.value!==e){c.value=e,m(c,"change",!0);var t=v(u,"[data-composite-phone-trigger-label]"),n=v(u,'[data-country-code="'+e+'"]');t&&n&&(t.innerHTML=n.innerHTML);var r=n&&n.getAttribute("data-country-name")||e,a=v(u,"[data-composite-phone-live-region]");a&&(a.textContent="",setTimeout(function(){a.textContent=r},0));var i=v(u,"[data-composite-phone-trigger-sr-label]");if(i){var o=i.getAttribute("data-sr-label-template")||"Selected country: #{country}, change country";i.textContent=o.replace(/#\{country\}/g,r)}}}(i.country),void p(i.national)}var o=function(e){var t=s();if(!t)return null;var n=l(e,t);if(!n)return null;var r=n.nationalNumber||"";return r?{national:r}:null}(r);o&&(e.preventDefault(),p(o.national))}}}})}}function l(e,t){try{var n=t?new r.AsYouType(t):new r.AsYouType;return n.input(e),n.getNumber()||null}catch(e){return null}}function s(){return(c.value||"").trim().toUpperCase()}function d(e,t){if(!e)return!1;for(var n=e.toUpperCase(),r=0;r<t.length;r++)if(t[r]===n)return!0;return!1}function f(e,t){for(var n=s(),r={},a=0;a<e.length;a++)r[e[a]]=!0;if(n&&r[n]&&d(n,t))return n;var i,o=(i=v(c,"option[selected]"))?(i.value||"").trim().toUpperCase():"";if(o&&r[o]&&d(o,t))return o;for(var u=0;u<t.length;u++)if(r[t[u]])return t[u];return t.length?t[0]:""}function p(e){t.value=e||"",m(t,"input",!0)}}(t.enable_ulp_separate_login_display||t.enable_ulp_separate_signup_identifiers)&&("loading"===document.readyState?document.addEventListener("DOMContentLoaded",n):n())},s.exports)(f.querySelector,f.querySelectorAll,f.addEventListener,f.dispatchEvent,d)}();
+</script>
+<header class="knz-header">
+  <a href="https://www.kleinanzeigen.de" class="knz-header__back" aria-label="Zurück">
+    <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path stroke="currentColor" stroke-linecap="round" stroke-width="1.5" d="M7.5 2 4 6l3.5 4"></path>
+    </svg>
+  </a>
+  <a href="https://www.kleinanzeigen.de" class="knz-header__logo-link">
+    <img class="knz-header__logo-img" src="https://static.kleinanzeigen.de/static/img/common/logo/logo-kleinanzeigen-horizontal.svg" alt="Kleinanzeigen">
+  </a>
+  <a href="https://hilfe.kleinanzeigen.de/hc/de" target="_blank" class="knz-header__help-link">
+    Hilfe
+  </a>
+</header>
+<script type="text/javascript" nonce="X" src="/WraVOa6p_X1H7/YhSfDlIKscnX/OI/YmkiQ48JpSJk4V/JnAvJhNA/BnI/NNBkKPk0"></script>
+<script type="text/javascript" id="" charset="">document.addEventListener("visibilitychange",function(){document.visibilityState==="hidden"&&window.dataLayer.push({event:"web_vitals_summary"})},{capture:!0});</script><script type="text/javascript" id="" charset="">function getSlots(c){window.googletag.pubads().getSlots().forEach(function(b){c.slots[b.getSlotElementId()]=getSlotData(b)})}
+function getSlotData(c){var b={sizes:[],outOfPage:c.getOutOfPage(),targeting:c.getTargetingMap(),elementId:c.getSlotElementId(),container:document.getElementById(c.getSlotElementId())},a=c.getResponseInformation();b.advertiserId=a&&a.advertiserId||"";b.campaignId=a&&a.campaignId||"";b.creativeId=a&&a.creativeId||"";b.isBackfill=a&&!!a.isBackfill;b.labelIds=a&&a.labelIds||"";b.lineItemId=a&&a.lineItemId||"";b.outOfPage=a&&!!a.outOfPag;b.sourceAgnosticCreativeId=a&&a.sourceAgnosticCreativeId||"";b.sourceAgnosticLineItemId=
+a&&a.sourceAgnosticLineItemId||"";b.DFP=a&&a.creativeId&&"https://www.google.com/dfp/7233#delivery/CreativeDetail/creativeId\x3d"+a.creativeId||"";c.getSizes().forEach(function(d){b.sizes.push("object"===typeof d?d.getWidth()+"x"+d.getHeight():d)});return b}function getPageTargeting(c){window.googletag.pubads().getTargetingKeys().forEach(function(b){c.pageTargeting[b]=window.googletag.pubads().getTargeting(b)})}
+function getAdsData(){var c={pageTargeting:{},slots:{}};getPageTargeting(c);getSlots(c);return c}(function waitForGPT(){window.googletag&&window.googletag.pubadsReady?dataLayer.push(getAdsData(),{event:"dataLayerUpdated"}):setTimeout(waitForGPT,250)})();</script><script type="text/javascript" id="" charset="">(function(){typeof __tcfapi==="function"&&__tcfapi("getTCData",2,function(a,b){b&&a&&a.lastUpdated&&localStorage.setItem("tcfLastUpdated",a.lastUpdated)})})();</script></body></html>
