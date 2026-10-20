@@ -66,7 +66,7 @@ def test_review_card_in_russian_short():
                ad_title="Rückbank Peugeot", ad_price="450 €", ru_client="Скамья ещё есть? Последняя цена 300?",
                de_client="Ist die Bank noch da? Letzter Preis 300?", ru_translation="Да, есть.", ru_answer="")
     with patch.object(tb, "db") as mdb:
-        mdb.thread_history.return_value = [1]
+        mdb.thread_history.return_value = [_row(direction="in", de_client="a"), _row(direction="in", de_client="b")]
         text = tb._build_review_text(msg)
     lines = text.split("\n")
     assert len(lines) <= 6 and "Скамья ещё есть" in text and "Ist die Bank" not in text
@@ -118,3 +118,25 @@ def test_notify_admin_without_chat_is_not_sent(cfg):
     with patch.object(tb, "_http_post_single") as p:
         assert tb.notify_admin("ошибка") is False
     p.assert_not_called()
+
+
+def test_first_letter_with_auto_ack_is_new():
+    msg = _row(id=7, gmail_thread_id="t1", buyer_display_name="Anna", buyer_name="a@x", ad_title="X",
+               ad_price=None, ru_client="Привет", de_client="Hallo", ru_translation="", ru_answer="")
+    with patch.object(tb, "db") as mdb:
+        mdb.thread_history.return_value = [_row(direction="in", de_client="Hallo"),
+                                           _row(direction="out", de_client=None)]  # auto-ack
+        assert tb._build_review_text(msg).startswith("🆕")
+
+
+def test_release_other_card_keeps_thread_busy():
+    """Уход с экрана старого письма треда не снимает «занят» по живому локу другого оператора."""
+    from modules import operator_lock
+    with patch.object(tb, "_msg_thread_id", return_value="T"), patch.object(tb, "run_in_background"):
+        operator_lock.forget(11); operator_lock.forget(10)
+        assert tb._claim_lock(11, "@a") is None
+        assert tb.thread_is_busy("T")
+        assert tb._release_lock(10, "@b") is True
+        assert tb.thread_is_busy("T")  # A ещё работает
+        assert tb._release_lock(11, "@a") is True
+        assert not tb.thread_is_busy("T")

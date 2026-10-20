@@ -235,7 +235,7 @@ def _review_kb(msg: Any) -> dict:
     thread_id = _safe(msg, "gmail_thread_id") or ""
     return {"inline_keyboard": [[
         {"text": "✅ Ответить", "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
-        {"text": "💬 Переписка", "web_app": {"url": _ma_deep_link(f"thread_{thread_id}")}},
+        {"text": "💬 Переписка", "web_app": {"url": _ma_deep_link(f"thread_{thread_id}" if thread_id else "pipeline")}},
     ]]}
 
 
@@ -250,7 +250,9 @@ def _build_review_text(msg: Any) -> str:
     thread_id = _safe(msg, "gmail_thread_id") or ""
     is_followup = False
     try:
-        is_followup = len(db.thread_history(thread_id)) > 1 if thread_id else False
+        # «ответил» — если до этого письма в треде уже были письма покупателя (auto-ack не в счёт)
+        is_followup = sum(1 for r in db.thread_history(thread_id)
+                          if _safe(r, "direction") == "in" and _safe(r, "de_client")) > 1 if thread_id else False
     except Exception:
         logger.exception("карточка письма: история треда %s не прочитана", thread_id)
     buyer = _html(_oneline(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент", 24))
@@ -379,7 +381,12 @@ def send_for_review(message_id: int) -> Optional[int]:
         except Exception:
             logger.exception("send_for_review fanout to %s failed", dm_id)
     if first_mid:
-        db.update_message(message_id, telegram_message_id=first_mid)
+        try:
+            db.update_message(message_id, telegram_message_id=first_mid)
+        except Exception:
+            # Карточки уже у операторов: падение здесь заставило бы очередь повторить письмо
+            # и разослать дубль — только лог
+            logger.exception("send_for_review: telegram_message_id не записан msg=%s", message_id)
     return first_mid
 
 
@@ -539,10 +546,15 @@ def _release_lock(msg_id: int, actor: Optional[str] = None) -> bool:
     else:
         operator_lock.forget(msg_id)
     thread_id = _msg_thread_id(msg_id)
-    clear_thread_busy(thread_id, "operator")
     if thread_id:
         with _BUSY_LOCK:
+            # Тред «занят оператором» по ДРУГОЙ карточке (её лок жив) — не снимаем: иначе уход
+            # одного оператора со старого письма открывал тред, пока второй ещё печатает
+            other = _THREAD_OP_MSG.get(thread_id)
+            if other is not None and other != msg_id and operator_lock.state(other) is not None:
+                return True
             _THREAD_OP_MSG.pop(thread_id, None)
+            clear_thread_busy(thread_id, "operator")
         # drain поднимает отложенные карточки и шлёт send_for_review (Telegram, до 30 с
         # на каждый DM) — в фоне, чтобы не держать ответ MA
         run_in_background(_drain_deferred, thread_id)
@@ -647,7 +659,7 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int
                 "chat_id": chat_id, "message_id": edit_msg_id,
                 "text": text, "parse_mode": "HTML", "reply_markup": markup, "_kind": "inbox",
             })
-        except RuntimeError as exc:
+        except Exception as exc:  # сеть тоже: иначе «🔄 Обновить» крутится без answerCallbackQuery
             if "message is not modified" not in str(exc):
                 logger.error("send_pending_summary edit fail: %s", exc)
     else:
