@@ -35,6 +35,25 @@ router = APIRouter(prefix="/api/ma", tags=["Mini App"])
 logger = logging.getLogger(__name__)
 
 _CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
+# Строка уже отвечена/закрыта: перезапись черновика затёрла бы отправленный клиенту текст
+# (инцидент аудита №45: «Предложить» переводил sent → edited и затирал de_answer).
+_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "skipped", "skipped_sold", "archived"}
+
+
+def _is_answered(row) -> bool:
+    keys = row.keys()
+    if row["status"] in _ANSWERED_STATUSES:
+        return True
+    # edited/approved после отправки (уже испорченные строки) — по факту отправки
+    return bool(("sent_at" in keys and row["sent_at"])
+                or ("sent_message_id" in keys and row["sent_message_id"]))
+
+
+def _ensure_draft_editable(row) -> None:
+    if _is_answered(row):
+        raise HTTPException(
+            409, f"Сообщение уже отправлено или закрыто ({row['status']}) — черновик не меняем. "
+                 "Для нового ответа используйте «Написать».")
 _ALLOWED_TAGS = {"Серьёзный", "Торгуется", "Тянет время", "Мошенник"}
 
 
@@ -682,6 +701,7 @@ def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
     actor = actor_from_user(user)
     _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
@@ -818,6 +838,7 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
     actor = actor_from_user(user)
     _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
@@ -838,6 +859,7 @@ def ma_edit_ru(msg_id: int, body: EditTextBody,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
     actor = actor_from_user(user)
     _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
@@ -859,6 +881,7 @@ def ma_edit_de(msg_id: int, body: EditTextBody,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
     actor = actor_from_user(user)
     _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
@@ -886,6 +909,7 @@ def ma_price(msg_id: int, body: PriceBody,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
     actor = actor_from_user(user)
     _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
@@ -901,6 +925,7 @@ def ma_instruction(msg_id: int, body: InstructionBody,
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
     actor = actor_from_user(user)
     _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
@@ -1129,6 +1154,12 @@ def ma_suggest_reply(thread_id: str,
             break
     if latest_in is None:
         raise HTTPException(404, "no incoming message in thread")
+    # Последнее письмо клиента уже отвечено — черновик писать некуда: перегенерация этой
+    # строки затёрла бы отправленный ответ. Новое сообщение — через «Написать» (compose).
+    if _is_answered(latest_in):
+        raise HTTPException(
+            409, "Последнее письмо клиента уже отвечено — нового черновика нет. "
+                 "Для нового сообщения используйте «Написать».")
 
     msg_id = latest_in["id"]
     result = scheduler.regenerate_draft(msg_id, "regen")
