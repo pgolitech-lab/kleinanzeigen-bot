@@ -222,8 +222,9 @@ def format_history(
         if h.get("direction") == "in" and h.get("de_client"):
             turns.append((h.get("created_at") or "", hid, 0,
                           f"[Клиент]: {_clip(h['de_client'], HISTORY_MSG_MAX_CHARS)}"))
-        # Для старых вызывающих без status (формат до 2026-10) — считаем отправленным
-        sent = status in SENT_STATUSES if status is not None else True
+        # sent_at — тоже признак отправки: после «Продано» статус строки меняется на
+        # skipped_sold, а ответ уже ушёл. Без status (старые вызывающие) — отправленным.
+        sent = (status in SENT_STATUSES or bool(h.get("sent_at"))) if status is not None else True
         if h.get("de_answer") and sent:
             who = "[Продавец, авто-приветствие]" if h.get("is_auto_ack") else "[Продавец]"
             turns.append((h.get("sent_at") or h.get("created_at") or "", hid, 1,
