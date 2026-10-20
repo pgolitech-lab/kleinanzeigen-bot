@@ -211,3 +211,49 @@ def test_sale_recorded_in_stock_once(tmp_db):
     tmp_db.mark_thread_sold(mid, sold_price_eur=10.0)  # повтор — не списывает второй раз
     assert inv.stock_qty(pid) == 2
     assert inv.sale_for_thread("thread-A")["source"] == "thread"
+
+
+def test_sale_on_answered_thread_keeps_sent_status(tmp_db):
+    """Тред уже отвечен: наш ответ остаётся sent, продажа — отдельной строкой того же треда."""
+    _ensure_account(tmp_db)
+    from modules import db_inventory as inv, inventory
+    pid = _stock("ad-1", 3)
+    mid = _insert_msg(tmp_db, direction="in", status="sent",
+                      gmail_thread_id="thread-A", ad_id="ad-1")
+    with tmp_db.get_conn() as conn:
+        conn.execute("UPDATE messages SET de_client='Hallo', de_answer='Ja', sent_at=? WHERE id=?",
+                     (datetime.utcnow().isoformat(), mid))
+    res = tmp_db.add_thread_sale("thread-A", 50.0, note="забрал сам")
+    assert tmp_db.get_message(mid)["status"] == "sent"
+    sale = tmp_db.get_message(res["sale_msg_id"])
+    assert sale["id"] != mid and sale["status"] == "skipped_sold" and sale["sold_price_eur"] == 50.0
+    assert sale["gmail_thread_id"] == "thread-A" and sale["ad_id"] == "ad-1"
+    assert sale["direction"] == "out" and not sale["de_answer"]
+    # «Последнее письмо клиента» по-прежнему настоящее входящее
+    assert tmp_db.add_thread_sale("thread-A", 50.0)["sale_msg_id"] == res["sale_msg_id"]
+    assert "забрал сам" in sale["extra_notes"]
+    # Повтор (поправили цену) — та же строка, склад не списывает второй раз
+    res2 = tmp_db.add_thread_sale("thread-A", 55.0)
+    assert res2["sale_msg_id"] == res["sale_msg_id"]
+    assert inv.stock_qty(pid) == 2
+    sales = tmp_db.list_sales()
+    assert len(sales) == 1 and sales[0]["sold_price_eur"] == 55.0 and sales[0]["source"] == "thread"
+    # sync склада видит ту же продажу — без второго списания и без void
+    inventory.sync_sales()
+    assert inv.stock_qty(pid) == 2
+    # В ленте треда строки продажи нет, наш ответ остаётся
+    kinds = [e["kind"] for e in tmp_db.thread_events("thread-A")]
+    assert kinds == ["in", "out"]
+
+
+def test_add_thread_sale_on_draft_marks_row(tmp_db):
+    _ensure_account(tmp_db)
+    mid = _insert_msg(tmp_db, direction="in", status="pending",
+                      gmail_thread_id="thread-A", ad_id="ad-1")
+    res = tmp_db.add_thread_sale("thread-A", 20.0)
+    assert res["sale_msg_id"] == mid and tmp_db.get_message(mid)["status"] == "skipped_sold"
+
+
+def test_add_thread_sale_unknown_thread(tmp_db):
+    with pytest.raises(ValueError):
+        tmp_db.add_thread_sale("nope", 10.0)

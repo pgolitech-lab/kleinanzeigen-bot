@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn, get_thread_autopilot, stop_thread_autopilot, transaction
+from database import DB_PATH, SENT_STATUSES, get_conn, get_thread_autopilot, stop_thread_autopilot, transaction
 from modules.db_threads import close_thread
 
 logger = logging.getLogger(__name__)
@@ -396,11 +396,16 @@ def mark_thread_sold(
     msg_id: int,
     sold_price_eur: float,
     close_other_threads_for_ad: bool = False,
+    note: Optional[str] = None,
 ) -> dict[str, Any]:
     """Зафиксировать продажу и свернуть тред.
 
     Поведение:
-      - msg_id → status='skipped_sold', sold_price_eur=<price>, sold_at=now.
+      - msg_id — черновик/новое → status='skipped_sold', sold_price_eur=<price>, sold_at=now.
+      - msg_id уже отправлен (sent/sent_debug/sent_external/sending/send_queued) — его статус
+        НЕ меняется: продажа пишется отдельной строкой-продажей в том же треде (source='sale',
+        direction='out', без текста — не «письмо клиента», в ленте и событиях не видна).
+        Повтор обновляет ту же строку.
       - Все pending in-rows этого же gmail_thread_id → status='skipped_sold' (без цены).
       - Если автопилот треда активен → stop_thread_autopilot(reason='sold'); тред закрыт.
       - Найденная продажа по треду, ждущая ревью, снимается.
@@ -417,7 +422,7 @@ def mark_thread_sold(
     """
     with transaction() as conn:
         src = conn.execute(
-            "SELECT id, gmail_thread_id, ad_id FROM messages WHERE id = ?", (msg_id,)
+            "SELECT * FROM messages WHERE id = ?", (msg_id,)
         ).fetchone()
         if not src:
             raise ValueError(f"message {msg_id} not found")
@@ -425,10 +430,7 @@ def mark_thread_sold(
         ad_id = src["ad_id"] or ""
 
         now_iso = datetime.utcnow().isoformat()
-        conn.execute(
-            "UPDATE messages SET status='skipped_sold', sold_price_eur=?, sold_at=? WHERE id=?",
-            (float(sold_price_eur), now_iso, msg_id),
-        )
+        sale_id = _put_sale_row(conn, src, float(sold_price_eur), now_iso, note)
         if thread_id:
             conn.execute(
                 "UPDATE messages SET status='skipped_sold' "
@@ -486,9 +488,85 @@ def mark_thread_sold(
     return {
         "thread_id": thread_id,
         "ad_id": ad_id,
+        "sale_msg_id": sale_id,
         "closed_other_threads": closed_other,
         "stock": stock,
     }
+
+
+# Статусы, при которых строку при продаже не трогаем: ответ ушёл или вот-вот уйдёт.
+_KEEP_ON_SALE = set(SENT_STATUSES) | {"sending", "send_queued"}
+SALE_ROW_SOURCE = "sale"
+_SALE_ROW_COPY = ("account_id", "ad_url", "ad_id", "ad_title", "ad_price", "seller_name",
+                  "buyer_name", "buyer_display_name", "buyer_email", "client_lang")
+
+
+def _put_sale_row(conn: sqlite3.Connection, src: sqlite3.Row, price: float,
+                  now_iso: str, note: Optional[str]) -> int:
+    """Записать продажу треда, не трогая отправленное. Возвращает id строки с продажей."""
+    thread_id = src["gmail_thread_id"] or ""
+    # Без треда отдельную строку не к чему привязать (sync склада идёт по треду) — как раньше.
+    if src["status"] not in _KEEP_ON_SALE or not thread_id:
+        conn.execute(
+            "UPDATE messages SET status='skipped_sold', sold_price_eur=?, sold_at=? WHERE id=?",
+            (price, now_iso, src["id"]),
+        )
+        if note:
+            _append_note(conn, src["id"], note)
+        return int(src["id"])
+    prev = conn.execute(
+        "SELECT id FROM messages WHERE gmail_thread_id=? AND source=? AND status='skipped_sold' "
+        "ORDER BY id DESC LIMIT 1", (thread_id, SALE_ROW_SOURCE),
+    ).fetchone()
+    if prev:
+        conn.execute("UPDATE messages SET sold_price_eur=?, sold_at=? WHERE id=?",
+                     (price, now_iso, prev["id"]))
+        sale_id = int(prev["id"])
+    else:
+        keys = src.keys()
+        cols = [c for c in _SALE_ROW_COPY if c in keys]
+        vals = [src[c] for c in cols]
+        cols += ["direction", "status", "gmail_thread_id", "sold_price_eur", "sold_at",
+                 "created_at", "source"]
+        # direction='out' без текста: выборки «последнее письмо клиента» (In-Reply-To, тема,
+        # якорь черновика, счётчики входящих) её не видят, лента и события — тоже.
+        vals += ["out", "skipped_sold", thread_id, price, now_iso, now_iso, SALE_ROW_SOURCE]
+        cur = conn.execute(
+            f"INSERT INTO messages ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", vals)
+        sale_id = int(cur.lastrowid)
+    if note:
+        _append_note(conn, sale_id, note)
+    return sale_id
+
+
+def _append_note(conn: sqlite3.Connection, msg_id: int, note: str) -> None:
+    conn.execute(
+        "UPDATE messages SET extra_notes = CASE WHEN COALESCE(extra_notes, '') = '' THEN ? "
+        "ELSE extra_notes || char(10) || ? END WHERE id=?",
+        (f"Продано: {note}", f"Продано: {note}", msg_id),
+    )
+
+
+def add_thread_sale(
+    gmail_thread_id: str,
+    sold_price_eur: float,
+    *,
+    note: Optional[str] = None,
+    close_other_threads_for_ad: bool = False,
+) -> dict[str, Any]:
+    """«Продано» на треде: по последнему входящему, статусы отправленных строк не меняются.
+    Обёртка над mark_thread_sold (склад списывает один раз, source='thread')."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM messages WHERE gmail_thread_id=? AND direction='in' "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (gmail_thread_id,),
+        ).fetchone()
+    if not row:
+        raise ValueError(f"в треде {gmail_thread_id} нет входящих")
+    return mark_thread_sold(int(row["id"]), sold_price_eur,
+                            close_other_threads_for_ad=close_other_threads_for_ad,
+                            note=(note or "").strip() or None)
 
 
 # --- LESSONS ---

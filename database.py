@@ -600,6 +600,8 @@ def init_db() -> None:
         _add_column_if_missing(conn, "messages", "is_hot", "INTEGER DEFAULT 0")
         _add_column_if_missing(conn, "messages", "hot_reason", "TEXT")
         _add_column_if_missing(conn, "messages", "sla_reminded_at", "TEXT")
+        # is_late — письмо принято «запоздалым» (дошло позже суток после отправки; ставит mail).
+        _add_column_if_missing(conn, "messages", "is_late", "INTEGER DEFAULT 0")
         # SLA-джоб каждые 5 мин: входящие в ждущих статусах за последние часы.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_dir_status_created "
@@ -1091,6 +1093,7 @@ from modules.db_sales import (  # noqa: F401
     add_manual_sale,
     reject_detection,
     mark_thread_sold,
+    add_thread_sale,
     add_lesson,
     has_mined_lessons,
     find_relevant_lessons,

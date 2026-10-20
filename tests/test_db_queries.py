@@ -283,7 +283,11 @@ def _populate(db, seed: int = 7, n_threads: int = 60) -> None:
                     (tid, rnd.choice([0, 1]), rnd.choice([0, 1]), ts()))
 
 
-def _rows(rows, drop_prefix: str = "autopilot_"):
+# Колонки, которых нет в эталонном SQL (добавлены позже): автопилот, отложенная отправка.
+_NEW_PIPELINE_COLS = ("autopilot_", "has_queued_send", "queued_msg_id", "last_event_state")
+
+
+def _rows(rows, drop_prefix: "str | tuple[str, ...]" = _NEW_PIPELINE_COLS):
     return [{k: r[k] for k in r.keys() if not k.startswith(drop_prefix)} for r in rows]
 
 
@@ -871,3 +875,25 @@ def test_clear_forever_sold_marks_once(tmp_path, monkeypatch):
     db.mark_ad_sold("3391997887")  # поставили снова осознанно — миграция не повторяется
     db.init_db()
     assert db.is_ad_sold("3391997887") is True
+
+
+# --- send_queued и is_late ---------------------------------------------------
+
+def test_pipeline_send_queued_not_answered(tmp_path, monkeypatch):
+    import database as dbm
+    from modules import db_threads
+    monkeypatch.setattr(dbm, "DB_PATH", tmp_path / "q.db")
+    dbm.init_db()
+    with dbm.get_conn() as conn:
+        conn.execute("INSERT INTO accounts (id, name, gmail_email, gmail_app_password, is_active, created_at) "
+                     "VALUES (1, 'a', 'a@x', 'p', 1, '2026-01-01')")
+    mid = dbm.add_message(account_id=1, direction="in", gmail_thread_id="TQ", de_client="Hallo",
+                          de_answer="Ja", status="send_queued", created_at="2026-10-20T10:00:00")
+    rows = [r for r in db_threads.pipeline_threads() if r["gmail_thread_id"] == "TQ"]
+    assert len(rows) == 1, "тред с ответом в очереди не должен пропадать из pipeline"
+    r = rows[0]
+    assert r["has_queued_send"] == 1 and r["queued_msg_id"] == mid
+    assert r["last_event_kind"] == "in" and r["last_event_state"] == "queued"
+    assert r["has_any_sent"] == 0 and r["has_real_reply"] == 0
+    assert [e["kind"] for e in db_threads.thread_events("TQ")] == ["in"]
+    assert "is_late" in dbm.get_message(mid).keys() and dbm.get_message(mid)["is_late"] == 0
