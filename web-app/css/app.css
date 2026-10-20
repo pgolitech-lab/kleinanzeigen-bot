@@ -1385,3 +1385,30 @@ em.good { color: var(--good); }
 .sold-hint { font-size: .8rem; color: var(--sub); margin-top: 6px; }
 .sold-hint:empty { display: none; }
 .sold-form .form-control { min-height: 46px; }
+
+/* ---------- Аккаунты ---------- */
+.accounts { display: flex; flex-direction: column; gap: 10px; }
+.acc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 10px; }
+.acc-card { padding: 12px; border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.ac-head { display: flex; align-items: center; gap: 8px; }
+.ac-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.ac-name { flex: 1; font-size: 1.05rem; }
+.ac-st { font-size: .72rem; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: var(--tonal); color: var(--hint); }
+.ac-st.good { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.ac-mail, .ac-flags { color: var(--hint); font-size: .8rem; overflow-wrap: anywhere; }
+.ac-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ac-acts .btn { min-height: 44px; }
+.ac-res.ok, .pw-res.ok { color: var(--good); }
+.ac-res.bad, .pw-res.bad, .bk-s.bad { color: var(--danger); }
+.tgl { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+.tgl-l { flex: 1; font-size: .9rem; }
+.tgl input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tgl-s { flex: none; width: 46px; height: 28px; border-radius: 14px; background: var(--line2); position: relative; transition: background .2s; }
+.tgl-s::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: var(--shadow-sm); }
+.tgl input:checked + .tgl-s { background: var(--good); }
+.tgl input:checked + .tgl-s::after { transform: translateX(18px); }
+.tgl input:focus-visible + .tgl-s { outline: 2px solid var(--link); outline-offset: 2px; }
+.bk .bk-s { font-size: .86rem; color: var(--sub); margin-bottom: 8px; }
+.bk-run { min-height: 46px; width: 100%; }
+.pw-form { display: flex; flex-direction: column; gap: 6px; }
+.pw-form .form-control { min-height: 46px; }

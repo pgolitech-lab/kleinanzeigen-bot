@@ -20,6 +20,7 @@ const scout    = () => import("./screens/scout.js");
 const more     = () => import("./screens/more.js");
 const triage   = () => import("./screens/triage.js");
 const stock    = () => import("./screens/stock.js");
+const accounts = () => import("./screens/accounts.js");
 
 // root: true — корневой экран вкладки (без кнопки «Назад»).
 // list — на широком экране (Fold внутренний) слева держится этот список,
@@ -43,6 +44,7 @@ const ROUTES = [
   { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, list: "pipeline", title: "Переписка", params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }), key: p => p.thread_id },  // focused deep-link
   { pattern: /^#\/thread\/([^/]+)\/?$/,         screen: thread, list: "pipeline", title: "Переписка", params: m => ({ thread_id: decodeURIComponent(m[1]) }), key: p => p.thread_id },
   { pattern: /^#\/client\/(.+)$/,         screen: client, list: "clients", title: "Клиент", params: m => ({ email: decodeURIComponent(m[1]) }), key: p => p.email },
+  { pattern: /^#\/accounts\/?$/,          screen: accounts, title: "Аккаунты", params: () => ({}) },
   { pattern: /^#\/settings\/?$/,          screen: settings, title: "Настройки", params: () => ({}) },
   { pattern: /^#\/review\/(.+)$/,         screen: review, list: "pipeline", title: "Открываю…", params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
 ];

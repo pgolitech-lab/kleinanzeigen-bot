@@ -107,6 +107,13 @@ STOCK_PRODUCTS = [
 def mock_get(path: str):
     p = urllib.parse.urlparse(path)
     route = p.path
+    if route == "/api/ma/accounts":
+        return 200, {"accounts": [{"id": 1, "name": "osman", "active": True, "gmail_email": "osman@example.invalid", "gmail_app_password_set": True,
+                                   "kleinanzeigen_email": "osman@example.invalid", "kleinanzeigen_password_set": True, "auto_ack_enabled": True},
+                                  {"id": 2, "name": "anna", "active": False, "gmail_email": "anna@example.invalid", "gmail_app_password_set": False,
+                                   "kleinanzeigen_email": None, "kleinanzeigen_password_set": False, "auto_ack_enabled": False}]}
+    if route == "/api/ma/backup/status":
+        return 200, {"running": False, "ok": True, "exit_code": 0, "finished_at": "2026-10-20T08:00:00", "backup_age_sec": 14400}
     if route == "/api/ma/stock/report":
         return 200, {"totals": {"products": 3, "tracked": 2, "qty": 4, "stock_cost": 1410, "expected_revenue_list": 3820,
                                 "expected_profit_list": 2410, "open_questions": 2, "unlinked_sales": 1, "stale": 1},
