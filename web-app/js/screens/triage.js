@@ -9,6 +9,7 @@
 // ИНВАРИАНТ языка: кириллица чужому клиенту или вердикт lang-check «не тот
 // язык» — отправка отсюда запрещена, только через переписку.
 import { api, LLM_TIMEOUT_MS } from "../api.js";
+import { postSend, announceSend } from "../components/send.js";
 import { el, setLoading, setError, sendOutcome, parseEur } from "../utils.js";
 import { avatar, icon, langBadge, langName, toast } from "../components/kit.js";
 import { thermo, hasThermo } from "../components/thermo.js";
@@ -246,10 +247,9 @@ export async function render(mount) {
           paint(t, fresh);
           return;
         }
-        const res = await api(`/api/ma/messages/${t.msg_id}/send`, { method: "POST", body: {mode: "as_is", force: false} });
+        const res = await postSend(t.msg_id, {force: false});
         closeSheet();
-        const o = sendOutcome(res ?? {});
-        toast(o.text, { level: o.level === "bad" ? "bad" : "", ms: 4500 });
+        const o = announceSend(res, t.msg_id, () => { stats.sent--; if (mount.isConnected) render(mount); });
         laterRun = 0;
         if (o.level === "ok") stats.sent++;
         else stats.notSent++;  // режим выключен / тестовый адрес — клиенту не ушло, в итоге видно

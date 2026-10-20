@@ -8,6 +8,7 @@
 // оператора — кириллическая эвристика + LLM lang-check, force только по галочке,
 // серверный 409-guard в /send — последняя линия.
 import { api, API_BASE, LLM_TIMEOUT_MS } from "../api.js";
+import { postSend, announceSend } from "../components/send.js";
 import { el, berlinTime, setLoading, setError, sendOutcome, parseEur, accountColor } from "../utils.js";
 import { openSoldSheet } from "../components/sold-sheet.js";
 import { setTitle } from "../components/backbar.js";
@@ -688,12 +689,9 @@ function renderThread(mount, params, data, opts = {}) {
       sendBtn.textContent = "⏳ Отправляю…";
       try {
         // force=true только при явной галочке-разрешении оператора
-        const res = await api(`/api/ma/messages/${msgId}/send`, {
-          method: "POST", body: {mode: "as_is", force: blocked && allowCb.checked === true},
-        });
+        const res = await postSend(msgId, {force: blocked && allowCb.checked === true});
         closeSheet();
-        const o = sendOutcome(res ?? {});
-        toast(o.text, { level: o.level === "bad" ? "bad" : "", ms: 4500 });
+        announceSend(res, msgId, () => { if (mount.isConnected) render(mount, {...params, focus_msg_id: null}); });
         render(mount, {...params, focus_msg_id: null}, {sendResult: res ?? {}});
       } catch (e) {
         if (e.status === 409 && /уже отправлено/i.test(e.message)) {

@@ -70,6 +70,9 @@ export function eur(n) {
 // level: ok | warn | bad.
 export function sendOutcome(res) {
   const st = res?.status, kind = res?.kind, mode = res?.mode;
+  if (res?.queued || st === "send_queued") {
+    return { level: "ok", text: "⏳ Письмо в очереди — уйдёт клиенту через несколько секунд" };
+  }
   if (kind === "skipped" && mode !== "disabled" && st !== "not_sent_disabled") {
     return { level: "warn", text: "⚠️ Уже было отправлено — повторная отправка заблокирована" };
   }
