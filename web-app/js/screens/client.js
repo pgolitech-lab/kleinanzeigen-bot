@@ -124,7 +124,7 @@ export async function render(mount, params) {
       lastSaved = key;
       savedEl.textContent = "✓ сохранено";
     } catch (e) {
-      savedEl.textContent = "";
+      savedEl.textContent = "⚠️ не сохранено";
       toast(`Не сохранилось: ${e.message ?? e}`, { level: "bad", ms: 5000 });
     }
   }
@@ -166,4 +166,10 @@ export async function render(mount, params) {
   // уход с экрана — несохранённую заметку не теряем
   const flush = () => { if (!mount.isConnected) { window.removeEventListener("hashchange", flush); clearTimeout(saveTimer); save(); } };
   window.addEventListener("hashchange", flush);
+  // MA уходит в фон / закрывается — сохраняем сразу, не дожидаясь паузы ввода
+  const onHide = () => {
+    if (!mount.isConnected) { document.removeEventListener("visibilitychange", onHide); return; }
+    if (document.visibilityState === "hidden") { clearTimeout(saveTimer); save(); }
+  };
+  document.addEventListener("visibilitychange", onHide);
 }

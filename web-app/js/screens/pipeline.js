@@ -284,7 +284,10 @@ async function paint(mount) {
         const changed = !_soldToday || _soldToday.count !== v.count;
         _soldToday = v;
         if (changed && mount.isConnected && _cachedData && !sel.active) renderWith(mount, _cachedData);
-      }).catch(e => console.warn("[pipeline] sold today:", e));
+      }).catch(e => {
+        console.warn("[pipeline] sold today:", e);
+        _soldToday = { count: "—", eur: 0 };  // не показываем старое число как «сегодня»
+      });
     }
   }
   renderWith(mount, _cachedData);

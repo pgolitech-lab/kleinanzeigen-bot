@@ -44,7 +44,8 @@ export async function render(mount) {
   }
   if (!mount.isConnected) return;
   const total = queue.length;
-  const stats = { sent: 0, later: 0 };
+  const stats = { sent: 0, later: 0, skipped: 0, notSent: 0 };
+  let laterRun = 0;  // «Позже» подряд без отправки — когда обошли всю очередь, итог
   const cache = new Map();  // msg_id → review
 
   async function review(t) {
@@ -63,13 +64,15 @@ export async function render(mount) {
       r = await review(t);
     } catch (e) {
       queue.shift();
+      stats.skipped++;
       toast(`Не открылось: ${e.message ?? e}`, { level: "bad" });
       return next();
     }
     if (!mount.isConnected) return;
     if (!PENDING.has(r.status) || !r.draft?.de_answer) {
-      // черновика уже нет (отправлен с другого устройства) — дальше
+      // черновика уже нет (отправлен с другого устройства / пустой) — дальше, но учитываем
       queue.shift();
+      stats.skipped++;
       return next();
     }
     paint(t, r);
@@ -162,9 +165,10 @@ export async function render(mount) {
 
   function later() {
     stats.later++;
+    laterRun++;
     queue.push(queue.shift());
-    // всё отложено по кругу — показываем итог, а не ту же карточку
-    if (stats.later >= queue.length && queue.length) { done(); return; }
+    // обошли всю оставшуюся очередь одними «Позже» — итог, а не та же карточка по кругу
+    if (laterRun >= queue.length && queue.length) { done(); return; }
     next();
   }
 
@@ -212,7 +216,7 @@ export async function render(mount) {
     status.textContent = "Проверяю язык…";
     try {
       const lc = await api(`/api/ma/messages/${t.msg_id}/lang-check`, { method: "POST", body: {text}, timeoutMs: LLM_TIMEOUT_MS });
-      if (!lc.match) {
+      if (!lc?.match) {
         blockToThread(`ИИ определил язык: ${langName(lc.detected_lang)}, а клиент пишет: ${langName(lang)}. Откройте переписку.`);
         return;
       }
@@ -220,7 +224,7 @@ export async function render(mount) {
       status.textContent = `Проверено: ${langName(lang)}`;
     } catch (e) {
       // ИИ-проверка недоступна: эвристика пропустила, серверный 409-guard — страховка
-      badge.replaceChildren(langBadge(lang.toUpperCase(), true));
+      badge.replaceChildren(langBadge(lang.toUpperCase(), null));
       status.textContent = "⚠️ ИИ-проверка языка недоступна — сработала быстрая проверка";
     }
     sendBtn.disabled = false;
@@ -231,11 +235,22 @@ export async function render(mount) {
       try {
         await api(`/api/ma/messages/${t.msg_id}/lock/acquire`, { method: "POST" });
         held = true;
+        // черновик могли перегенерировать после показа карточки — проверяли не тот текст
+        const fresh = await api(`/api/ma/messages/${t.msg_id}`);
+        if ((fresh?.draft?.de_answer ?? "").trim() !== text) {
+          cache.set(t.msg_id, fresh);
+          closeSheet();
+          toast("Черновик изменился — проверьте новый текст", { ms: 4000 });
+          paint(t, fresh);
+          return;
+        }
         const res = await api(`/api/ma/messages/${t.msg_id}/send`, { method: "POST", body: {mode: "as_is", force: false} });
         closeSheet();
         const o = sendOutcome(res ?? {});
-        toast(o.text, { level: o.level === "bad" ? "bad" : "", ms: 4000 });
+        toast(o.text, { level: o.level === "bad" ? "bad" : "", ms: 4500 });
+        laterRun = 0;
         if (o.level === "ok") stats.sent++;
+        else stats.notSent++;  // режим выключен / тестовый адрес — клиенту не ушло, в итоге видно
         queue.shift();
         fling(card, 1, next);
       } catch (e) {
@@ -263,8 +278,11 @@ export async function render(mount) {
       </div>`);
     box.querySelector(".td-ic").appendChild(icon("check"));
     const parts = [`отправлено ${stats.sent}`];
-    if (stats.later) parts.push(`отложено ${stats.later}`);
+    if (stats.notSent) parts.push(`не ушло клиенту ${stats.notSent} (режим отправки)`);
+    if (queue.length) parts.push(`отложено ${queue.length}`);
+    if (stats.skipped) parts.push(`пропущено ${stats.skipped} (черновика нет)`);
     box.querySelector(".td-s").textContent = total ? parts.join(" · ") : "Готовых ответов нет — на всё ответили.";
+    box.querySelector("h2").textContent = queue.length ? "Остались отложенные" : "Всё разобрано";
     box.querySelector(".again").addEventListener("click", () => render(mount));
     mount.replaceChildren(box);
   }

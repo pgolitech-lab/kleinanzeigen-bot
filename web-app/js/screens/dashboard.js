@@ -27,16 +27,16 @@ function statsBlock(d, sold) {
 
   wrap.appendChild(el(`<div class="lsec"><span>Сегодня</span></div>`));
   const g2 = el(`<div class="kgrid k3"></div>`);
-  g2.appendChild(kpi(t.new ?? 0, "новых писем"));
-  g2.appendChild(kpi(t.sent ?? 0, "отправлено"));
+  g2.appendChild(kpi(t.new ?? "—", "новых писем"));
+  g2.appendChild(kpi(t.sent ?? "—", "отправлено"));
   // «продано» — из /sales, как на экране «Продажи» (одно число везде, день по Берлину)
   g2.appendChild(kpi(sold ? sold.count : "—", "продано", "k-grn", "#/sales"));
   wrap.appendChild(g2);
 
   wrap.appendChild(el(`<div class="lsec"><span>Продажи</span></div>`));
   const g3 = el(`<div class="kgrid"></div>`);
-  g3.appendChild(kpi(s7.count ?? 0, "за 7 дней", "", "#/sales"));
-  g3.appendChild(kpi(s30.count ?? 0, "за 30 дней", "", "#/sales"));
+  g3.appendChild(kpi(s7.count ?? "—", "за 7 дней", "", "#/sales"));
+  g3.appendChild(kpi(s30.count ?? "—", "за 30 дней", "", "#/sales"));
   wrap.appendChild(g3);
   return wrap;
 }

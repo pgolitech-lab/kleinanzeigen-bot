@@ -109,12 +109,20 @@ export function parseEur(v) {
 
 // «Продано сегодня» — из того же /api/ma/sales, что и экран «Продажи»
 // (одно число на всех экранах, день по Берлину). Кэш 2 мин.
-let _soldToday = { at: 0, p: null };
+let _soldToday = { at: 0, p: null, day: "" };
+// после записи продажи — следующий показ «продано сегодня» берёт свежие данные
+export function invalidateSoldToday() { _soldToday = { at: 0, p: null, day: "" }; }
+// сегодняшняя дата по Берлину в формате YYYY-MM-DD (для полей <input type=date>)
+export function berlinDateISO(d = new Date()) {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(d);
+}
 export function soldToday(api) {
-  if (_soldToday.p && Date.now() - _soldToday.at < 120000) return _soldToday.p;
+  const dayKey = berlinDateISO();
+  if (_soldToday.p && _soldToday.day === dayKey && Date.now() - _soldToday.at < 120000) return _soldToday.p;
   const day = d => new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
   const today = day(new Date());
   _soldToday.at = Date.now();
+  _soldToday.day = dayKey;
   _soldToday.p = api("/api/ma/sales?period=week&group_by=day").then(r => {
     const sales = (r?.sales ?? []).filter(s => {
       if (!s.sold_at) return false;

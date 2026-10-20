@@ -1443,3 +1443,5 @@ em.good { color: var(--good); }
 }
 .nav-link.active { background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); }
 .dash { display: flex; flex-direction: column; gap: 8px; }
+.r-unit.need { border-color: var(--warn); }
+.srow.no-link { cursor: default; }

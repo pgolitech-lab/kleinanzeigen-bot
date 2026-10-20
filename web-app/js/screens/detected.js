@@ -3,7 +3,7 @@
 // «Точно / вероятно / сомнительно» вместо high/medium/low, дата по Берлину,
 // «Принять все уверенные» одной кнопкой (по одному запросу на продажу).
 import { api } from "../api.js";
-import { el, setLoading, setError, eur, berlinTime } from "../utils.js";
+import { el, setLoading, setError, eur, berlinTime, invalidateSoldToday } from "../utils.js";
 import { confirmSheet } from "../components/sheet.js";
 import { toast } from "../components/kit.js";
 
@@ -68,6 +68,7 @@ function card(d, onDone) {
     btns().forEach(b => { b.disabled = true; });
     try {
       await apply(d.id, p);
+      invalidateSoldToday();
       toast(`✅ Продажа ${eur(p)} записана`);
       onDone(d.id);
     } catch (e) {
@@ -129,16 +130,20 @@ export async function render(mount) {
         if (!(await confirmSheet(`Записать ${sure.length} продаж на ${eur(sum)}?`, "Записать"))) return;
         b.disabled = true;
         let ok = 0;
+        const failed = [];
         for (const d of sure) {
           try {
             await apply(d.id, Number(d.sold_price_eur));
             ok++;
             onDone(d.id);
           } catch (e) {
-            toast(`«${d.thread_ad_title || "?"}»: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+            failed.push(`«${d.thread_ad_title || "?"}»: ${e.message ?? e}`);
           }
         }
-        toast(`✅ Записано продаж: ${ok}`);
+        if (ok) invalidateSoldToday();
+        // один итоговый тост: иначе красные ошибки затирались зелёным «записано»
+        if (failed.length) toast(`Записано ${ok}, не прошло ${failed.length}: ${failed.join("; ")}`, { level: "bad", ms: 8000 });
+        else toast(`✅ Записано продаж: ${ok}`);
       });
       head.appendChild(b);
     }

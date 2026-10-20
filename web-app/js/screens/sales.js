@@ -3,7 +3,7 @@
 // остальное под «Подробнее»). Ссылка на найденные продажи с числом.
 // Разбивка по группам и поиск — всегда доступны, на Fold видны сразу.
 import { api } from "../api.js";
-import { el, setLoading, setError, eur, berlinTime } from "../utils.js";
+import { el, setLoading, setError, eur, berlinTime, berlinDateISO, invalidateSoldToday } from "../utils.js";
 import { openSheet, closeSheet, menuSheet } from "../components/sheet.js";
 import { toast } from "../components/kit.js";
 
@@ -29,7 +29,7 @@ function plural(n, one, few, many) {
 
 // ---- «+ Продажа» ----
 function addSaleSheet(accounts, onOk) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = berlinDateISO();
   const f = el(`
     <div class="sale-form">
       <input type="text" class="form-control s-title" placeholder="Что продали" maxlength="200">
@@ -80,6 +80,7 @@ function addSaleSheet(accounts, onOk) {
         },
       });
       closeSheet();
+      invalidateSoldToday();
       toast(`✅ Продажа ${eur(price)} записана`);
       onOk();
     } catch (e) {
@@ -114,7 +115,9 @@ function saleRow(s) {
       <span class="sr-main"><b class="sr-t"></b><small class="sr-meta"></small></span>
       <span class="sr-side"><b class="sr-p"></b><small class="sr-d"></small></span>
     </a>`);
-  a.href = `#/thread/${encodeURIComponent(s.thread_id)}`;
+  // без thread_id ссылку не делаем (иначе #/thread/undefined)
+  if (s.thread_id) a.href = `#/thread/${encodeURIComponent(s.thread_id)}`;
+  else a.classList.add("no-link");
   a.querySelector(".sr-t").textContent = s.ad_title;
   const meta = [];
   if (s.sold_at) meta.push(berlinTime(s.sold_at).split(",")[0]);
@@ -128,20 +131,33 @@ function saleRow(s) {
   return a;
 }
 
-async function load(mount) {
+let _seq = 0;
+
+// soft — перезагрузка из поиска: экран не очищаем (поле ввода и клавиатура остаются)
+async function load(mount, soft = false) {
   const q = new URLSearchParams({ period: state.period, group_by: state.group_by });
   if (state.account_id) q.set("account_id", state.account_id);
   if (state.q) q.set("q", state.q);
-  setLoading(mount, "Считаю продажи…");
+  const seq = ++_seq;
+  if (!soft) setLoading(mount, "Считаю продажи…");
   let data;
   try {
     data = await api(`/api/ma/sales?${q}`);
   } catch (e) {
-    if (mount.isConnected) setError(mount, e.message ?? String(e));
+    if (!mount.isConnected || seq !== _seq) return;
+    if (soft) toast(`Поиск: ${e.message ?? e}`, { level: "bad" });
+    else setError(mount, e.message ?? String(e));
     return;
   }
-  if (!mount.isConnected) return;
+  if (!mount.isConnected || seq !== _seq) return;  // устаревший ответ
+  const focused = soft && document.activeElement?.classList.contains("s-q");
+  const caret = focused ? document.activeElement.selectionStart : null;
   paint(mount, data);
+  if (focused) {
+    const inp = mount.querySelector(".s-q");
+    inp.focus();
+    try { inp.setSelectionRange(caret, caret); } catch (e) { /* type=search без выделения */ }
+  }
 }
 
 function paint(mount, data) {
@@ -208,7 +224,7 @@ function paint(mount, data) {
   qIn.addEventListener("input", () => {
     state.q = qIn.value.trim();
     clearTimeout(qTimer);
-    qTimer = setTimeout(() => load(mount), 400);
+    qTimer = setTimeout(() => load(mount, true), 400);
   });
 
   const sales = data.sales ?? [];

@@ -24,7 +24,8 @@ const CYRILLIC_CLIENT_LANGS = new Set(["ru", "uk", "be", "bg", "sr", "mk"]);
 
 // Module-state для lock release at unmount.
 let _heldMsgId = null;
-// Кэш вариантов черновика по чипам: `${msgId}:${chip}` → текст клиенту
+// Кэш вариантов черновика по чипам: `${msgId}:${chip}` → {from, text}; вариант
+// возвращается без LLM, только если черновик не меняли с момента его генерации
 const _variants = new Map();
 
 // Кириллица при не-кириллическом языке клиента = почти наверняка ошибка.
@@ -455,9 +456,15 @@ function renderThread(mount, params, data, opts = {}) {
   async function flushEdits() {
     const deNow = draftBox.querySelector(".d2-de").value.trim();
     const ruNow = draftBox.querySelector(".d2-ru").value.trim();
-    if (ruNow && ruNow !== lastRu.trim()) {
+    const ruChanged = ruNow && ruNow !== lastRu.trim(), deChanged = deNow !== lastDe.trim();
+    let useRu = ruChanged;
+    if (ruChanged && deChanged) {
+      // правка текста клиенту при переводе идеи пропала бы молча
+      useRu = await confirmSheet("Изменены и текст клиенту, и идея по-русски.\n«Перевести идею» — ИИ заново переведёт идею (правка текста клиенту пропадёт).\n«Отмена» — оставить ваш текст клиенту.", "Перевести идею");
+    }
+    if (useRu) {
       syncDraft(await api(`/api/ma/messages/${msgId}/edit-ru`, { method: "POST", body: {text: ruNow}, timeoutMs: LLM_TIMEOUT_MS }));
-    } else if (deNow !== lastDe.trim()) {
+    } else if (deChanged) {
       syncDraft(await api(`/api/ma/messages/${msgId}/edit-de`, { method: "POST", body: {text: deNow} }));
     }
   }
@@ -490,16 +497,26 @@ function renderThread(mount, params, data, opts = {}) {
     });
   }
 
+  function draftDirty() {
+    if (!draftBox) return false;
+    return draftBox.querySelector(".d2-de").value.trim() !== lastDe.trim() ||
+           draftBox.querySelector(".d2-ru").value.trim() !== lastRu.trim();
+  }
+
   async function applyChip(c, btn, d) {
     if (c.price != null && d.floor != null && c.price < d.floor &&
         !(await confirmSheet(`Ниже минимума ${fmtEur(d.floor)} — точно предложить ${fmtEur(c.price)}?`, "Да, предложить"))) return;
+    // вариант ИИ заменит текст в полях — несохранённую правку не теряем молча
+    if (draftDirty() && !(await confirmSheet("Ваша правка в черновике будет заменена вариантом ИИ. Продолжить?", "Заменить"))) return;
     const pult = btn.parentElement;
     pult.querySelectorAll(".pchip").forEach(x => { x.disabled = true; x.classList.remove("on"); });
     btn.classList.add("busy");
     draftError("");
     const cacheKey = `${msgId}:${c.key}`;
     try {
-      const cached = _variants.get(cacheKey);
+      const hit = _variants.get(cacheKey);
+      const cached = hit && hit.from === lastDe ? hit.text : null;
+      const from = lastDe;
       let fresh;
       if (cached) {
         // вариант уже генерировали — возвращаем без LLM
@@ -510,7 +527,7 @@ function renderThread(mount, params, data, opts = {}) {
         fresh = await api(`/api/ma/messages/${msgId}/regenerate`, { method: "POST", body: {strategy: c.strategy}, timeoutMs: LLM_TIMEOUT_MS });
       }
       syncDraft(fresh);
-      if (c.strategy !== "regen" && review.draft?.de_answer) _variants.set(cacheKey, review.draft.de_answer);
+      if (c.strategy !== "regen" && review.draft?.de_answer && !cached) _variants.set(cacheKey, { from, text: review.draft.de_answer });
       btn.classList.add("on");
     } catch (e) {
       draftError(e.message ?? String(e));
@@ -645,18 +662,18 @@ function renderThread(mount, params, data, opts = {}) {
       sync();
       api(`/api/ma/messages/${msgId}/lang-check`, { method: "POST", body: {text} }).then(r => {
         checking = false;
-        if (r.match) {
+        if (r?.match) {
           badge.replaceChildren(langBadge(LANG, true));
           statusEl.textContent = `Проверено: язык клиента (${langName(clientLang)})`;
         } else {
           statusEl.textContent = "";
-          block(`ИИ определил язык текста: ${langName(r.detected_lang)}, а клиент пишет: ${langName(clientLang)}. Переведите или явно разрешите отправку.`);
+          block(`ИИ определил язык текста: ${langName(r?.detected_lang || "?")}, а клиент пишет: ${langName(clientLang)}. Переведите или явно разрешите отправку.`);
         }
         sync();
       }).catch(() => {
         // LLM-проверка недоступна: эвристика уже пропустила текст, серверный 409 — страховка
         checking = false;
-        badge.replaceChildren(langBadge(LANG, true));
+        badge.replaceChildren(langBadge(LANG, null));
         statusEl.textContent = "⚠️ ИИ-проверка языка недоступна — сработала только быстрая проверка";
         sync();
       });
@@ -845,21 +862,14 @@ function renderThread(mount, params, data, opts = {}) {
     const box = el(`
       <div class="alert alert-warning">
         <div class="mb-1"><b>Черновик занят: <span class="holder"></span></b> <small>(~<span class="mins"></span> мин)</small></div>
-        <div class="small mb-2">Если оператор уже закрыл MA — заберите черновик, чтобы ответить.</div>
+        <div class="small mb-2">Черновик освободится сам, когда оператор закончит или через несколько минут после закрытия MA.</div>
         <div class="d-flex gap-2">
-          <button class="btn btn-sm retry-btn" type="button">↻ Проверить</button>
-          <button class="btn btn-sm btn-warning takeover-btn" type="button">🔓 Забрать</button>
+          <button class="btn btn-sm retry-btn" type="button">↻ Проверить снова</button>
         </div>
       </div>`);
     box.querySelector(".holder").textContent = lock.holder ?? "?";
     box.querySelector(".mins").textContent = String(lock.remaining_min ?? 0);
     box.querySelector(".retry-btn").addEventListener("click", () => render(mount, params));
-    box.querySelector(".takeover-btn").addEventListener("click", async ev => {
-      ev.currentTarget.disabled = true;
-      ev.currentTarget.textContent = "⏳ Забираю…";
-      if (msgId != null) await tryReleaseLock(msgId);
-      render(mount, params);
-    });
     return box;
   }
 

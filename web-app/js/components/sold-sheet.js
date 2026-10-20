@@ -6,20 +6,22 @@
 // Эндпоинт: /threads/{id}/sold (работает и без черновика), пока api его не
 // выкатил — фолбэк на /messages/{msgId}/sold.
 import { api } from "../api.js";
-import { el } from "../utils.js";
+import { el, invalidateSoldToday } from "../utils.js";
 import { openSheet, closeSheet } from "./sheet.js";
 import { toast } from "./kit.js";
 
+// → {res, legacy}: legacy = записано старым путём (без количества и склада)
 async function postSold({ threadId, msgId }, body) {
   if (threadId) {
     try {
-      return await api(`/api/ma/threads/${encodeURIComponent(threadId)}/sold`, { method: "POST", body });
+      return { res: await api(`/api/ma/threads/${encodeURIComponent(threadId)}/sold`, { method: "POST", body }), legacy: false };
     } catch (e) {
-      // эндпоинта ещё нет — старый путь через сообщение
-      if (!(e.status === 404 || e.status === 405) || !msgId) throw e;
+      // фолбэк только когда эндпоинта ещё нет (404 «Not Found» / 405), не при «тред не найден»
+      const missing = (e.status === 404 && (!e.detail || e.detail === "Not Found")) || e.status === 405;
+      if (!missing || !msgId) throw e;
     }
   }
-  return api(`/api/ma/messages/${msgId}/sold`, { method: "POST", body });
+  return { res: await api(`/api/ma/messages/${msgId}/sold`, { method: "POST", body }), legacy: true };
 }
 
 // opts: {threadId, msgId, title, price, prices: [числа для чипов], onDone}
@@ -85,13 +87,15 @@ export function openSoldSheet(opts) {
     save.disabled = true;
     save.textContent = "⏳ Сохраняю…";
     try {
-      const res = await postSold(opts, { price_eur: price, qty, close_other_threads_for_ad: form.querySelector(".close-other").checked });
+      const { res, legacy } = await postSold(opts, { price_eur: price, qty, close_other_threads_for_ad: form.querySelector(".close-other").checked });
       closeSheet();
+      invalidateSoldToday();
       const st = res?.stock;
       let tail = "";
-      if (st && res.product_id === null) tail = " · товар не найден на складе — привяжите в «Склад»";
+      if (legacy && qty > 1) tail = ` · ⚠️ записана 1 продажа: количество ${qty} сервер пока не принимает`;
+      else if (st && res.product_id === null) tail = " · товар не найден на складе — привяжите в «Склад»";
       else if (st?.stock_tracked && st.qty_after != null) tail = ` · на складе осталось ${st.qty_after}`;
-      toast(`✅ Продажа ${price.toLocaleString("de-DE")} € записана${tail}`, { ms: tail ? 5000 : 3200 });
+      toast(`✅ Продажа ${price.toLocaleString("de-DE")} € записана${tail}`, { ms: tail ? 6000 : 3200 });
       opts.onDone?.(price);
     } catch (err) {
       errEl.textContent = err.message ?? String(err);

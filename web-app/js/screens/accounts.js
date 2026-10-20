@@ -162,7 +162,11 @@ export async function render(mount) {
         const st = await api("/api/ma/backup/status");
         paintBackup(st);
         if (st.running) pollBackup();
-      } catch (e) { bkS.textContent = `Статус недоступен: ${e.message ?? e}`; }
+      } catch (e) {
+        bkS.textContent = `Статус недоступен: ${e.message ?? e} — откройте экран заново, чтобы проверить`;
+        bkS.classList.add("bad");
+        bkBtn.disabled = false;
+      }
     }, 4000);
   };
   bkBtn.addEventListener("click", async () => {

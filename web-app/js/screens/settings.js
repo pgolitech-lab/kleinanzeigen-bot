@@ -117,6 +117,7 @@ export async function render(mount) {
         !(await confirmSheet("Включить отправку РЕАЛЬНЫМ покупателям?\nВсе одобренные ответы начнут уходить клиентам.", "Да, покупателям"))) return;
     saveBtn.disabled = true;
     let ok = 0;
+    const failed = [];
     for (const k of keys) {
       // пустой секрет = «не менять»
       if (k === "telegram_bot_token" && !current[k]) { initial[k] = current[k]; continue; }
@@ -125,10 +126,11 @@ export async function render(mount) {
         initial[k] = current[k];
         ok++;
       } catch (e) {
-        toast(`«${k}»: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+        failed.push(`«${k}»: ${e.message ?? e}`);
       }
     }
-    if (ok) toast(`✅ Сохранено: ${ok}`);
+    if (failed.length) toast(`Сохранено ${ok}, не сохранилось: ${failed.join("; ")}`, { level: "bad", ms: 8000 });
+    else if (ok) toast(`✅ Сохранено: ${ok}`);
     sync();
   });
   sync();

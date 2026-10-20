@@ -6,7 +6,7 @@
 //   #/stock/month      — отчёт за месяц.
 // Неизвестные деньги/остаток (None) показываем как «—», не как 0.
 import { api } from "../api.js";
-import { el, setLoading, setError, eur, berlinTime } from "../utils.js";
+import { el, setLoading, setError, eur, berlinTime, parseEur } from "../utils.js";
 import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js";
 import { setTitle } from "../components/backbar.js";
 import { icon, toast } from "../components/kit.js";
@@ -16,7 +16,7 @@ const days = v => (v == null ? "—" : `${Math.round(v)} дн.`);
 
 // Эндпоинты склада выкатывает api — пока их нет, честно говорим об этом
 function notReady(mount, e) {
-  if (e?.status === 404) {
+  if (e?.status === 404 && (!e.detail || e.detail === "Not Found")) {
     const box = el(`<div class="empty"><p></p></div>`);
     box.prepend(icon("cards"));
     box.querySelector("p").textContent = "Склад ещё не подключён на сервере — экран заработает, как только api выкатит /api/ma/stock.";
@@ -132,7 +132,8 @@ function parseReceipt(text) {
   let total = null;
   const m = text.match(/\bза\s*(\d[\d\s.,]*)\s*(€|eur|евро)?\s*$/i);
   let body = text;
-  if (m) { total = Number(m[1].replace(/\s/g, "").replace(",", ".")); body = text.slice(0, m.index); }
+  // «за 1.350» / «за 1 350» — немецкая запись тысяч (parseEur), не 1,35 €
+  if (m) { total = parseEur(m[1].replace(/\s/g, "")); body = text.slice(0, m.index); }
   const lines = body.split(/[,;\n]|\sи\s/).map(s => s.trim()).filter(Boolean).map(s => {
     const q = s.match(/^(\d+)\s*(шт\.?|x|×)?\s*(.+)$/i);
     return q ? { qty: Number(q[1]), name: q[3].trim() } : { qty: 1, name: s };
@@ -180,9 +181,16 @@ function receiptSheet(products, onDone) {
       rows = parsed.items.map(x => ({ qty: x.qty, name: x.name ?? x.title ?? "", product_id: x.product_id ?? null, unit: x.unit_cost_eur ?? null }));
     } else {
       const { lines, total } = parseReceipt(text);
+      // общую сумму делим на штуки только для одной позиции; для разных товаров
+      // себестоимость за штуку оператор вписывает сам (поровну — порча прибыли)
       const units = lines.reduce((s, l) => s + l.qty, 0) || 1;
+      const single = lines.length === 1;
       rows = lines.map(l => ({ ...l, product_id: guessProduct(l.name, products)?.product_id ?? null,
-        unit: total != null ? Math.round((total / units) * 100) / 100 : null }));
+        unit: total != null && single ? Math.round((total / units) * 100) / 100 : null }));
+      if (total != null && !single) {
+        err.textContent = `Общая сумма ${eur(total)} — впишите себестоимость за штуку в каждой строке.`;
+        err.hidden = false;
+      }
     }
     paintRows();
   });
@@ -202,6 +210,7 @@ function receiptSheet(products, onDone) {
       const qIn = row.querySelector(".r-qty"), uIn = row.querySelector(".r-unit"), pb = row.querySelector(".r-prod");
       qIn.value = String(r.qty);
       if (r.unit != null) uIn.value = String(r.unit);
+      else uIn.classList.add("need");
       qIn.addEventListener("input", () => { r.qty = Number(qIn.value); sync(); });
       uIn.addEventListener("input", () => { r.unit = uIn.value === "" ? null : Number(uIn.value); });
       const p = products.find(x => x.product_id === r.product_id);
@@ -216,24 +225,32 @@ function receiptSheet(products, onDone) {
   function pickProduct(r) {
     const guess = guessProduct(r.name, products);
     const sorted = guess ? [guess, ...products.filter(p => p !== guess)] : products;
-    menuSheet(sorted.slice(0, 80).map(p => ({ label: p.title, onClick: () => { r.product_id = p.product_id; openSheet(box, "➕ Приход"); paintRows(); } })), "Какой товар?");
+    menuSheet([
+      { label: "↩ Назад к приходу", onClick: () => openSheet(box, "➕ Приход") },
+      ...sorted.slice(0, 80).map(p => ({ label: p.title, onClick: () => { r.product_id = p.product_id; openSheet(box, "➕ Приход"); paintRows(); } })),
+    ], "Какой товар?");
   }
   function sync() { save.disabled = !rows.length || rows.some(r => !r.product_id || !(r.qty > 0)); }
   save.addEventListener("click", async () => {
     save.disabled = true;
     save.textContent = "⏳ Записываю…";
+    // принятые строки убираем сразу: повтор после частичной ошибки не задвоит остаток
+    const failed = [];
     let ok = 0;
-    for (const r of rows) {
+    for (const r of [...rows]) {
       try {
         await api(`/api/ma/stock/products/${r.product_id}/receipt`, { method: "POST", body: { qty: r.qty, unit_cost_eur: r.unit } });
+        rows = rows.filter(x => x !== r);
         ok++;
       } catch (e) {
-        err.textContent = `«${r.name}»: ${e.message ?? e}`;
-        err.hidden = false;
+        failed.push(`«${r.name}»: ${e.message ?? e}`);
       }
     }
-    if (ok === rows.length) { closeSheet(); toast(`✅ Оприходовано позиций: ${ok}`); onDone(); }
-    else { save.disabled = false; save.textContent = "✅ Оприходовать"; onDone(); }
+    if (!failed.length) { closeSheet(); toast(`✅ Оприходовано позиций: ${ok}`); onDone(); return; }
+    err.textContent = `${ok ? `Принято ${ok}. ` : ""}Не прошло: ${failed.join("; ")}`;
+    err.hidden = false;
+    save.textContent = "✅ Оприходовать";
+    paintRows();
   });
   openSheet(box, "➕ Приход");
   box.querySelector(".r-text").focus();
@@ -248,7 +265,9 @@ async function renderProduct(mount, id) {
     d = await api(`/api/ma/stock/products/${encodeURIComponent(id)}`);
   } catch (e) {
     if (!mount.isConnected) return;
-    if (!notReady(mount, e)) setError(mount, e.message ?? String(e));
+    // 404 «Not Found» без detail — эндпоинта нет; с detail — товар не найден
+    if (e.status === 404 && e.detail && e.detail !== "Not Found") setError(mount, `Товар не найден: ${e.detail}`);
+    else if (!notReady(mount, e)) setError(mount, e.message ?? String(e));
     return;
   }
   if (!mount.isConnected) return;
@@ -293,7 +312,7 @@ async function renderProduct(mount, id) {
   act("➖ Списать", () => numberSheet("Списание", [["qty", "Сколько штук", 1]],
     v => api(`/api/ma/stock/products/${id}/writeoff`, { method: "POST", body: v }), reload));
   act("✏️ Цены", () => numberSheet("Цены товара", [["list_price_eur", "Цена в объявлениях, €", p.list_price_eur], ["min_price_eur", "Минимум, €", p.min_price_eur], ["unit_cost_eur", "Себестоимость, €", p.unit_cost_eur]],
-    v => api(`/api/ma/stock/products/${id}`, { method: "PATCH", body: v }), reload));
+    v => api(`/api/ma/stock/products/${id}`, { method: "PATCH", body: v }), reload, true));
   act("🗄 В архив", async () => {
     if (!(await confirmSheet("Убрать товар в архив?", "В архив"))) return;
     try { await api(`/api/ma/stock/products/${id}/archive`, { method: "POST", body: { archived: true } }); location.hash = "#/stock"; }
@@ -330,7 +349,7 @@ async function renderProduct(mount, id) {
 }
 
 // Лист с числовыми полями; fields = [[key, label, initial]]
-function numberSheet(title, fields, submit, onDone) {
+function numberSheet(title, fields, submit, onDone, clearable = false) {
   const box = el(`<div class="num-form"><div class="nf"></div><div class="form-error text-danger small" hidden></div>
     <div class="sheet-actions"><button class="btn cancel-btn" type="button">Отмена</button><button class="btn btn-primary save-btn" type="button">✅ Сохранить</button></div></div>`);
   const nf = box.querySelector(".nf");
@@ -347,11 +366,12 @@ function numberSheet(title, fields, submit, onDone) {
   box.querySelector(".save-btn").addEventListener("click", async e => {
     const body = {};
     for (const i of nf.querySelectorAll("input")) {
-      if (i.value === "") continue;
+      if (i.value === "") { if (clearable) body[i.dataset.k] = null; continue; }
       const v = Number(i.value);
       if (!Number.isFinite(v) || v < 0) { i.classList.add("is-invalid"); return; }
       body[i.dataset.k] = v;
     }
+    if (!Object.keys(body).length) { closeSheet(); return; }
     e.currentTarget.disabled = true;
     try {
       await submit(body);
@@ -375,7 +395,7 @@ async function renderQuestions(mount) {
   try {
     [qs, unl] = await Promise.all([
       api("/api/ma/stock/questions"),
-      api("/api/ma/stock/unlinked-sales").catch(() => null),
+      api("/api/ma/stock/unlinked-sales").catch(e => { console.warn("[stock] unlinked-sales:", e); return { error: e }; }),
     ]);
   } catch (e) {
     if (!mount.isConnected) return;
@@ -404,6 +424,9 @@ async function renderQuestions(mount) {
       try {
         await api(`/api/ma/stock/questions/${q.id}`, { method: "POST", body: { same } });
         c.remove();
+        const left = list.querySelectorAll(".qcard").length;
+        root.querySelector(".lsec i").textContent = String(left);
+        if (!left) list.appendChild(el(`<div class="empty"><p>Вопросов нет — склад разобран.</p></div>`));
       } catch (e) {
         toast(`Ошибка: ${e.message ?? e}`, { level: "bad" });
         c.querySelectorAll("button").forEach(b => { b.disabled = false; });
@@ -414,6 +437,7 @@ async function renderQuestions(mount) {
     list.appendChild(c);
   });
   if (!items.length) list.appendChild(el(`<div class="empty"><p>Вопросов нет — склад разобран.</p></div>`));
+  if (unl?.error) root.appendChild(el(`<div class="st-note">Список продаж без товара сейчас недоступен.</div>`));
   const unlinked = Array.isArray(unl) ? unl : (unl?.items ?? []);
   if (unlinked.length) {
     const sec = el(`<section class="c-sec"><h3>Продажи без товара</h3><div class="u-list"></div><small class="muted">Привяжите в карточке товара или через переписку.</small></section>`);
@@ -431,7 +455,10 @@ async function renderQuestions(mount) {
 
 // ================= отчёт за месяц =================
 
+let _monthSeq = 0;
+
 async function renderMonth(mount, ym = null) {
+  const seq = ++_monthSeq;
   const now = new Date();
   const [y, m] = ym ?? [now.getFullYear(), now.getMonth() + 1];
   setLoading(mount, "Считаю месяц…");
@@ -439,11 +466,11 @@ async function renderMonth(mount, ym = null) {
   try {
     r = await api(`/api/ma/stock/month?year=${y}&month=${m}`);
   } catch (e) {
-    if (!mount.isConnected) return;
+    if (!mount.isConnected || seq !== _monthSeq) return;
     if (!notReady(mount, e)) setError(mount, e.message ?? String(e));
     return;
   }
-  if (!mount.isConnected) return;
+  if (!mount.isConnected || seq !== _monthSeq) return;
   const title = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
   setTitle(`Отчёт: ${title}`);
   const root = el(`
