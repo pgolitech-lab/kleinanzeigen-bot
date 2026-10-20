@@ -492,6 +492,8 @@ def build_scheduler() -> BackgroundScheduler:
             llm_login_job,
             trigger="interval",
             minutes=30,
+            # первая проверка через 2 мин после старта, а не через 30
+            next_run_time=datetime.now() + timedelta(minutes=2),
             id="check_llm_login",
             replace_existing=True,
             max_instances=1,
