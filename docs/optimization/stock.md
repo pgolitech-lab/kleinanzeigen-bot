@@ -14,8 +14,11 @@
 | `inv_movements` | движения | kind receipt/sale/writeoff/adjust, qty со знаком, unit_cost_eur (приход), unit_price_eur (продажа), source thread/detected/manual/operator/seed, gmail_thread_id (**одна продажа на тред** — уникальный индекс), occurred_at, voided_at |
 | `inv_link_questions` | «это тот же товар?» | ad_id, product_id (где сейчас), suggested_product_id, score, reason, resolution same/different |
 
-Остаток = `SUM(qty)` невоидированных движений. Пока `stock_tracked=0` остаток **неизвестен** — из
-этого нельзя делать вывод «нет в наличии». Приход/инвентаризация включают учёт.
+Остаток = `SUM(qty)` невоидированных движений **с начала учёта** (самый ранний приход/корректировка
+товара). Продажи из истории до этого момента в остаток не входят (в отчёт о прибыли — входят, с
+себестоимостью по оценке товара). Пока `stock_tracked=0` остаток **неизвестен**; остаток < 0 тоже
+считается «неизвестно» (`negative_stock=True` — оператору проверить приход). Ни то ни другое не
+значит «нет в наличии».
 
 ## Логика (modules/inventory.py)
 - **Заголовки**: из `messages.ad_title` убираются «Nutzer-Anfrage zu deiner Anzeige "…"», «Gelöscht •»,
@@ -30,10 +33,21 @@
   выручка/прибыль по цене объявления и по минимуму, продажи за период (выручка, себестоимость,
   прибыль), средний срок до продажи, возраст старейшей единицы, «залежалось > 60 дн.», минусовые
   остатки, открытые вопросы, продажи без товара. Неизвестные деньги = `None`, не 0.
+- `monthly_report(year, month)` — прибыль за месяц: вложено (приходы месяца), выручка, себестоимость
+  проданного (FIFO по партиям), прибыль, остаток на конец месяца (шт., по себестоимости, по цене
+  объявления, по минимуму), партии с окупаемостью на конец месяца (`paid` / `not_yet` / `unknown`,
+  `payback_pct`), разбивка по товарам. Неизвестное — `None`.
 - `summary_text()` — 3–6 строк для ежедневной сводки.
+- `suggest_sale_price(thread_id)` → `{price_eur, source, candidates}`: подсказка для обязательной цены
+  в «Продано» (negotiation_state → deal_brief → цена в нашем последнем ответе → в письме покупателя →
+  цена объявления).
+- `product_profile(product_id)` / `list_product_profiles()` — стабильный контракт (`version: 1`) для
+  kab-market: название, категория, состояние, признаки, ядро заголовка, модели авто, цены,
+  себестоимость единицы (FIFO/оценка), остаток, все объявления (ad_id, заголовок, цена, url, состояние,
+  аккаунт, даты), свежее описание.
 
 ## Начальное заполнение (scripts/inventory_seed.py)
-Dry-run на копии прод-БД (20.10): **182** объявления с названием (12 ad_id — рассылки, не заведены) →
+`--apply` только с явным `--db`, перед записью делается копия рядом. Dry-run на копии прод-БД (20.10): **182** объявления с названием (12 ad_id — рассылки, не заведены) →
 **126 товаров**, из них 30 перепощенных; **45 вопросов** «тот же товар?»; 47 исторических продаж
 перенесены движениями, **6 ручных продаж без товара** (свободный текст: «2+1 старые 3 шт и 2+1 новые
 2 шт», «Поляк Peter» …). Запуск на проде — после ответа владельца на вопросы 4–5 ниже:
@@ -44,7 +58,8 @@ Dry-run на копии прод-БД (20.10): **182** объявления с �
 - `init_db()`: `from modules.db_inventory import ensure_inventory_schema` → `ensure_inventory_schema(conn)`
   в конце миграций (склад и без этого создаёт таблицы лениво, но так надёжнее).
 - `mark_thread_sold(...)`: после транзакции → `inventory.record_sale(price_eur=sold_price_eur,
-  gmail_thread_id=thread_id, ad_id=ad_id, message_id=msg_id, source="thread")`, вернуть его
+  gmail_thread_id=thread_id, ad_id=ad_id, message_id=msg_id, source="thread")` (именно `"thread"`:
+  по умолчанию `"operator"`, такую продажу джоб не снимет при откате треда), вернуть его
   `qty_after`/`stock_tracked` наверх. Ошибка склада не должна откатывать продажу (`logger.exception`) —
   джоб `sync_all` догонит.
 - `close_other_threads_for_ad`: закрывать другие треды только если после продажи
@@ -75,6 +90,8 @@ Dry-run на копии прод-БД (20.10): **182** объявления с �
 | Метод | Путь | Вызов |
 |---|---|---|
 | GET | `/stock/report?from&to` | `inventory.report(from, to)` |
+| GET | `/stock/month?year&month` | `inventory.monthly_report(year, month)` |
+| GET | `/threads/{thread_id}/sale-price` | `inventory.suggest_sale_price(thread_id)` — предзаполнить цену |
 | GET | `/stock/products` | `db_inventory.list_products()` |
 | GET | `/stock/products/{id}` | `get_product` + `list_listings(id)` + `list_movements(id)` + `ad_context` |
 | POST | `/stock/products` | `db_inventory.create_product(title=…, category, condition, unit_cost_eur, list_price_eur, min_price_eur, note)` |
@@ -89,8 +106,9 @@ Dry-run на копии прод-БД (20.10): **182** объявления с �
 | POST | `/stock/questions/{id}` | `inventory.answer_question(id, same: bool)` |
 | GET | `/stock/unlinked-sales` | `inventory.unlinked_sales()` |
 | POST | `/stock/unlinked-sales/{thread_id}` | `inventory.record_sale(product_id=, gmail_thread_id=thread_id, price_eur=, qty=, source="thread")` |
-- `POST /threads/{id}/sold` (и manual-sale, apply detection): в ответе `stock: {qty_after, stock_tracked}`
-  из `record_sale`. «Сегодня продано» в Обзоре — через `list_sales`, как и сейчас.
+- `POST /threads/{id}/sold` (и manual-sale, apply detection): **цена обязательна** (422 без неё; в UI
+  предзаполнена из `suggest_sale_price`); в ответе `stock: {qty_after, stock_tracked}` из `record_sale`;
+  `product_id is None` → показать «товар не найден на складе — привяжите». «Сегодня продано» в Обзоре — через `list_sales`, как и сейчас.
 - `ValueError` из склада → 400 с текстом.
 
 **webapp** — экран «Склад»: список товаров (остаток / «не внесён», цена, себестоимость, висит дн.,
