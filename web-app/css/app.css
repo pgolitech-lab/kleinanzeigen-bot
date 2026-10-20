@@ -889,3 +889,217 @@ em.good { color: var(--good); }
   .tlist { margin: 0 -8px; }
 }
 .pane-list .banner-detected .bd-go b { display: none; }
+
+/* ============================================================
+   Тред v3
+   ============================================================ */
+.th { display: flex; gap: 16px; align-items: flex-start; }
+.th-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.th-aside { display: none; }
+:root[data-layout="split3"] .th-aside {
+  display: flex; flex-direction: column; gap: 12px; flex: 0 0 min(300px, 34%);
+  position: sticky; top: 0;
+}
+
+.th-head { display: flex; align-items: center; gap: 6px; }
+.th-who {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 4px 4px 4px 6px;
+  border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; border-radius: var(--r);
+  font: inherit;
+}
+.th-who:active { background: var(--tonal); }
+.th-txt { min-width: 0; display: flex; flex-direction: column; }
+.th-name { font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-sub { color: var(--sub); font-size: .76rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.th-sub .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
+.th-link { text-decoration: none; color: var(--link); font-size: 1.2rem; }
+.th-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tchip { font-size: .74rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--tonal); color: var(--sub); }
+.tchip.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.tchip.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+
+/* полоса сделки */
+.deal-strip {
+  position: sticky; top: -12px; z-index: 8;
+  padding: 10px 12px; border-radius: var(--r);
+  background: color-mix(in srgb, var(--card) 94%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--line); cursor: pointer;
+}
+.ds-nums { display: flex; gap: 14px; flex-wrap: wrap; }
+.dn { display: flex; flex-direction: column; min-width: 0; }
+.dn small { font-size: .62rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--hint); }
+.dn b { font-size: 1.12rem; font-variant-numeric: tabular-nums; }
+.dn.floor b { color: var(--warn); }
+.dn.offer b { color: var(--good); }
+.dn.bad b { color: var(--danger); }
+.dn.ours b { color: var(--accent); filter: brightness(1.2); }
+.ds-more { display: none; margin-top: 8px; font-size: .86rem; color: var(--sub); }
+.ds-more p { margin: 4px 0 0; }
+.ds-more p.bad { color: var(--danger); font-weight: 700; }
+.deal-strip.open .ds-more { display: block; }
+.deal-strip .scale.lg { margin-top: 6px; }
+:root[data-layout="split3"] .deal-strip { display: none; }   /* на Fold-ландшафте — в правой панели */
+
+/* похожий покупатель */
+.maybe-same {
+  display: flex; gap: 10px; padding: 10px 12px; border-radius: var(--r);
+  background: color-mix(in srgb, var(--warn) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+}
+.maybe-same .ms-ic { color: var(--warn); }
+.maybe-same .ms-t { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: .86rem; }
+.maybe-same .ms-list { display: flex; flex-direction: column; gap: 3px; }
+.maybe-same a { color: var(--link); text-decoration: none; overflow-wrap: anywhere; }
+
+/* лента */
+.feed { display: flex; flex-direction: column; gap: 6px; }
+.day-sep { display: flex; justify-content: center; margin: 8px 0 2px; }
+.day-sep span { font-size: .72rem; font-weight: 700; color: var(--sub); padding: 3px 12px; border-radius: 999px; background: var(--tonal); }
+.bub2 {
+  max-width: min(86%, 560px); padding: 9px 13px 6px; border-radius: 18px;
+  overflow-wrap: anywhere; white-space: pre-wrap; box-shadow: var(--shadow-sm);
+}
+.bub2.in { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.bub2.out { align-self: flex-end; background: var(--out-bg); color: var(--out-text); border-bottom-right-radius: 6px; }
+.bub2.bilingual { cursor: pointer; }
+.b-main { font-size: .98rem; line-height: 1.4; }
+.b-alt { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: .8rem; color: var(--hint); }
+.bub2.out .b-alt { color: var(--out-sub); border-top-color: color-mix(in srgb, var(--out-text) 18%, transparent); }
+.b-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 3px; font-size: .68rem; color: var(--hint); white-space: normal; }
+.bub2.out .b-meta { color: var(--out-sub); }
+.b-tag { font-weight: 700; }
+.muted-c { color: var(--hint); text-align: center; }
+
+/* черновик ИИ */
+.draft2 {
+  border-radius: var(--r-lg); padding: 10px 12px 12px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  box-shadow: var(--shadow);
+}
+.d2-head { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.d2-t { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; white-space: nowrap; color: var(--accent); filter: brightness(1.2); font-size: .9rem; }
+.d2-t .ic { width: 18px; height: 18px; }
+.d2-sp { flex: 1; }
+.ibtn.sm { min-width: 36px; height: 36px; border-radius: 12px; font-size: .82rem; font-weight: 700; padding: 0 8px; }
+.d2-tabs { display: flex; gap: 4px; margin: 6px 0 8px; padding: 3px; border-radius: 12px; background: var(--tonal); }
+.d2-tabs button {
+  flex: 1; min-height: 38px; border: 0; border-radius: 10px; background: none; color: var(--sub);
+  font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer;
+}
+.d2-tabs button.on { background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); }
+.draft2 textarea {
+  width: 100%; min-height: 72px; resize: none; border-radius: 12px; padding: 10px 12px;
+  border: 1px solid var(--line2); background: var(--bg); color: var(--text);
+  font: inherit; font-size: .98rem; line-height: 1.42;
+}
+.draft2 textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 0; }
+.d2-mirror, .d2-hint { margin-top: 6px; font-size: .8rem; color: var(--hint); white-space: pre-wrap; }
+.d2-err { margin-top: 6px; color: var(--danger); font-size: .84rem; }
+.pult { display: flex; gap: 6px; overflow-x: auto; margin: 10px -12px 0; padding: 2px 12px; scrollbar-width: none; }
+.pult::-webkit-scrollbar { display: none; }
+.pchip {
+  flex: none; min-height: 40px; padding: 0 13px; border-radius: 999px;
+  border: 1px solid var(--line2); background: var(--card); color: var(--text);
+  font: inherit; font-size: .84rem; font-weight: 650; white-space: nowrap; cursor: pointer;
+}
+.pchip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--card)); }
+.pchip.below { border-color: color-mix(in srgb, var(--danger) 55%, var(--line2)); color: var(--danger); }
+.pchip.busy { position: relative; color: transparent; }
+.pchip.busy::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* док треда */
+.tdock {
+  position: sticky; bottom: 6px; z-index: 15;
+  display: flex; align-items: stretch; gap: 8px; padding: 8px;
+  background: var(--glass); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow);
+}
+.tdock .ibtn { height: auto; min-height: 52px; }
+.tdock > .btn { flex: 1; min-height: 52px; }
+.d-sold { color: var(--good); }
+.btn-send {
+  flex: 1; min-width: 0; min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 6px 16px;
+  border: 0; border-radius: 16px; background: var(--grad); color: var(--on-accent); cursor: pointer; text-align: left;
+  font: inherit; box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.btn-send:disabled { opacity: .6; }
+.btn-send .bs-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.btn-send b { font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-send small { font-size: .7rem; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-ro { flex: 1; display: grid; place-items: center; color: var(--hint); font-size: .86rem; text-align: center; }
+
+/* финальный лист */
+.final .f-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.final .f-l { font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--hint); }
+.final .f-text {
+  white-space: pre-wrap; font-size: 1rem; line-height: 1.45; padding: 12px; border-radius: 14px;
+  background: var(--bg); border: 1px solid var(--line); max-height: calc(var(--app-h) * .32); overflow-y: auto;
+}
+.final .f-ru { margin-top: 8px; font-size: .84rem; color: var(--hint); white-space: pre-wrap; max-height: calc(var(--app-h) * .18); overflow-y: auto; }
+.final .f-status { margin: 8px 0; font-size: .82rem; color: var(--sub); }
+
+/* уроки */
+.lessons { display: flex; flex-direction: column; gap: 10px; }
+.lesson { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: .86rem; }
+.lesson .l-bad { padding: 8px 10px; background: color-mix(in srgb, var(--danger) 10%, transparent); text-decoration: line-through; color: var(--hint); }
+.lesson .l-good { padding: 8px 10px; background: color-mix(in srgb, var(--good) 10%, transparent); }
+
+/* правая панель (split3) */
+.as-card { padding: 12px; border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); }
+.as-card h3 { margin: 0 0 8px; font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--hint); }
+.as-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.as-n { padding: 8px 10px; border-radius: 12px; background: var(--tonal); display: flex; flex-direction: column; }
+.as-n small { font-size: .66rem; color: var(--hint); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.as-n b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.as-n.floor b { color: var(--warn); }
+.as-n.offer b { color: var(--good); }
+.as-n.ours b { color: var(--accent); filter: brightness(1.2); }
+.as-p { margin: 8px 0 0; font-size: .86rem; color: var(--sub); }
+.as-acts { display: flex; gap: 6px; margin-top: 10px; }
+.as-acts .btn { flex: 1; min-height: 44px; }
+.as-who { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; color: var(--text); padding: 4px; text-align: left; cursor: pointer; font: inherit; border-radius: 12px; }
+.as-who:active { background: var(--tonal); }
+.as-who .aw-t { min-width: 0; display: flex; flex-direction: column; }
+.as-who small { color: var(--hint); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-dossier { margin: 8px 0 0; padding-left: 18px; font-size: .82rem; color: var(--sub); }
+
+@media (max-width: 340px) {
+  .bub2 { max-width: 92%; }
+  .ds-nums { gap: 10px; }
+  .dn b { font-size: 1rem; }
+  .btn-send small { display: none; }
+  .btn-send { padding: 6px 12px; }
+  .tdock { gap: 6px; padding: 6px; }
+  .tdock .ibtn { min-width: 44px; }
+}
+/* Flex Window: только суть — последние письма, черновик, кнопка */
+:root[data-layout="flex"] .deal-strip,
+:root[data-layout="flex"] .th-chips,
+:root[data-layout="flex"] .maybe-same,
+:root[data-layout="flex"] .pult,
+:root[data-layout="flex"] .d2-tabs,
+:root[data-layout="flex"] .d2-head { display: none; }
+:root[data-layout="flex"] .draft2 { padding: 8px; }
+:root[data-layout="flex"] .draft2 textarea { min-height: 70px; font-size: .9rem; }
+
+/* узкая колонка треда (Fold-ландшафт, 280 px): короткая подпись кнопки */
+.th-main { container-type: inline-size; }
+.btn-send .l-short { display: none; }
+@container (max-width: 400px) {
+  .btn-send .l-long { display: none; }
+  .btn-send .l-short { display: inline; }
+  .btn-send small { display: none; }
+}
+.btn-send.busy { opacity: .7; }
+.btn-send.busy .ic { animation: spin 1s linear infinite; }
+@container (max-width: 300px) {
+  .btn-send > .ic { display: none; }
+  .btn-send { padding: 6px 10px; justify-content: center; }
+  .btn-send .bs-t { align-items: center; }
+}

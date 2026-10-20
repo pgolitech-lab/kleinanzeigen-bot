@@ -204,6 +204,42 @@ async def handle_api(route, request):
                                                  "access-control-allow-headers": "*", "access-control-allow-methods": "*"})
         return
     NET["api"] += 1
+    # POST /threads/{id}/open — чтение (тред + черновик + лок); мок отвечает данными
+    mo = re.match(r"^/api/ma/threads/([^/]+)/open$", url.path)
+    if request.method == "POST" and mo and MODE == "mock":
+        R["nonget"].append({"screen": CUR["label"], "method": "POST", "path": path, "body": None})
+        tid = urllib.parse.unquote(mo.group(1))
+        pend = {"T1": 101, "T2": 0, "T3": 0}.get(tid, 0)
+        data = _thread(tid, pend)
+        data["header"]["account_id"] = 1
+        data["review"] = _msg(pend, tid) if pend else None
+        data["lock"] = {"acquired": True, "holder": "qa", "remaining_min": 5} if pend else None
+        await asyncio.sleep(LAT)
+        await route.fulfill(status=200, content_type="application/json", body=json.dumps(data),
+                            headers={"access-control-allow-origin": "*"})
+        return
+    # правки черновика — мок отвечает review с изменённым текстом (как настоящий api)
+    me = re.match(r"^/api/ma/messages/(\d+)/(edit-de|edit-ru|price|regenerate|translate-draft|instruction)$", url.path)
+    if request.method == "POST" and me and MODE == "mock":
+        R["nonget"].append({"screen": CUR["label"], "method": "POST", "path": path, "body": (request.post_data or "")[:300]})
+        msg = _msg(int(me.group(1)), "T1")
+        try:
+            b = json.loads(request.post_data or "{}")
+        except ValueError:
+            b = {}
+        kind = me.group(2)
+        if kind == "edit-de" and b.get("text"):
+            msg["draft"]["de_answer"] = b["text"]
+        elif kind == "price":
+            msg["draft"]["de_answer"] = f"Für {int(b.get('eur', 0))} € gehört sie Ihnen. MfG"
+        elif kind == "regenerate":
+            msg["draft"]["de_answer"] = f"Variante ({b.get('strategy')}): Der Preis ist fest. MfG"
+        elif kind == "translate-draft":
+            msg["draft"]["de_answer"] = "Übersetzt: Der Preis ist 1000 €. MfG"
+        await asyncio.sleep(LAT)
+        await route.fulfill(status=200, content_type="application/json", body=json.dumps(msg),
+                            headers={"access-control-allow-origin": "*"})
+        return
     if request.method != "GET":
         body = request.post_data
         R["nonget"].append({"screen": CUR["label"], "method": request.method, "path": path,
