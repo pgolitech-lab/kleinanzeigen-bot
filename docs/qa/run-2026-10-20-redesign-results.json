@@ -1,0 +1,2732 @@
+{
+ "flip5-main/dark": {
+  "device": {
+   "w": 412,
+   "h": 915,
+   "dpr": 2.625
+  },
+  "theme": "dark",
+  "screens": {
+   "inbox": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [
+     "div.row «AN Anna_K 11:11 Sitzbank Citroën Jumpy З» right=416",
+     "div.row «KM Klaus M. 12:53 Rückbank Peugeot Trave» right=416",
+     "div.row «JE Jean 12:11 Sitzbank Ford Transit Cust» right=416",
+     "div.row «PI Piotr 08:11 Einzelsitz Fahrersitz VW » right=416",
+     "div.row «MY M.Yilmaz вчера Sitzbank 2er Mercedes » right=416",
+     "div.row «BS B.ST 18.10 Klappbank Renault Trafic М» right=416"
+    ],
+    "overflowN": 6,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:11 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:53 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:11 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:11 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »"
+    ],
+    "truncN": 10,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\nПроверить ›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:11\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "triage": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "4 ждут ответа\n1 из 4\nPI\nPiotr\nпольский\nEinzelsitz Fahrersitz VW T6\nЦена 250 €\nКЛИЕНТ · ПО-РУССКИ\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nОТВЕТ ИИ\nPL ✓\nDzień do",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "dashboard": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 125×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "div.rw «KM Klaus M. 12:53 Rückbank Peugeot Trave»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «JE Jean 12:11 Sitzbank Ford Transit Cust»",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «PI Piotr 08:11 Einzelsitz Fahrersitz VW »",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «MY M.Yilmaz вчера Sitzbank 2er Mercedes »",
+     "div.rw «BS B.ST 18.10 Klappbank Renault Trafic М»"
+    ],
+    "truncN": 8,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nKM\nKlaus M.\n12:53\nRückbank Peugeot",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "clients": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "КЛИЕНТЫ\n6\nKM\nKlaus M.\n12:53\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n12:11\nждёт ответа\n1 обращение · 1 товар\nAN\nAnna_K\n11:11\nждёт ответа\n1 обращение · 1 товар\nPI\nPiotr\n08:11\nждёт ответа\n1 обращение ",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "client": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Серьёзный» 118×40",
+     "button «Торгуется» 106×40",
+     "button «Тянет время» 128×40",
+     "button «Мошенник» 117×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "span.ct-brief «Покупатель торгуется, предлагает 300€ · »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nklausm.@example.invalid\n✉️ К переписке\n1\nобращение\n0\nпокупок\n20.10\nпоследнее\nМЕТКИ И ЗАМЕТКА\nСерьёзный\nТоргуется\nТянет время\nМошенник\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Lede",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "sales": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Неделя» 84×40",
+     "button «Месяц» 76×40",
+     "button «Год» 53×40",
+     "button «Всё» 53×40",
+     "input «Поиск продаж» 237×44",
+     "button «Все аккаунты ▾» 145×44",
+     "button «по дням ▾» 103×40"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "ЭТОТ МЕСЯЦ\n0 €\nпродаж нет\nНеделя\nМесяц\nГод\nВсё\n➕ Продажа\n🔍 Найдено: 1\nВсе аккаунты ▾\nпо дням ▾\nПРОДАЖИ\n0\n\nВ этом периоде продаж нет",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "detected": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Найденные продажи",
+    "text": "НА ПРОВЕРКУ\n1\nSitzbank 2er Mercedes Vito\nсомнительно\n20.10, 03:11 · M.Yilmaz · Garage West · в объявлении 600 €\n«Покупатель: «komme morgen abholen»»\nЦена продажи, €\nскидка 20 €\nПереписка\nНе продано\n✅ ",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "listings": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «▶️ Включить авто» 157×34",
+     "a «🚐 Машины» 118×30",
+     "a «🪑 Запчасти» 121×30",
+     "a «⚙️ Запросы» 115×30",
+     "input «on» 18×18"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Объявления",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "more": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Ещё",
+    "text": "📊\nОбзор\nсводка за сегодня и неделю\n›\n🔍\nНайденные продажи\nпроверить, что продано по переписке\n›\n🗺\nРынок\nпохожие объявления и цены\n›\n📮\nАккаунты\n5 почт Kleinanzeigen, проверка входа, бэкап\n›\n⚙️\nНастр",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "accounts": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Kleinanzeigen Bot",
+    "text": "Ошибка: Неизвестный путь: #/accounts",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": true
+   },
+   "settings": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "input «form-control» 388×44",
+     "input «60» 388×44",
+     "input «kleinanzeigen.de» 388×44",
+     "input «7» 388×44",
+     "input «1» 388×44",
+     "input «777000777» 388×44",
+     "input «10» 388×44",
+     "input «claude-sonnet-4-6» 388×44",
+     "input «1.0» 388×44",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 30,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "thread-draft": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 430 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nЦЕНА\n450\n450\n300\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 11:",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "thread-long": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 950 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Anna_K",
+    "text": "AN\nAnna_K\nAutoteile Süd · Sitzbank Citroën Jumpy\n↗\nЦЕНА\n1.000\n1.000\n300\nСегодня\nЗдравствуйте, очень интересует скамья... (длинный текст)\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie no",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-pl": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 240 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Piotr",
+    "text": "PI\nPiotr\nWerkstatt Ost · Einzelsitz Fahrersitz VW T6\n↗\nЦЕНА\n250\n250\n300\nСегодня\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłk",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-answered": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "M.Yilmaz",
+    "text": "MY\nM.Yilmaz\nGarage West · Sitzbank 2er Mercedes Vito\n↗\nЦЕНА\n600\nВчера\nСпасибо, напишу завтра.\nDanke, ich melde mich morgen.\n19.10, 07:11\nХорошо, жду.\nGerne, ich warte auf Ihre Nachricht.\nViele Grüße\n1",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-sold": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "B.ST",
+    "text": "BS\nB.ST\nTeile-Lager Mitte · Klappbank Renault Trafic\n↗\nЦЕНА\n350\n18 октября\nМогу забрать сегодня? Наличными.\nKann ich die Bank heute abholen? Barzahlung.\n18.10, 11:11\nДа, сегодня после 17.\nJa, heute ab",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-fr": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · FR» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 475 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Jean",
+    "text": "JE\nJean\nErsatzteile Nord · Sitzbank Ford Transit Custom\n↗\nЦЕНА\n500\n500\n300\nСегодня\nЗдравствуйте, финальная цена?\nBonjour, prix final ?\n20.10, 12:11\nЧерновик ИИ\nFR ✓\nКлиенту · FR\nПо-русски\n−5 % · 475 €",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "review": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 430 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nЦЕНА\n450\n450\n300\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 11:",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F1-final-sheet": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 430 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nЦЕНА\n450\n450\n300\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 11:",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F1-after-send": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nЦЕНА\n450\n⛔ Не отправлено — режим отправки выключен\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist d",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F2-guard-sheet": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · FR» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 475 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40",
+     "button «🌐 Перевести: французский» 378×42",
+     "input «on» 18×18"
+    ],
+    "smallN": 10,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Jean",
+    "text": "JE\nJean\nErsatzteile Nord · Sitzbank Ford Transit Custom\n↗\nЦЕНА\n500\n500\n300\nСегодня\nЗдравствуйте, финальная цена?\nBonjour, prix final ?\n20.10, 12:11\nЧерновик ИИ\nRU ✕\nКлиенту · FR\nПо-русски\nRU: [QA-пере",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F2-after": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «🌐 Перевести: французский» 378×42",
+     "input «on» 18×18"
+    ],
+    "smallN": 2,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Jean",
+    "text": "JE\nJean\nErsatzteile Nord · Sitzbank Ford Transit Custom\n↗\nЦЕНА\n500\n⛔ Не отправлено — режим отправки выключен\nСегодня\nЗдравствуйте, финальная цена?\nBonjour, prix final ?\n20.10, 12:11\n🤖 Предложить\n✉️ Н",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F3-sold-sheet": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «600» 378×44",
+     "button «600 €» 69×40",
+     "input «on» 18×18"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "M.Yilmaz",
+    "text": "MY\nM.Yilmaz\nGarage West · Sitzbank 2er Mercedes Vito\n↗\nЦЕНА\n600\nВчера\nСпасибо, напишу завтра.\nDanke, ich melde mich morgen.\n19.10, 07:11\nХорошо, жду.\nGerne, ich warte auf Ihre Nachricht.\nViele Grüße\n1",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F3-after": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "a «Sitzbank 2er Mercedes Vito · 600 € · 20.» 330×44",
+     "input «600» 378×44",
+     "button «600 €» 69×40",
+     "input «on» 18×18"
+    ],
+    "smallN": 4,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "M.Yilmaz",
+    "text": "MY\nM.Yilmaz\nGarage West · Sitzbank 2er Mercedes Vito\n↗\nЦЕНА\n600\nВозможно, тот же покупатель\nSitzbank 2er Mercedes Vito · 600 € · 20.10, 13:13\nВчера\nСпасибо, напишу завтра.\nDanke, ich melde mich morgen",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F4-chip": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 240 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Piotr",
+    "text": "PI\nPiotr\nWerkstatt Ost · Einzelsitz Fahrersitz VW T6\n↗\nЦЕНА\n250\n250\n300\nСегодня\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłk",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F7-triage-next": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "1 ждут ответа\n3 из 3\nPI\nPiotr\nпольский\nEinzelsitz Fahrersitz VW T6\nЦена 250 €\nКЛИЕНТ · ПО-РУССКИ\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nОТВЕТ ИИ\nPL ✓\nDzień do",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F8-kb": {
+    "W": 412,
+    "H": 503,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 176×38",
+     "button «По-русски» 176×38",
+     "button «−5 % · 240 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Piotr",
+    "text": "PI\nPiotr\nWerkstatt Ost · Einzelsitz Fahrersitz VW T6\n↗\nЦЕНА\n250\n250\n300\nСегодня\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłk",
+    "layout": "phone",
+    "theme": "dark",
+    "unknown_route": false
+   }
+  },
+  "flows": {
+   "F1_final_text": "Финальный текст\nУЙДЁТ КЛИЕНТУ\nDE ✓\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\nПроверено: язык клиента (немецкий)\n✏️ Править\n✅ Отправить",
+   "F1_send_enabled": true,
+   "F1_taps": 3,
+   "F1_send_resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+   "F1_toast": [
+    "⛔ Не отправлено — режим отправки выключен",
+    "⛔ Не отправлено — режим отправки выключен"
+   ],
+   "F1_says_sent": false,
+   "F2_mismatch_shown": true,
+   "F2_send_disabled_before_cb": true,
+   "F2_send_enabled_after_cb": true,
+   "F2_sends": [
+    [
+     "{\"mode\":\"as_is\",\"force\":true}",
+     200
+    ]
+   ],
+   "F2_ok": true,
+   "F3_price_prefilled": "600",
+   "F3_sold_req": [
+    [
+     "/api/ma/threads/qa-t4/sold",
+     200,
+     "{\"ok\":true,\"status\":\"skipped_sold\",\"sold_price_eur\":600.0,\"msg_id\":4,\"closed_other_threads\":[],\"separate_sale\":{\"msg_id\""
+    ]
+   ],
+   "F3_taps": 2,
+   "F3_toast": [
+    "✅ Продажа 600 € записана"
+   ],
+   "F4_chip_req": [
+    [
+     "/api/ma/threads/qa-t3/open",
+     "{\"focus\":null,\"acquire\":true}",
+     200
+    ],
+    [
+     "/api/ma/messages/3/price",
+     "{\"eur\":240}",
+     500
+    ]
+   ],
+   "F4_visible_error": [
+    "❌ Перегенерация упала: QA: LLM отключён в тестовом бэкенде"
+   ],
+   "F5_tg_back_visible": true,
+   "F5_after_back_hash": "#/pipeline",
+   "F5_sheet_or_confirm": false,
+   "F5_text_after_return": "Dzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\nPozdrawiam",
+   "F5_kept": false,
+   "F5_tg_back_hash": "#/thread/qa-t3",
+   "F6_sheet_opened": true,
+   "F6_sheet_after_nav": false,
+   "F7_counter": [
+    "1 из 3",
+    "3 из 3"
+   ],
+   "F8_kb": {
+    "H": 503,
+    "ta_top": 406,
+    "ta_bottom": 503,
+    "ta_visible": true,
+    "send_visible": true,
+    "tabbar_visible": false
+   }
+  },
+  "events": {
+   "errors": [
+    {
+     "screen": "F4-chip",
+     "type": "console",
+     "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    }
+   ],
+   "http": [
+    {
+     "status": 500,
+     "method": "POST",
+     "path": "/api/ma/messages/3/price",
+     "body": "{\"detail\":\"❌ Перегенерация упала: QA: LLM отключён в тестовом бэкенде\"}",
+     "screen": "F4-chip"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t2/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t2\",\"ad_title\":\"Sitzbank Citroën Jumpy\",\"ad_price\":\"1000 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000001\",\"buyer_display_name\":\"Anna_K\",\"buyer_email\":\"anna_k@example.invalid\",\"account_id\":2,\"a",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t4\",\"ad_title\":\"Sitzbank 2er Mercedes Vito\",\"ad_price\":\"600 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000003\",\"buyer_display_name\":\"M.Yilmaz\",\"buyer_email\":\"m.yilmaz@example.invalid\",\"account_id",
+     "screen": "thread-answered"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t5/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t5\",\"ad_title\":\"Klappbank Renault Trafic\",\"ad_price\":\"350 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000004\",\"buyer_display_name\":\"B.ST\",\"buyer_email\":\"b.st@example.invalid\",\"account_id\":5,\"accou",
+     "screen": "thread-sold"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "thread-fr"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":1,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "F1-send"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lang-check",
+     "body": "{\"text\":\"Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\\nMit freundlichen Grüßen\"}",
+     "status": 200,
+     "resp": "{\"detected_lang\":\"de\",\"client_lang\":\"de\",\"match\":true}",
+     "screen": "F1-send"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/send",
+     "body": "{\"mode\":\"as_is\",\"force\":false}",
+     "status": 200,
+     "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "F2-guard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/edit-de",
+     "body": "{\"text\":\"Здравствуйте, цена окончательная, забрать можно сегодня.\"}",
+     "status": 200,
+     "resp": "{\"msg_id\":6,\"thread_id\":\"qa-t6\",\"status\":\"edited\",\"ad\":{\"title\":\"Sitzbank Ford Transit Custom\",\"price\":\"500 €\",\"url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"id\":\"2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@",
+     "screen": "F2-guard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/send",
+     "body": "{\"mode\":\"as_is\",\"force\":true}",
+     "status": 200,
+     "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+     "screen": "F2-guard-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F2-guard-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "F2-guard-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t4\",\"ad_title\":\"Sitzbank 2er Mercedes Vito\",\"ad_price\":\"600 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000003\",\"buyer_display_name\":\"M.Yilmaz\",\"buyer_email\":\"m.yilmaz@example.invalid\",\"account_id",
+     "screen": "F3-sold"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/sold",
+     "body": "{\"price_eur\":600,\"close_other_threads_for_ad\":true}",
+     "status": 200,
+     "resp": "{\"ok\":true,\"status\":\"skipped_sold\",\"sold_price_eur\":600.0,\"msg_id\":4,\"closed_other_threads\":[],\"separate_sale\":{\"msg_id\":8,\"thread_id\":\"manual-4ead5137b5b94e60\"},\"stock\":{\"product_id\":null,\"qty_after\":null,\"stock_tracked\":false}}",
+     "screen": "F3-sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t4\",\"ad_title\":\"Sitzbank 2er Mercedes Vito\",\"ad_price\":\"600 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000003\",\"buyer_display_name\":\"M.Yilmaz\",\"buyer_email\":\"m.yilmaz@example.invalid\",\"account_id",
+     "screen": "F3-sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F4-chip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/price",
+     "body": "{\"eur\":240}",
+     "status": 500,
+     "resp": "{\"detail\":\"❌ Перегенерация упала: QA: LLM отключён в тестовом бэкенде\"}",
+     "screen": "F4-chip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F5-back"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F5-back"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F5-back"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F5-back"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F5-back"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lang-check",
+     "body": "{\"text\":\"Dzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\\nPozdrawiam\"}",
+     "status": 200,
+     "resp": "{\"detected_lang\":\"pl\",\"client_lang\":\"pl\",\"match\":true}",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F8-kb"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "flip5-flex/dark": {
+  "device": {
+   "w": 306,
+   "h": 340,
+   "dpr": 2.35
+  },
+  "theme": "dark",
+  "screens": {
+   "inbox": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "div.t3-de «Dzień dobry, tak, fotel jest dostępny. W»"
+    ],
+    "truncN": 1,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "4 ждут ответа\n1 из 4\nPI\nPiotr\nпольский\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nDzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\nPozdrawi",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "triage": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "div.t3-de «Dzień dobry, tak, fotel jest dostępny. W»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "4 ждут ответа\n1 из 4\nPI\nPiotr\nпольский\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nDzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\nPozdrawi",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "dashboard": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 125×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "div.rw «KM Klaus M. 12:56 Rückbank Peugeot Trave»",
+     "span.r-ad «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «JE Jean 12:14 Sitzbank Ford Transit Cust»",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «PI Piotr 08:14 Einzelsitz Fahrersitz VW »",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «MY M.Yilmaz вчера Sitzbank 2er Mercedes »",
+     "div.rw «BS B.ST 18.10 Klappbank Renault Trafic М»",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 10,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nKM\nKlaus M.\n12:56\nRückbank Peugeot",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "clients": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [
+     "div.clist «KM Klaus M. 12:56 ждём клиента 1 обращен» right=310",
+     "a.crow «KM Klaus M. 12:56 ждём клиента 1 обращен» right=310",
+     "a.crow «JE Jean 12:14 ждёт ответа 1 обращение · » right=310",
+     "a.crow «AN Anna_K 11:14 ждёт ответа 1 обращение » right=310",
+     "a.crow «PI Piotr 08:14 ждёт ответа 1 обращение ·» right=310",
+     "a.crow «MY M.Yilmaz вчера ждём клиента 1 обращен» right=310",
+     "a.crow «BS B.ST 18.10 ждём клиента 1 обращение ·» right=310"
+    ],
+    "overflowN": 7,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "span.cr-meta «1 обращение · 1 товар»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "КЛИЕНТЫ\n6\nKM\nKlaus M.\n12:56\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n12:14\nждёт ответа\n1 обращение · 1 товар\nAN\nAnna_K\n11:14\nждёт ответа\n1 обращение · 1 товар\nPI\nPiotr\n08:14\nждёт ответа\n1 обращение ",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "client": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Серьёзный» 118×40",
+     "button «Торгуется» 106×40",
+     "button «Тянет время» 128×40",
+     "button «Мошенник» 117×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "span.ct-brief «Покупатель торгуется, предлагает 300€ · »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nklausm.@example.invalid\n✉️ К переписке\n1\nобращение\n0\nпокупок\n20.10\nпоследнее\nМЕТКИ И ЗАМЕТКА\nСерьёзный\nТоргуется\nТянет время\nМошенник\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Lede",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "sales": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [
+     "div.s-list «В этом периоде продаж нет» right=310",
+     "div.empty «В этом периоде продаж нет» right=310"
+    ],
+    "overflowN": 2,
+    "small": [
+     "button «Неделя» 84×40",
+     "button «Месяц» 76×40",
+     "button «Год» 53×40",
+     "button «Всё» 53×40",
+     "input «Поиск продаж» 290×44",
+     "button «Все аккаунты ▾» 145×40",
+     "button «по дням ▾» 103×40"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "ЭТОТ МЕСЯЦ\n0 €\nпродаж нет\nНеделя\nМесяц\nГод\nВсё\n➕ Продажа\n🔍 Найдено: 1\nВсе аккаунты ▾\nпо дням ▾\nПРОДАЖИ\n0\n\nВ этом периоде продаж нет",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "detected": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Найденные продажи",
+    "text": "НА ПРОВЕРКУ\n1\nSitzbank 2er Mercedes Vito\nсомнительно\n20.10, 03:14 · M.Yilmaz · Garage West · в объявлении 600 €\n«Покупатель: «komme morgen abholen»»\nЦена продажи, €\nскидка 20 €\nПереписка\nНе продано\n✅ ",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "listings": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «on» 18×18"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Объявления",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "more": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Ещё",
+    "text": "📊\nОбзор\nсводка за сегодня и неделю\n›\n🔍\nНайденные продажи\nпроверить, что продано по переписке\n›\n🗺\nРынок\nпохожие объявления и цены\n›\n📮\nАккаунты\n5 почт Kleinanzeigen, проверка входа, бэкап\n›\n⚙️\nНастр",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "accounts": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Kleinanzeigen Bot",
+    "text": "Ошибка: Неизвестный путь: #/accounts",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": true
+   },
+   "settings": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "input «form-control» 290×44",
+     "input «60» 290×44",
+     "input «kleinanzeigen.de» 290×44",
+     "input «7» 290×44",
+     "input «1» 290×44",
+     "input «777000777» 290×44",
+     "input «10» 290×44",
+     "input «claude-sonnet-4-6» 290×44",
+     "input «1.0» 290×44",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 30,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "thread-draft": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 11:14\nДа, доступна.\n",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "thread-long": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Anna_K",
+    "text": "AN\nAnna_K\nAutoteile Süd · Sitzbank Citroën Jumpy\n↗\nСегодня\nЗдравствуйте, очень интересует скамья... (длинный текст)\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-pl": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Piotr",
+    "text": "PI\nPiotr\nWerkstatt Ost · Einzelsitz Fahrersitz VW T6\n↗\nСегодня\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\n20.1",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-answered": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [
+     "button.ibtn «Ещё действия» right=357"
+    ],
+    "overflowN": 1,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "M.Yilmaz",
+    "text": "MY\nM.Yilmaz\nGarage West · Sitzbank 2er Mercedes Vito\n↗\nВчера\nСпасибо, напишу завтра.\nDanke, ich melde mich morgen.\n19.10, 07:14\nХорошо, жду.\nGerne, ich warte auf Ihre Nachricht.\nViele Grüße\n19.10, 08:",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-sold": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [
+     "button.ibtn «Ещё действия» right=357"
+    ],
+    "overflowN": 1,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "B.ST",
+    "text": "BS\nB.ST\nTeile-Lager Mitte · Klappbank Renault Trafic\n↗\n18 октября\nМогу забрать сегодня? Наличными.\nKann ich die Bank heute abholen? Barzahlung.\n18.10, 11:14\nДа, сегодня после 17.\nJa, heute ab 17 Uhr m",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-fr": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Jean",
+    "text": "JE\nJean\nErsatzteile Nord · Sitzbank Ford Transit Custom\n↗\nСегодня\nЗдравствуйте, финальная цена?\nBonjour, prix final ?\n20.10, 12:14\nОтправить\n⋯",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "review": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Klaus M.",
+    "text": "KM\nKlaus M.\nErsatzteile Nord · Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n↗\nВчера\nЗдравствуйте, скамья ещё доступна?\nHallo, ist die Bank noch verfügbar?\n19.10, 11:14\nДа, доступна.\n",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F1-final-sheet": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "div.t3-de «Dzień dobry, tak, fotel jest dostępny. W»"
+    ],
+    "truncN": 1,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "4 ждут ответа\n1 из 4\nPI\nPiotr\nпольский\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nDzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\nPozdrawi",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F1-after-send": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "div.t3-de «Hallo Klaus, ja, sie ist noch da. 300 € »"
+    ],
+    "truncN": 1,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Разбор",
+    "text": "3 ждут ответа\n2 из 4\nKM\nKlaus M.\nнемецкий\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать оригинал\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundliche",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F7-triage-next": {
+    "W": 306,
+    "H": 340,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [
+     "div.t3-de «Hallo Klaus, ja, sie ist noch da. 300 € »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "1 ждут ответа\n3 из 3\nKM\nKlaus M.\nнемецкий\nЗадняя скамья ещё есть? Последняя цена 300?\nПоказать оригинал\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundliche",
+    "layout": "flex",
+    "theme": "dark",
+    "unknown_route": false
+   }
+  },
+  "flows": {
+   "F1_final_text": "Отправить ответ?\nУЙДЁТ КЛИЕНТУ\nPL ✓\nDzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\nPozdrawiam\nПроверено: польский\nОтмена\n✅ Отправить",
+   "F1_send_enabled": true,
+   "F1_taps": 2,
+   "F1_send_resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+   "F1_toast": [
+    "⛔ Не отправлено — режим отправки выключен"
+   ],
+   "F1_says_sent": false,
+   "F7_counter": [
+    "1 из 3",
+    "3 из 3"
+   ]
+  },
+  "events": {
+   "errors": [],
+   "http": [],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t2/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t2\",\"ad_title\":\"Sitzbank Citroën Jumpy\",\"ad_price\":\"1000 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000001\",\"buyer_display_name\":\"Anna_K\",\"buyer_email\":\"anna_k@example.invalid\",\"account_id\":2,\"a",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t4\",\"ad_title\":\"Sitzbank 2er Mercedes Vito\",\"ad_price\":\"600 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000003\",\"buyer_display_name\":\"M.Yilmaz\",\"buyer_email\":\"m.yilmaz@example.invalid\",\"account_id",
+     "screen": "thread-answered"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t5/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t5\",\"ad_title\":\"Klappbank Renault Trafic\",\"ad_price\":\"350 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000004\",\"buyer_display_name\":\"B.ST\",\"buyer_email\":\"b.st@example.invalid\",\"account_id\":5,\"accou",
+     "screen": "thread-sold"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "thread-fr"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":1,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lang-check",
+     "body": "{\"text\":\"Dzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\\nPozdrawiam\"}",
+     "status": 200,
+     "resp": "{\"detected_lang\":\"pl\",\"client_lang\":\"pl\",\"match\":true}",
+     "screen": "F1-send"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "status": 200,
+     "resp": "{\"holder\":\"@qa_operator#777000777\",\"remaining_min\":5}",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/send",
+     "body": "{\"mode\":\"as_is\",\"force\":false}",
+     "status": 200,
+     "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F1-final-sheet"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "fold-inner/dark": {
+  "device": {
+   "w": 910,
+   "h": 820,
+   "dpr": 2.625
+  },
+  "theme": "dark",
+  "screens": {
+   "inbox": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "triage": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "4 ждут ответа\n1 из 4\nPI\nPiotr\nпольский\nEinzelsitz Fahrersitz VW T6\nЦена 250 €\nКЛИЕНТ · ПО-РУССКИ\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nОТВЕТ ИИ\nPL ✓\nDzień do",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "dashboard": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 125×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "div.rw «KM Klaus M. 12:58 Rückbank Peugeot Trave»",
+     "div.rw «JE Jean 12:16 Sitzbank Ford Transit Cust»",
+     "div.rw «PI Piotr 08:16 Einzelsitz Fahrersitz VW »",
+     "div.rw «MY M.Yilmaz вчера Sitzbank 2er Mercedes »",
+     "div.rw «BS B.ST 18.10 Klappbank Renault Trafic М»"
+    ],
+    "truncN": 5,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nKM\nKlaus M.\n12:58\nRückbank Peugeot",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "clients": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "span.cr-meta «1 обращение · 1 товар»"
+    ],
+    "truncN": 3,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "КЛИЕНТЫ\n6\nKM\nKlaus M.\n12:58\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n12:16\nждёт ответа\n1 обращение · 1 товар\nAN\nAnna_K\n11:16\nждёт ответа\n1 обращение · 1 товар\nPI\nPiotr\n08:16\nждёт ответа\n1 обращение ",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "client": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Серьёзный» 118×40",
+     "button «Торгуется» 106×40",
+     "button «Тянет время» 128×40",
+     "button «Мошенник» 117×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "span.cr-meta «1 обращение · 1 товар»"
+    ],
+    "truncN": 3,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "КЛИЕНТЫ\n6\nKM\nKlaus M.\n12:58\nждём клиента\n1 обращение · 1 товар\nJE\nJean\n12:16\nждёт ответа\n1 обращение · 1 товар\nAN\nAnna_K\n11:16\nждёт ответа\n1 обращение · 1 товар\nPI\nPiotr\n08:16\nждёт ответа\n1 обращение ",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": false
+   },
+   "sales": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Неделя» 84×40",
+     "button «Месяц» 76×40",
+     "button «Год» 53×40",
+     "button «Всё» 53×40",
+     "input «Поиск продаж» 287×44",
+     "button «Все аккаунты ▾» 145×44",
+     "button «по дням ▾» 103×40"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "ЭТОТ МЕСЯЦ\n0 €\nпродаж нет\nНеделя\nМесяц\nГод\nВсё\n➕ Продажа\n🔍 Найдено: 1\nВсе аккаунты ▾\nпо дням ▾\nПРОДАЖИ\n0\n\nВ этом периоде продаж нет",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "detected": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Найденные продажи",
+    "text": "НА ПРОВЕРКУ\n1\nSitzbank 2er Mercedes Vito\nсомнительно\n20.10, 03:16 · M.Yilmaz · Garage West · в объявлении 600 €\n«Покупатель: «komme morgen abholen»»\nЦена продажи, €\nскидка 20 €\nПереписка\nНе продано\n✅ ",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "listings": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «▶️ Включить авто» 157×34",
+     "a «🚐 Машины» 118×30",
+     "a «🪑 Запчасти» 121×30",
+     "a «⚙️ Запросы» 115×30",
+     "input «on» 18×18"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Объявления",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "more": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Ещё",
+    "text": "📊\nОбзор\nсводка за сегодня и неделю\n›\n🔍\nНайденные продажи\nпроверить, что продано по переписке\n›\n🗺\nРынок\nпохожие объявления и цены\n›\n📮\nАккаунты\n5 почт Kleinanzeigen, проверка входа, бэкап\n›\n⚙️\nНастр",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "accounts": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Kleinanzeigen Bot",
+    "text": "Ошибка: Неизвестный путь: #/accounts",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": true
+   },
+   "settings": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "input «form-control» 886×44",
+     "input «60» 886×44",
+     "input «kleinanzeigen.de» 886×44",
+     "input «7» 886×44",
+     "input «1» 886×44",
+     "input «777000777» 886×44",
+     "input «10» 886×44",
+     "input «claude-sonnet-4-6» 886×44",
+     "input «1.0» 886×44",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 30,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": true
+   },
+   "thread-draft": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 121×38",
+     "button «По-русски» 121×38",
+     "button «−5 % · 430 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false,
+    "tg_back_visible": false
+   },
+   "thread-long": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 123×38",
+     "button «По-русски» 123×38",
+     "button «−5 % · 950 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Anna_K",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-pl": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 130×38",
+     "button «По-русски» 130×38",
+     "button «−5 % · 240 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Piotr",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-answered": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "M.Yilmaz",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-sold": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "B.ST",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "thread-fr": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · FR» 132×38",
+     "button «По-русски» 132×38",
+     "button «−5 % · 475 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Jean",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "review": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 121×38",
+     "button «По-русски» 121×38",
+     "button «−5 % · 430 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F1-final-sheet": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · DE» 121×38",
+     "button «По-русски» 121×38",
+     "button «−5 % · 430 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F1-after-send": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F2-guard-sheet": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · FR» 132×38",
+     "button «По-русски» 132×38",
+     "button «−5 % · 475 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40",
+     "button «🌐 Перевести: французский» 876×42",
+     "input «on» 18×18"
+    ],
+    "smallN": 14,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Jean",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F2-after": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 6» 80×40",
+     "button «Ждут 4» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «🌐 Перевести: французский» 876×42",
+     "input «on» 18×18"
+    ],
+    "smallN": 6,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано JE Jean 12:16 Sitzbank Ford »",
+     "span.r-msg «Здравствуйте, финальная цена?»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 11,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Jean",
+    "text": "3\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n6\nЖдут\n4\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F4-chip": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 5» 80×40",
+     "button «Ждут 3» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 130×38",
+     "button «По-русски» 130×38",
+     "button «−5 % · 240 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 9,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Piotr",
+    "text": "2\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n5\nЖдут\n3\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F7-triage-next": {
+    "W": 910,
+    "H": 820,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Показать оригинал» 148×26"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": true,
+    "title": "Разбор",
+    "text": "1 ждут ответа\n3 из 3\nPI\nPiotr\nпольский\nEinzelsitz Fahrersitz VW T6\nЦена 250 €\nКЛИЕНТ · ПО-РУССКИ\nДобрый день, кресло доступно? Сколько стоит доставка в Польшу?\nПоказать оригинал\nОТВЕТ ИИ\nPL ✓\nDzień do",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   },
+   "F8-kb": {
+    "W": 910,
+    "H": 451,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все 5» 80×40",
+     "button «Ждут 3» 95×40",
+     "button «Ждём 2» 99×40",
+     "button «Все аккаунты ▾» 148×40",
+     "button «ibtn sm d2-lessons» 36×36",
+     "button «Клиенту · PL» 130×38",
+     "button «По-русски» 130×38",
+     "button «−5 % · 240 €» 114×40",
+     "button «🔒 Без торга» 125×40",
+     "button «Короче» 85×40",
+     "button «Мягче» 77×40",
+     "button «🔁 Вариант» 118×40"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.rw «Жду Продано AN Anna_K 11:16 Sitzbank Cit»",
+     "span.r-msg «Здравствуйте, очень интересует скамья...»",
+     "div.rw «Жду Продано PI Piotr 08:16 Einzelsitz Fa»",
+     "span.r-msg «Добрый день, кресло доступно? Сколько ст»",
+     "div.rw «Жду Продано KM Klaus M. 12:58 Rückbank P»",
+     "span.r-msg «Задняя скамья ещё есть? Последняя цена 3»",
+     "div.rw «Продано MY M.Yilmaz вчера Sitzbank 2er M»",
+     "div.rw «Продано BS B.ST 18.10 Klappbank Renault »",
+     "span.r-msg «Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 9,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Piotr",
+    "text": "2\nждут ответа\n2\nждём клиента\n💰 Найдено продаж: 1\n›\nВсе\n5\nЖдут\n3\nЖдём\n2\nВсе аккаунты\n▾\nЗАКРЕПЛЁННЫЕ\n1\nЖду\nПродано\nAN\nAnna_K\n11:16\nSitzbank Citroën Jumpy\nЗдравствуйте, очень интересует скамья... (длинн",
+    "layout": "split3",
+    "theme": "dark",
+    "unknown_route": false
+   }
+  },
+  "flows": {
+   "F1_final_text": "Финальный текст\nУЙДЁТ КЛИЕНТУ\nDE ✓\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\nПроверено: язык клиента (немецкий)\n✏️ Править\n✅ Отправить",
+   "F1_send_enabled": true,
+   "F1_taps": 3,
+   "F1_send_resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+   "F1_toast": [
+    "⛔ Не отправлено — режим отправки выключен",
+    "⛔ Не отправлено — режим отправки выключен"
+   ],
+   "F1_says_sent": false,
+   "F2_mismatch_shown": true,
+   "F2_send_disabled_before_cb": true,
+   "F2_send_enabled_after_cb": true,
+   "F2_sends": [
+    [
+     "{\"mode\":\"as_is\",\"force\":true}",
+     200
+    ]
+   ],
+   "F2_ok": true,
+   "F3_error": "Locator.click: Timeout 6000ms exceeded.\nCall log:\n  - waiting for locator(\".d-sold, button:has-text('Продано')\").first\n    - locator resolved to <button class=\"ra ra-sold\">…</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is visible,",
+   "F4_chip_req": [
+    [
+     "/api/ma/threads/qa-t3/open",
+     "{\"focus\":null,\"acquire\":true}",
+     200
+    ],
+    [
+     "/api/ma/messages/3/price",
+     "{\"eur\":240}",
+     500
+    ]
+   ],
+   "F4_visible_error": [
+    "❌ Перегенерация упала: QA: LLM отключён в тестовом бэкенде"
+   ],
+   "F5_tg_back_visible": false,
+   "F5_after_back_hash": "#/thread/qa-t3",
+   "F5_sheet_or_confirm": false,
+   "F5_text_after_return": "QA-ПРАВКА оператора, не отправлена",
+   "F5_kept": true,
+   "F5_tg_back_hash": "#/thread/qa-t3",
+   "F6_sheet_opened": true,
+   "F6_sheet_after_nav": false,
+   "F7_counter": [
+    "1 из 3",
+    "3 из 3"
+   ],
+   "F8_kb": {
+    "H": 451,
+    "ta_top": 329,
+    "ta_bottom": 451,
+    "ta_visible": true,
+    "send_visible": true,
+    "tabbar_visible": false
+   }
+  },
+  "events": {
+   "errors": [
+    {
+     "screen": "F4-chip",
+     "type": "console",
+     "msg": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    }
+   ],
+   "http": [
+    {
+     "status": 500,
+     "method": "POST",
+     "path": "/api/ma/messages/3/price",
+     "body": "{\"detail\":\"❌ Перегенерация упала: QA: LLM отключён в тестовом бэкенде\"}",
+     "screen": "F4-chip"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release-beacon",
+     "body": "user=%7B%22id%22%3A777000777%2C%22first_name%22%3A%22QA%22%2C%22username%22%3A%22qa_operator%22%7D&auth_date=1792495027&query_id=QA&hash=ab43bd05b3dbf075a0dabaf79f536779cd523fa856614dba6b549efa939fdd4",
+     "status": 204,
+     "resp": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t2/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t2\",\"ad_title\":\"Sitzbank Citroën Jumpy\",\"ad_price\":\"1000 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000001\",\"buyer_display_name\":\"Anna_K\",\"buyer_email\":\"anna_k@example.invalid\",\"account_id\":2,\"a",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release-beacon",
+     "body": "user=%7B%22id%22%3A777000777%2C%22first_name%22%3A%22QA%22%2C%22username%22%3A%22qa_operator%22%7D&auth_date=1792495030&query_id=QA&hash=8ef4d8171eab5238ad6f31f5eb24179f9902c4312f6aa0e6ffc0434d9d62395",
+     "status": 204,
+     "resp": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release-beacon",
+     "body": "user=%7B%22id%22%3A777000777%2C%22first_name%22%3A%22QA%22%2C%22username%22%3A%22qa_operator%22%7D&auth_date=1792495034&query_id=QA&hash=caf2a999c2324dc8c36b7d52e4a8e59ebc7c693accb6eef2b993d67d765d9e1",
+     "status": 204,
+     "resp": "",
+     "screen": "thread-answered"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t4\",\"ad_title\":\"Sitzbank 2er Mercedes Vito\",\"ad_price\":\"600 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000003\",\"buyer_display_name\":\"M.Yilmaz\",\"buyer_email\":\"m.yilmaz@example.invalid\",\"account_id",
+     "screen": "thread-answered"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t5/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t5\",\"ad_title\":\"Klappbank Renault Trafic\",\"ad_price\":\"350 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000004\",\"buyer_display_name\":\"B.ST\",\"buyer_email\":\"b.st@example.invalid\",\"account_id\":5,\"accou",
+     "screen": "thread-sold"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "thread-fr"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":1,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "F1-send"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lang-check",
+     "body": "{\"text\":\"Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\\nMit freundlichen Grüßen\"}",
+     "status": 200,
+     "resp": "{\"detected_lang\":\"de\",\"client_lang\":\"de\",\"match\":true}",
+     "screen": "F1-send"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/send",
+     "body": "{\"mode\":\"as_is\",\"force\":false}",
+     "status": 200,
+     "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t1/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t1\",\"ad_title\":\"Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\",\"ad_price\":\"450 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000000\",\"buyer_display_name\":\"Klaus M.\",\"buyer_email\":\"",
+     "screen": "F1-final-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "F2-guard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/edit-de",
+     "body": "{\"text\":\"Здравствуйте, цена окончательная, забрать можно сегодня.\"}",
+     "status": 200,
+     "resp": "{\"msg_id\":6,\"thread_id\":\"qa-t6\",\"status\":\"edited\",\"ad\":{\"title\":\"Sitzbank Ford Transit Custom\",\"price\":\"500 €\",\"url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"id\":\"2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@",
+     "screen": "F2-guard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/send",
+     "body": "{\"mode\":\"as_is\",\"force\":true}",
+     "status": 200,
+     "resp": "{\"ok\":true,\"status\":\"not_sent_disabled\",\"closed_drafts\":[]}",
+     "screen": "F2-guard-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F2-guard-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t6/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t6\",\"ad_title\":\"Sitzbank Ford Transit Custom\",\"ad_price\":\"500 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000005\",\"buyer_display_name\":\"Jean\",\"buyer_email\":\"jean@example.invalid\",\"account_id\":1,\"a",
+     "screen": "F2-guard-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t4/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t4\",\"ad_title\":\"Sitzbank 2er Mercedes Vito\",\"ad_price\":\"600 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000003\",\"buyer_display_name\":\"M.Yilmaz\",\"buyer_email\":\"m.yilmaz@example.invalid\",\"account_id",
+     "screen": "F3-sold"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F4-chip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/price",
+     "body": "{\"eur\":240}",
+     "status": 500,
+     "resp": "{\"detail\":\"❌ Перегенерация упала: QA: LLM отключён в тестовом бэкенде\"}",
+     "screen": "F4-chip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F5-back"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release-beacon",
+     "body": "user=%7B%22id%22%3A777000777%2C%22first_name%22%3A%22QA%22%2C%22username%22%3A%22qa_operator%22%7D&auth_date=1792495093&query_id=QA&hash=b019ac25026e2af0f0dee179d407b4bfcff915832aa9ea0db2d40f12b62a840",
+     "status": 204,
+     "resp": "",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lang-check",
+     "body": "{\"text\":\"Dzień dobry, tak, fotel jest dostępny. Wysyłka do Polski kosztuje 60 €.\\nPozdrawiam\"}",
+     "status": 200,
+     "resp": "{\"detected_lang\":\"pl\",\"client_lang\":\"pl\",\"match\":true}",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "status": 204,
+     "resp": "",
+     "screen": "F6-sheet-nav"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/threads/qa-t3/open",
+     "body": "{\"focus\":null,\"acquire\":true}",
+     "status": 200,
+     "resp": "{\"header\":{\"thread_id\":\"qa-t3\",\"ad_title\":\"Einzelsitz Fahrersitz VW T6\",\"ad_price\":\"250 €\",\"ad_url\":\"https://www.kleinanzeigen.de/s-anzeige/qa/2900000002\",\"buyer_display_name\":\"Piotr\",\"buyer_email\":\"piotr@example.invalid\",\"account_id\":3,\"",
+     "screen": "F8-kb"
+    }
+   ],
+   "dialogs": []
+  }
+ }
+}
