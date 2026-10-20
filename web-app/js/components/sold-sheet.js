@@ -1,7 +1,8 @@
 // «💰 Продано» — один лист для треда и для свайпа во Входящих.
 // Итог QA «ленивый продажник» + склад: цена обязательна и предзаполнена
 // (/threads/{id}/sale-price — переговоры, бриф, наш ответ, объявление),
-// кандидаты — чипами, количество, «закрыть остальных» включено по умолчанию;
+// кандидаты — чипами; «закрыть остальных» выключено (на складе может быть
+// несколько штук под одним объявлением);
 // после записи — «на складе осталось N» или «товар не найден на складе».
 // Эндпоинт: /threads/{id}/sold (работает и без черновика), пока api его не
 // выкатил — фолбэк на /messages/{msgId}/sold.
@@ -33,10 +34,8 @@ export function openSoldSheet(opts) {
       <input type="number" inputmode="decimal" min="0" step="1" class="form-control sold-price">
       <div class="sold-hint"></div>
       <div class="chips-row sold-chips"></div>
-      <label class="form-label small mt-1">Сколько штук</label>
-      <input type="number" inputmode="numeric" min="1" step="1" value="1" class="form-control sold-qty">
       <label class="form-check mt-2">
-        <input type="checkbox" class="form-check-input close-other" checked>
+        <input type="checkbox" class="form-check-input close-other">
         <span class="form-check-label">Закрыть остальные переговоры по этому объявлению</span>
       </label>
       <div class="form-error text-danger small my-2 d-none"></div>
@@ -79,21 +78,19 @@ export function openSoldSheet(opts) {
   const save = form.querySelector(".save-btn");
   save.addEventListener("click", async () => {
     const price = Number(input.value.trim().replace(",", "."));
-    if (!input.value.trim() || Number.isNaN(price) || price < 0) {
+    if (!input.value.trim() || Number.isNaN(price) || price <= 0) {
       input.classList.add("is-invalid");
       return;
     }
-    const qty = Math.max(1, Math.round(Number(form.querySelector(".sold-qty").value) || 1));
     save.disabled = true;
     save.textContent = "⏳ Сохраняю…";
     try {
-      const { res, legacy } = await postSold(opts, { price_eur: price, qty, close_other_threads_for_ad: form.querySelector(".close-other").checked });
+      const { res } = await postSold(opts, { price_eur: price, close_other_threads_for_ad: form.querySelector(".close-other").checked });
       closeSheet();
       invalidateSoldToday();
       const st = res?.stock;
       let tail = "";
-      if (legacy && qty > 1) tail = ` · ⚠️ записана 1 продажа: количество ${qty} сервер пока не принимает`;
-      else if (st && res.product_id === null) tail = " · товар не найден на складе — привяжите в «Склад»";
+      if (st && (st.product_id ?? res.product_id) === null) tail = " · товар не найден на складе — привяжите в «Склад»";
       else if (st?.stock_tracked && st.qty_after != null) tail = ` · на складе осталось ${st.qty_after}`;
       toast(`✅ Продажа ${price.toLocaleString("de-DE")} € записана${tail}`, { ms: tail ? 6000 : 3200 });
       opts.onDone?.(price);

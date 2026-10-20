@@ -82,7 +82,8 @@ function detectedBanner(n) {
 // Счётчик найденных продаж: из summary, иначе отдельный запрос (раз в 5 мин)
 async function refreshDetected(data, mount) {
   if (data.summary?.detected_pending != null) { _detected = { n: data.summary.detected_pending, at: Date.now() }; return; }
-  if (Date.now() - _detected.at < 300000) return;
+  // без summary — не чаще раза в 30 мин: /detected-sales на сервере переводит цитаты через LLM
+  if (Date.now() - _detected.at < 1800000) return;
   _detected.at = Date.now();
   try {
     const r = await api("/api/ma/detected-sales");

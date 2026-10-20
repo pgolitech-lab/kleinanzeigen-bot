@@ -500,7 +500,7 @@ async function renderMonth(mount, ym = null) {
   lots.forEach(l => {
     const row = el(`<div class="mv"><span class="mv-q"></span><span class="mv-t"></span><time></time></div>`);
     row.querySelector(".mv-q").textContent = l.payback === "paid" ? "✓" : l.payback === "not_yet" ? `${Math.round(l.payback_pct ?? 0)}%` : "?";
-    row.querySelector(".mv-q").classList.add(l.payback === "paid" ? "good" : "");
+    if (l.payback === "paid") row.querySelector(".mv-q").classList.add("good");
     row.querySelector(".mv-t").textContent = `${l.title ?? "партия"} · ${l.qty_in ?? l.received_qty ?? "?"} шт. · ${money(l.cost)}`;
     row.querySelector("time").textContent = l.date ? berlinTime(l.date).split(",")[0] : "";
     ll.appendChild(row);

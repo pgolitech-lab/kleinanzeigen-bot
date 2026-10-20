@@ -28,7 +28,7 @@ const P = {
 
 export function icon(name, cls = "") {
   const s = el(`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"></svg>`);
-  if (cls) s.classList.add(...cls.split(" "));
+  if (cls) s.classList.add(...cls.split(" ").filter(Boolean));
   s.innerHTML = P[name] ?? "";  // статичная разметка из словаря выше
   return s;
 }

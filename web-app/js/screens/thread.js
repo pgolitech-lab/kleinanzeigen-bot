@@ -456,6 +456,7 @@ function renderThread(mount, params, data, opts = {}) {
   async function flushEdits() {
     const deNow = draftBox.querySelector(".d2-de").value.trim();
     const ruNow = draftBox.querySelector(".d2-ru").value.trim();
+    if (!deNow && !(ruNow && ruNow !== lastRu.trim())) throw new Error("Текст клиенту пуст — напишите его или измените идею по-русски");
     const ruChanged = ruNow && ruNow !== lastRu.trim(), deChanged = deNow !== lastDe.trim();
     let useRu = ruChanged;
     if (ruChanged && deChanged) {
@@ -660,7 +661,7 @@ function renderThread(mount, params, data, opts = {}) {
       badge.replaceChildren(langBadge(LANG, null));
       statusEl.textContent = "Проверяю язык…";
       sync();
-      api(`/api/ma/messages/${msgId}/lang-check`, { method: "POST", body: {text} }).then(r => {
+      api(`/api/ma/messages/${msgId}/lang-check`, { method: "POST", body: {text}, timeoutMs: LLM_TIMEOUT_MS }).then(r => {
         checking = false;
         if (r?.match) {
           badge.replaceChildren(langBadge(LANG, true));
@@ -671,11 +672,12 @@ function renderThread(mount, params, data, opts = {}) {
         }
         sync();
       }).catch(() => {
-        // LLM-проверка недоступна: эвристика уже пропустила текст, серверный 409 — страховка
+        // ИИ-проверка недоступна: эвристика ловит только кириллицу, а серверный 409 —
+        // тоже. Английский/польский текст немецкому клиенту прошёл бы — поэтому
+        // отправка только с явной галочкой оператора (инвариант языка).
         checking = false;
-        badge.replaceChildren(langBadge(LANG, null));
-        statusEl.textContent = "⚠️ ИИ-проверка языка недоступна — сработала только быстрая проверка";
-        sync();
+        statusEl.textContent = "";
+        block(`ИИ-проверка языка сейчас недоступна. Убедитесь, что текст на языке клиента (${langName(clientLang)}), и отметьте галочку — или переведите.`);
       });
     }
 

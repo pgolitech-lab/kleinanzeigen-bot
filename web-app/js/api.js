@@ -102,8 +102,18 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
   // 401 — initData истекла/плохой hash; 422 — заголовок не дошёл (пустой →
   // срезан прокси). Оба = проблема сессии: показываем инструкцию, а НЕ
   // закрываем МА резко (иначе на гонке при старте окно мигает и закрывается).
-  if (res.status === 401 || res.status === 422) {
+  if (res.status === 401) {
     throw new Error(SESSION_LOST_MSG);
+  }
+  if (res.status === 422) {
+    // 422 от pydantic (detail — массив ошибок полей) — это ошибка данных, а не сессии;
+    // 422 без тела/заголовка — initData не дошла
+    const body = await res.clone().json().catch(() => null);
+    if (!Array.isArray(body?.detail)) throw new Error(SESSION_LOST_MSG);
+    const err = new Error("Проверьте данные: " + body.detail.map(d => d.msg || d.type).join("; "));
+    err.status = 422;
+    err.detail = body.detail;
+    throw err;
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
@@ -113,6 +123,7 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
     try {
       const j = JSON.parse(text);
       if (typeof j?.detail === "string") detail = j.detail;
+      else if (j?.detail && typeof j.detail === "object") detail = j.detail.message || j.detail.msg || JSON.stringify(j.detail);
     } catch (e) { /* не JSON — оставляем text */ }
     const err = new Error(detail ?? `HTTP ${res.status}: ${text}`);
     err.status = res.status;

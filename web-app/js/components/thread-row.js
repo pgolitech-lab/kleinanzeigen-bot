@@ -11,7 +11,7 @@ export function dealOf(t) {
   return {
     price: t.ad_price_eur ?? parseEur(t.ad_price),
     floor: t.floor_eur ?? null,
-    offer: t.offer_eur ?? null,
+    offer: t.offer_eur ?? t.offered_eur ?? null,
     ours: t.our_last_eur ?? null,
   };
 }

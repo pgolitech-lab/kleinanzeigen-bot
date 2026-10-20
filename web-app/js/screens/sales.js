@@ -233,11 +233,6 @@ function paint(mount, data) {
   if (!sales.length) list.appendChild(el(`<div class="empty"><p>В этом периоде продаж нет</p></div>`));
   else sales.forEach(x => list.appendChild(saleRow(x)));
 
-  // число найденных продаж на кнопке
-  api("/api/ma/detected-sales").then(r => {
-    const c = r?.count ?? (r?.items ?? []).length;
-    if (c && root.isConnected) root.querySelector(".s-det").textContent = `🔍 Найдено: ${c}`;
-  }).catch(e => console.warn("[sales] detected-sales:", e));
 
   mount.replaceChildren(root);
 }

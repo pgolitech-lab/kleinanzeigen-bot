@@ -22,7 +22,8 @@ const PENDING = new Set(["pending", "new", "edited", "approved"]);
 async function loadQueue() {
   try {
     const r = await api("/api/ma/triage");
-    if (Array.isArray(r?.items)) return r.items;
+    // без готового черновика карточку не показываем (лишний запрос и тут же пропуск)
+    if (Array.isArray(r?.items)) return r.items.filter(t => t.draft && t.draft.msg_id != null && t.draft.has_text !== false);
   } catch (e) {
     if (e.status !== 404 && e.status !== 405) throw e;
   }
@@ -118,7 +119,7 @@ export async function render(mount) {
     else if (d.price != null) deal.textContent = `Цена ${Math.round(d.price).toLocaleString("de-DE")} €`;
     else deal.remove();
     const ruEl = card.querySelector(".t3-ru");
-    const ru = r.client_message?.ru || t.ru_client || "", orig = r.client_message?.raw || "";
+    const ru = r.client_message?.ru || t.client_message_ru || t.ru_client || "", orig = r.client_message?.raw || "";
     ruEl.textContent = ru || orig;
     const ob = card.querySelector(".t3-orig");
     if (orig && ru && orig !== ru) {
@@ -223,9 +224,10 @@ export async function render(mount) {
       badge.replaceChildren(langBadge(lang.toUpperCase(), true));
       status.textContent = `Проверено: ${langName(lang)}`;
     } catch (e) {
-      // ИИ-проверка недоступна: эвристика пропустила, серверный 409-guard — страховка
-      badge.replaceChildren(langBadge(lang.toUpperCase(), null));
-      status.textContent = "⚠️ ИИ-проверка языка недоступна — сработала быстрая проверка";
+      // ИИ-проверка недоступна — отсюда без проверки не отправляем: в переписке
+      // оператор может явно разрешить отправку галочкой
+      blockToThread("ИИ-проверка языка сейчас недоступна — отправьте из переписки.");
+      return;
     }
     sendBtn.disabled = false;
     sendBtn.onclick = async () => {

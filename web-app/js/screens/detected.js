@@ -100,6 +100,7 @@ export async function render(mount) {
   }
   if (!mount.isConnected) return;
   let items = data.items ?? [];
+  let bulkRunning = false;  // повторный тап во время пачки не повторяет apply
 
   const root = el(`<div class="detected"><div class="det-head"></div><div class="det-list"></div></div>`);
   const head = root.querySelector(".det-head");
@@ -122,13 +123,33 @@ export async function render(mount) {
     const t = el(`<div class="lsec"><span>На проверку</span><i></i></div>`);
     t.querySelector("i").textContent = String(items.length);
     head.appendChild(t);
-    if (sure.length) {
+    if (sure.length && !bulkRunning) {
       const sum = sure.reduce((a, x) => a + Number(x.sold_price_eur || 0), 0);
       const b = el(`<button class="btn btn-primary det-all" type="button"></button>`);
       b.textContent = `✅ Принять все уверенные: ${sure.length} · ${eur(sum)}`;
       b.addEventListener("click", async () => {
         if (!(await confirmSheet(`Записать ${sure.length} продаж на ${eur(sum)}?`, "Записать"))) return;
+        if (bulkRunning) return;
+        bulkRunning = true;
         b.disabled = true;
+        // атомарно на сервере (одна транзакция); нет эндпоинта — по одной
+        try {
+          const r = await api("/api/ma/detected-sales/accept-confident", { method: "POST", body: { min_confidence: "high" } });
+          const applied = r.applied ?? [], skipped = r.skipped ?? [];
+          applied.forEach(a => onDone(a.id ?? a.detection_id ?? a));
+          invalidateSoldToday();
+          if (skipped.length) toast(`Записано ${applied.length}, пропущено ${skipped.length}: ${skipped.map(s => s.reason ?? s).join("; ")}`, { level: "bad", ms: 8000 });
+          else toast(`✅ Записано продаж: ${applied.length}`);
+          bulkRunning = false;
+          return render(mount);
+        } catch (e) {
+          if (!(e.status === 404 && (!e.detail || e.detail === "Not Found"))) {
+            toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 6000 });
+            bulkRunning = false;
+            b.disabled = false;
+            return;
+          }
+        }
         let ok = 0;
         const failed = [];
         for (const d of sure) {
@@ -144,6 +165,7 @@ export async function render(mount) {
         // один итоговый тост: иначе красные ошибки затирались зелёным «записано»
         if (failed.length) toast(`Записано ${ok}, не прошло ${failed.length}: ${failed.join("; ")}`, { level: "bad", ms: 8000 });
         else toast(`✅ Записано продаж: ${ok}`);
+        bulkRunning = false;
       });
       head.appendChild(b);
     }
