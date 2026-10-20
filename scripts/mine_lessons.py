@@ -319,6 +319,7 @@ def main() -> None:
         db.DB_PATH = Path(args.db)
     if not args.dry_run:
         _preflight_write()
+    from modules import llm
     from modules.claude_utils import smart_model
     model = smart_model()
 
@@ -339,6 +340,14 @@ def main() -> None:
             buyer = futs[fut]["name"] or futs[fut]["emails"][0]
             try:
                 res = fut.result()
+            except llm.LLMLimitError as e:
+                # Подписка общая с ботом — при лимите останавливаемся, продолжим позже (идемпотентно)
+                logger.error("Лимит подписки: %s — останавливаю разбор, остаток в следующий запуск", e)
+                stats["error"] += 1
+                stats["stopped_on_limit"] = True
+                for f in futs:
+                    f.cancel()
+                break
             except Exception:  # noqa: BLE001 — один человек не валит весь прогон
                 logger.exception("[%d/%d] %s: ошибка разбора", i, len(people), buyer)
                 stats["error"] += 1
