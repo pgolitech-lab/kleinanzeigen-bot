@@ -49,7 +49,7 @@ const ROUTES = [
   { pattern: /^#\/client\/(.+)$/,         screen: client, list: "clients", title: "Клиент", params: m => ({ email: decodeURIComponent(m[1]) }), key: p => p.email },
   { pattern: /^#\/accounts\/?$/,          screen: accounts, title: "Аккаунты", params: () => ({}) },
   { pattern: /^#\/settings\/?$/,          screen: settings, title: "Настройки", params: () => ({}) },
-  { pattern: /^#\/review\/(.+)$/,         screen: review, list: "pipeline", title: "Открываю…", params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
+  { pattern: /^#\/(?:review|send)\/(.+)$/,         screen: review, list: "pipeline", title: "Открываю…", params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
 ];
 
 // Экраны-списки для левой панели (широкий экран)

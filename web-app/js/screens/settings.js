@@ -32,6 +32,7 @@ const GROUPS = [
   ]],
   ["Telegram и служебное", [
     ["telegram_operator_dm_ids", "Операторы (Telegram ID через запятую)", "text"],
+    ["telegram_admin_chat_id", "Служебный чат (Telegram ID — сюда идут ошибки и поломки)", "text"],
     ["telegram_authorized", "Кому можно открывать MA (ID через запятую)", "text"],
     ["claude_model", "Модель ИИ для черновиков", "text"],
     ["chat_font_em", "Размер шрифта чата в веб-морде, em", "text"],

@@ -125,7 +125,9 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
       if (typeof j?.detail === "string") detail = j.detail;
       else if (j?.detail && typeof j.detail === "object") detail = j.detail.message || j.detail.msg || JSON.stringify(j.detail);
     } catch (e) { /* не JSON — оставляем text */ }
-    const err = new Error(detail ?? `HTTP ${res.status}: ${text}`);
+    // 409 без причины — состояние за это время изменилось (ушло, в очереди, чужой лок)
+    const fallback = res.status === 409 ? "Состояние изменилось, пока вы смотрели: письмо уже ушло, стоит в очереди или занято другим оператором. Обновите экран." : `HTTP ${res.status}: ${text}`;
+    const err = new Error(detail ?? fallback);
     err.status = res.status;
     err.detail = detail;
     throw err;
