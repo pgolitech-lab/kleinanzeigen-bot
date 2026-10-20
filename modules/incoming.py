@@ -607,11 +607,22 @@ def _email_age_days(email: dict[str, Any]) -> Optional[float]:
     return (datetime.now(timezone.utc) - msg_dt).total_seconds() / 86400
 
 
+# Текст последнего отправленного уведомления о лимите (в нём время сброса):
+# одно окно лимита — одно уведомление, а не по штуке на каждое письмо.
+_LLM_LIMIT_NOTIFIED: Optional[str] = None
+
+
 def _notify_llm_limit(message_id: int, thread_id: str, err: Exception) -> None:
+    global _LLM_LIMIT_NOTIFIED
+    if str(err) == _LLM_LIMIT_NOTIFIED:
+        logger.info("Лимит LLM: уведомление уже было (%s), msg=%s — только карточка", err, message_id)
+        return
     text = (f"⏳ <b>{telegram_bot._html(str(err))}</b>\n"
-            f"Письмо #{message_id} ждёт ручного ответа. Автопилот треда остаётся включённым.")
+            f"Письмо #{message_id} ждёт ручного ответа (карточки следующих писем придут "
+            f"без повтора этого уведомления). Автопилот треда остаётся включённым.")
     try:
         telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+        _LLM_LIMIT_NOTIFIED = str(err)
     except Exception:
         logger.exception("Уведомление о лимите LLM не ушло msg=%s", message_id)
 

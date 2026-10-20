@@ -772,6 +772,7 @@ def test_autopilot_uses_llm_memory_lessons(inc, tmp_db, monkeypatch):
 
 
 def test_autopilot_llm_limit_card_and_note_keeps_active(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc, "_LLM_LIMIT_NOTIFIED", None)
     tmp_db.start_thread_autopilot("T1", 100, "silent")
     monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
                         lambda **kw: (_ for _ in ()).throw(inc.llm.LLMLimitError("429")))
@@ -780,6 +781,10 @@ def test_autopilot_llm_limit_card_and_note_keeps_active(inc, tmp_db, monkeypatch
     assert inc._calls["review"] == [row["id"]] and inc._calls["send"] == []
     assert any("Лимит подписки" in t for t in inc._calls["notify"])
     assert tmp_db.get_thread_autopilot("T1")["active"] == 1
+    # второе письмо в том же окне лимита — карточка есть, повторного уведомления нет
+    n = len(inc._calls["notify"])
+    inc._process_incoming(ACC, _email(gmail_message_id="<m2@x>", uid="9", body="Und? https://www.kleinanzeigen.de/s-anzeige/sitzbank/123456789-223-1"))
+    assert len(inc._calls["review"]) == 2 and len(inc._calls["notify"]) == n
 
 
 def test_manual_translation_llm_limit_marks_card(inc, tmp_db, monkeypatch):
