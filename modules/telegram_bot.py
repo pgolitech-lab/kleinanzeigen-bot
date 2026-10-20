@@ -623,6 +623,13 @@ REMINDER_BATCH_BUTTONS = 5  # кнопок «Напомнить · имя»; о�
 REMINDER_BATCH_LIST = 8  # строк в сводном сообщении; остальные — «и ещё N»
 
 
+def reminder_batch_shown_ids(out_message_ids: list[int]) -> list[int]:
+    """Какие письма из пачки реально названы в сообщении (читаемые, первые REMINDER_BATCH_LIST).
+    Остальные в «…и ещё N» не считаются показанными — их предложим в следующий проход."""
+    rows = [m for m in (db.get_message(i) for i in out_message_ids) if m]
+    return [m["id"] for m in rows[:REMINDER_BATCH_LIST]]
+
+
 def send_reminder_batch(out_message_ids: list[int], days_silent: float) -> Optional[int]:
     """Одно сообщение «пора напомнить: N клиентов» вместо N отдельных. Кнопка — «Входящие».
     Пустой список / ни одного читаемого письма — ничего не шлём (None)."""
@@ -863,7 +870,7 @@ def morning_summary_text() -> Optional[str]:
     if silent:
         lines.append(f"⏳ Ждём клиентов: {len(silent)}")
     if sales["count"]:
-        lines.append(f"💰 Вчера продано: {sales['count']} на {int(sales['total_eur'])} €")
+        lines.append(f"💰 Продано вчера: {sales['count']} на {int(sales['total_eur'])} €")
     extra: list[str] = []
     try:
         from modules import inventory
@@ -872,11 +879,13 @@ def morning_summary_text() -> Optional[str]:
             extra.append(_html(stock))
     except Exception:
         logger.exception("утренняя сводка: склад не собран — сводка без него")
+        extra.append("📦 склад: нет данных")
     try:
         from modules import market_advisor
         extra += [_html(x) for x in market_advisor.summary_lines()]
     except Exception:
         logger.exception("утренняя сводка: рынок не собран — сводка без него")
+        extra.append("📈 рынок: нет данных")
     if extra:
         lines += [""] + extra
     if not (waiting or silent or sales["count"] or extra):
@@ -914,7 +923,7 @@ def evening_summary_text() -> Optional[str]:
         return None
     lines = ["🌙 <b>Итог дня</b>",
              f"✉️ Писем: {new} · ответили: {sent}",
-             f"💰 Продано: {sales['count']}" + (f" на {int(sales['total_eur'])} €" if sales["count"] else "")]
+             f"💰 Продано сегодня: {sales['count']}" + (f" на {int(sales['total_eur'])} €" if sales["count"] else "")]
     lines.append(f"📥 Ждут ответа сейчас: <b>{waiting}</b>" if waiting else "✅ Все ответы отправлены")
     try:
         from modules import inventory
@@ -923,6 +932,7 @@ def evening_summary_text() -> Optional[str]:
             lines += ["", _html(stock)]
     except Exception:
         logger.exception("итог дня: сводка склада не собрана — итог без неё")
+        lines += ["", "📦 склад: нет данных"]
     return "\n".join(lines)
 
 
@@ -1050,7 +1060,7 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None,
             })
         except Exception as exc:  # сеть тоже: иначе «🔄 Обновить» крутится без answerCallbackQuery
             if "message is not modified" not in str(exc):
-                logger.error("send_pending_summary edit fail: %s", exc)
+                raise  # вызывающий скажет оператору, что панель не обновилась
     else:
         _http_post_single("sendMessage", {
             "chat_id": chat_id, "text": text, "parse_mode": "HTML",
@@ -1163,9 +1173,12 @@ def _handle_update(u: dict[str, Any]) -> None:
     cb_msg = cb.get("message") or {}
     cb_chat = (cb_msg.get("chat") or {}).get("id")
     if data == "tasks":
-        count = send_pending_summary(cb_chat, edit_msg_id=cb_msg.get("message_id"))
-        _http_post_single("answerCallbackQuery", {
-            "callback_query_id": cb["id"], "text": f"Ждут ответа: {count}" if count else "Никто не ждёт"})
+        try:
+            count = send_pending_summary(cb_chat, edit_msg_id=cb_msg.get("message_id"))
+            answer_text = f"Ждут ответа: {count}" if count else "Никто не ждёт"
+        except Exception:
+            answer_text = "Не удалось обновить панель — попробуйте ещё раз"
+        _http_post_single("answerCallbackQuery", {"callback_query_id": cb["id"], "text": answer_text})
     elif data.startswith(("skip:", "unskip:")):
         _handle_skip_cb(cb, data, cb_chat, cb_msg)
     else:

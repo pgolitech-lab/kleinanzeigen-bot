@@ -293,10 +293,16 @@ def check_reminders() -> str:
     ids = [row["id"] for row in candidates]
     try:
         # одна карточка-пачка вместо отдельного сообщения на каждого молчуна
-        telegram_bot.send_reminder_batch(ids, days_silent=after_days)
-        for mid in ids:
-            db.update_message(mid, reminder_state="offered")
-        sent = len(ids)
+        shown = telegram_bot.reminder_batch_shown_ids(ids)
+        if shown:
+            telegram_bot.send_reminder_batch(ids, days_silent=after_days)  # недоставка — исключение
+            # помечаем только названных в сообщении; хвост «…и ещё N» предложим в следующий проход
+            for mid in shown:
+                db.update_message(mid, reminder_state="offered")
+            sent = len(shown)
+        else:
+            failed = len(ids)
+            logger.error("Пачка напоминаний (%d): ни одно письмо не читается — не помечаем", len(ids))
     except Exception:
         logger.exception("Не удалось отправить пачку напоминаний (%d)", len(ids))
         failed = len(ids)
