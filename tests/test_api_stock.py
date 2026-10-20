@@ -77,3 +77,51 @@ def test_report_from_param_and_patch_title(c):
     from modules.inventory import match_key
     p = c.patch(f"/api/ma/stock/products/{pid}", json={"title": "Neu Sitzbank"}, headers=H()).json()["product"]
     assert p["title"] == "Neu Sitzbank" and p["match_key"] == match_key("Neu Sitzbank")
+
+
+def _mk(c, title, **kw):
+    return c.post("/api/ma/stock/products", json={"title": title, **kw}, headers=H()).json()["id"]
+
+
+def test_types_category_costs_kit_batch_nonstock(c):
+    a, b = _mk(c, "Sitzbank 2+1", list_price_eur=300), _mk(c, "Fahrersitz", list_price_eur=100)
+    kit = _mk(c, "Komplett")
+    t = c.get("/api/ma/stock/types", headers=H()).json()
+    assert "questions" in t and t["table"]
+    cats = c.put("/api/ma/stock/category-costs", json={"category": "fahrersitze", "unit_cost_eur": 40},
+                 headers=H()).json()["table"]
+    assert any(x["category"] == "fahrersitze" and x["standard_cost_eur"] == 40 for x in cats)
+    assert c.post("/api/ma/stock/types", json={"product_id": 9999, "category": "x"}, headers=H()).status_code == 404
+    assert c.post("/api/ma/stock/types", json={"product_id": b, "category": "nonsense-zzz"},
+                  headers=H()).status_code == 400
+    assert c.post("/api/ma/stock/types", json={"product_id": b, "category": "fahrersitze"},
+                  headers=H()).json()["category"] == "fahrersitze"
+    r = c.put(f"/api/ma/stock/products/{kit}/kit", json={"components": [{"product_id": a, "qty": 1},
+                                                                         {"product_id": b, "qty": 2}]}, headers=H())
+    assert r.status_code == 200 and r.json()["stock"]["kit"] is True
+    assert c.put(f"/api/ma/stock/products/{kit}/kit", json={"components": [{"product_id": 9999, "qty": 1}]},
+                 headers=H()).status_code == 404
+    r = c.post("/api/ma/stock/batches", json={"items": [{"product_id": a, "qty": 1}, {"product_id": b, "qty": 2}],
+                                              "total_cost_eur": 200}, headers=H())
+    assert r.status_code == 200 and len(r.json()["movements"]) == 2
+    assert sum(m["unit_cost_eur"] * m["qty"] for m in r.json()["movements"]) == pytest.approx(200, abs=0.05)
+    assert c.post("/api/ma/stock/batches", json={"items": [{"product_id": a, "qty": 1}, {"product_id": a, "qty": 1}]},
+                  headers=H()).status_code == 400
+    assert c.post(f"/api/ma/stock/products/{a}/non-stock", json={}, headers=H()).json()["product"]["non_stock"] == 1
+    assert a not in [i["id"] for i in c.get("/api/ma/stock/products", headers=H()).json()["items"]]
+
+
+def test_receipt_parse_matches_known_products_only(c):
+    a = _mk(c, "Fahrersitz Passat")
+    out = ({"items": [{"product_id": a, "title": "сиденье", "qty": 2}, {"product_id": 777, "title": "фаркоп", "qty": 1},
+                      {"product_id": None, "title": "мусор", "qty": 0}], "total_cost_eur": 150}, {})
+    with patch("modules.claude_utils.call_json", return_value=out):
+        r = c.post("/api/ma/stock/receipt/parse", json={"text": "сиденья 2, фаркоп, всего 150"}, headers=H())
+    j = r.json()
+    assert r.status_code == 200 and j["total_cost_eur"] == 150 and j["unmatched"] == 1
+    assert [i["product_id"] for i in j["items"]] == [a, None]  # чужой id отброшен, qty=0 пропущена
+    from modules import llm
+    with patch("modules.claude_utils.call_json", side_effect=llm.LLMLimitError("лимит")):
+        assert c.post("/api/ma/stock/receipt/parse", json={"text": "x"}, headers=H()).status_code == 503
+    with patch("modules.claude_utils.call_json", return_value=({"items": [], "total_cost_eur": None}, {})):
+        assert c.post("/api/ma/stock/receipt/parse", json={"text": "x"}, headers=H()).status_code == 422
