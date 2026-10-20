@@ -47,6 +47,9 @@ def client():
         mdb.list_accounts.return_value = []
         mdb.get_thread_autopilot.return_value = None
         mdb.get_message.return_value = None
+        mdb.sales_summary.return_value = {"count": 1, "total_eur": 300.0}
+        mdb.list_pending_detections.return_value = []
+        mdb.norm_name.side_effect = lambda n: (n or "").lower() or None
         # Активные автопилоты — один запрос SELECT ... FROM thread_autopilot (по умолчанию нет)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = []
@@ -63,7 +66,9 @@ def test_pipeline_empty_returns_empty_sections(client):
     res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
     body = res.json()
-    assert body == {"pinned": [], "red": [], "green": [], "accounts": []}
+    assert body == {"pinned": [], "red": [], "green": [], "accounts": [],
+                    "summary": {"waiting": 0, "waiting_client": 0, "sold_today_count": 1,
+                                "sold_today_eur": 300.0, "detected_pending": 0}}
 
 
 def test_pipeline_splits_by_last_event_kind(client):
@@ -114,7 +119,7 @@ def test_pipeline_autopilot_from_join_column(client):
     init = make_init_data(TEST_USER)
     res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
     assert res.json()["red"][0]["is_autopilot"] is True
-    mdb.get_conn.assert_not_called()
+    mdb.get_thread_autopilot.assert_not_called()  # автопилот — из строки pipeline
 
 
 def test_pipeline_truncates_ru_client(client):
@@ -225,3 +230,32 @@ def test_pipeline_pinned_thread_goes_to_pinned_section(client):
     assert body["pinned"][0]["thread_id"] == "t1"
     assert len(body["red"]) == 1
     assert body["red"][0]["thread_id"] == "t2"
+
+
+def test_pipeline_deal_numbers_tags_maybe_same(client):
+    """Числа торга, теги, «возможно тот же» — пакетными запросами, без запроса на тред."""
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [_row(gmail_thread_id="t1", buyer_name="osman@x", ad_id="AD1",
+                                              account_id=3, client_lang="de", autopilot_floor_price_eur=None)]
+    conn = mdb.get_conn.return_value.__enter__.return_value
+
+    def execute(sql, *a):
+        res = MagicMock()
+        data = []
+        if "negotiation_state" in sql:
+            data = [{"gmail_thread_id": "t1", "floor_eur": 350, "our_last_offer_eur": 420,
+                     "buyer_last_offer_eur": 300}]
+        elif "ad_briefs" in sql:
+            data = [{"ad_id": "AD1", "min_price_eur": 380}]
+        elif "client_profiles" in sql:
+            data = [{"buyer_email": "osman@x", "tags_json": '["Торгуется"]'}]
+        elif "norm_name" in sql:
+            data = [{"account_id": 3, "k": "osman"}]
+        res.__iter__.return_value = iter(data)
+        return res
+    conn.execute.side_effect = execute
+    init = make_init_data(TEST_USER)
+    item = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init}).json()["red"][0]
+    assert (item["offer_eur"], item["our_last_eur"], item["floor_eur"]) == (300, 420, 380)
+    assert item["tags"] == ["Торгуется"] and item["maybe_same"] is True and item["client_lang"] == "de"
+    assert item["ad_price_eur"] == 1500

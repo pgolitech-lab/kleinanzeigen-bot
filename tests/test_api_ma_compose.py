@@ -25,6 +25,7 @@ def client():
          patch("web.api_ma.telegram_bot") as mtb, \
          patch("web.api_ma.operator_lock") as mol, \
          patch("web.api_ma.scheduler") as msched, \
+         patch("web.api_ma.config.send_mode", return_value="disabled"), \
          patch("web.api_ma.claude") as mclaude:
         mc.telegram_bot_token.return_value = TEST_BOT_TOKEN
         mc.telegram_authorized_ids.return_value = {"999"}

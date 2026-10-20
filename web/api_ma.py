@@ -16,6 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
 import hashlib
+import sqlite3
 import os
 import json
 import logging
@@ -145,17 +146,74 @@ def _preview(text: "str | None") -> "str | None":
     return t if len(t) <= _PIPELINE_PREVIEW_CHARS else t[:_PIPELINE_PREVIEW_CHARS] + "…"
 
 
-def _row_to_pipeline_item(row: Any) -> dict[str, Any]:
+_ctx_cache: dict[str, Any] = {"rows": None, "ctx": None}
+
+
+def _pipeline_context_cached(rows: list) -> dict[str, Any]:
+    """Контекст считается раз на «поколение» строк pipeline (тот же TTL/сброс, что _pipeline_rows)."""
+    with _pipeline_lock:
+        if _ctx_cache["rows"] is rows and _ctx_cache["ctx"] is not None:
+            return _ctx_cache["ctx"]
+    ctx = _pipeline_context(rows)
+    with _pipeline_lock:
+        _ctx_cache.update(rows=rows, ctx=ctx)  # ссылка, а не id(): id переиспользуется после GC
+    return ctx
+
+
+def _pipeline_context(rows: list) -> dict[str, Any]:
+    """Всё, что нужно карточкам «Входящих», — несколькими запросами на весь список (без N+1):
+    состояние торга по тредам, минимумы объявлений, теги покупателей, имена с несколькими email."""
+    with db.get_conn() as conn:
+        neg = {r["gmail_thread_id"]: r for r in conn.execute(
+            "SELECT gmail_thread_id, floor_eur, our_last_offer_eur, buyer_last_offer_eur FROM negotiation_state")}
+        mins = {r["ad_id"]: r["min_price_eur"] for r in conn.execute(
+            "SELECT ad_id, min_price_eur FROM ad_briefs WHERE min_price_eur IS NOT NULL")}
+        tags = {r["buyer_email"]: r["tags_json"] for r in conn.execute(
+            "SELECT buyer_email, tags_json FROM client_profiles")}
+        # (аккаунт, нормализованное имя) с >1 email: relay-адрес свой на каждое объявление →
+        # «возможно тот же покупатель» по другим объявлениям
+        multi = {(r["account_id"], r["k"]) for r in conn.execute(
+            "SELECT account_id, norm_name(buyer_display_name) AS k FROM messages "
+            "WHERE direction='in' AND buyer_display_name IS NOT NULL "
+            "GROUP BY 1, 2 HAVING k IS NOT NULL AND COUNT(DISTINCT buyer_name) > 1")}
+        # минимум цены товара со склада (правило владельца 20.10): объявление → товар
+        try:
+            from modules.inventory import effective_min_price
+            stock_min = {r["ad_id"]: effective_min_price(r)[0] for r in conn.execute(
+                "SELECT l.ad_id, p.min_price_eur, p.list_price_eur FROM inv_listings l "
+                "JOIN inv_products p ON p.id = l.product_id")}
+        except sqlite3.OperationalError:
+            stock_min = {}  # склад ещё не заведён (seed не запускали)
+    return {"neg": neg, "mins": mins, "tags": tags, "multi": multi, "stock_min": stock_min}
+
+
+def _row_to_pipeline_item(row: Any, ctx: "dict[str, Any] | None" = None) -> dict[str, Any]:
     """Конвертация row из db.pipeline_threads (LEFT JOIN thread_autopilot) в API-форму."""
     keys = row.keys()
+    ctx = ctx or {"neg": {}, "mins": {}, "tags": {}, "multi": set(), "stock_min": {}}
+    neg = ctx["neg"].get(row["gmail_thread_id"])
+    ad_id = row["ad_id"] if "ad_id" in keys else None
+    floor_candidates = [x for x in (
+        neg["floor_eur"] if neg is not None else None, ctx["mins"].get(ad_id), ctx["stock_min"].get(ad_id),
+        row["autopilot_floor_price_eur"] if "autopilot_floor_price_eur" in keys else None) if x]
+    try:
+        tags = json.loads(ctx["tags"].get(row["buyer_name"] if "buyer_name" in keys else None) or "[]")
+    except ValueError:
+        tags = []
     return {
         "thread_id": row["gmail_thread_id"],
         "msg_id": row["id"],
         "ad_title": row["ad_title"],
         "ad_price": row["ad_price"],
+        "ad_price_eur": _parse_listed_price_eur(row["ad_price"]),
         "ad_url": row["ad_url"] if "ad_url" in keys else None,
         "buyer_display_name": row["buyer_display_name"],
+        "client_lang": row["client_lang"] if "client_lang" in keys else None,
         "deal_brief_json": row["deal_brief_json"] if "deal_brief_json" in keys else None,
+        # числа торга: предложение покупателя, наша последняя цена, минимум (наибольший из известных)
+        "offer_eur": neg["buyer_last_offer_eur"] if neg is not None else None,
+        "our_last_eur": neg["our_last_offer_eur"] if neg is not None else None,
+        "floor_eur": max(floor_candidates) if floor_candidates else None,
         "last_event_at": row["last_event_at"],
         "last_event_kind": row["last_event_kind"],
         "pending_drafts_count": row["pending_drafts_count"],
@@ -163,6 +221,11 @@ def _row_to_pipeline_item(row: Any) -> dict[str, Any]:
         # «горячий покупатель» (mail помечает is_hot/hot_reason) — наверх в «ждут нас»
         "is_hot": bool(row["is_hot"]) if "is_hot" in keys else False,
         "hot_reason": row["hot_reason"] if "hot_reason" in keys else None,
+        # is_late (письмо дошло с опозданием) — когда mail/db сохранят признак в messages
+        "is_late": bool(row["is_late"]) if "is_late" in keys else None,
+        "tags": tags if isinstance(tags, list) else [],
+        "maybe_same": (row["account_id"] if "account_id" in keys else None,
+                       db.norm_name(row["buyer_display_name"])) in ctx["multi"],
         "account_id": row["account_id"] if "account_id" in keys else None,
         "ru_client": _preview(row["ru_client"]) if "ru_client" in keys else None,
         "is_pinned": bool(row["is_pinned"]) if "is_pinned" in keys else False,
@@ -178,11 +241,12 @@ def ma_pipeline(request: Request, user: dict = Depends(verify_init_data_dep)) ->
     ETag: если ничего не изменилось — 304 без тела (экран опрашивается часто).
     """
     rows = _pipeline_rows()
+    ctx = _pipeline_context_cached(rows)
     pinned: list[dict[str, Any]] = []
     red: list[dict[str, Any]] = []
     green: list[dict[str, Any]] = []
     for row in rows:
-        item = _row_to_pipeline_item(row)
+        item = _row_to_pipeline_item(row, ctx)
         if item["is_pinned"]:
             pinned.append(item)
         elif item["last_event_kind"] == "in":
@@ -193,7 +257,16 @@ def ma_pipeline(request: Request, user: dict = Depends(verify_init_data_dep)) ->
         section.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
     red.sort(key=lambda x: x["is_hot"], reverse=True)  # стабильная: горячие сверху, внутри — по времени
     accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
-    body = json.dumps({"pinned": pinned, "red": red, "green": green, "accounts": accounts},
+    today = today_berlin()
+    sold = db.sales_summary(today, today)
+    summary = {
+        "waiting": len(red) + sum(1 for x in pinned if x["last_event_kind"] == "in"),  # как бейдж вкладки
+        "waiting_client": len(green),
+        "sold_today_count": sold["count"],
+        "sold_today_eur": sold["total_eur"],
+        "detected_pending": len(db.list_pending_detections()),
+    }
+    body = json.dumps({"pinned": pinned, "red": red, "green": green, "accounts": accounts, "summary": summary},
                       ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     etag = '"' + hashlib.sha1(body).hexdigest() + '"'
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
@@ -216,6 +289,10 @@ def _event_to_api(event: dict[str, Any]) -> dict[str, Any]:
         "is_auto_ack": bool(event.get("is_auto_ack")),
         "msg_id": row["id"] if row is not None else None,
         "status": event.get("status") or (row["status"] if row is not None else None),
+        # реплика продавца, написанная на сайте/в приложении Kleinanzeigen (импорт)
+        "from_app": bool(row is not None and event.get("kind") == "out"
+                         and "source" in row.keys() and row["source"] == "site"),
+        "is_late": bool(row["is_late"]) if row is not None and "is_late" in row.keys() else None,
     }
 
 
@@ -289,8 +366,9 @@ _HOT_WORDS = ("серьёз", "серьез", "готов", "горяч", "бы�
 _COLD_WORDS = ("мошен", "тянет", "спам", "скам", "подозр")
 
 
-def _triage_item(row: Any, now: datetime) -> dict[str, Any]:
+def _triage_item(row: Any, now: datetime, ctx: "dict[str, Any] | None" = None) -> dict[str, Any]:
     keys = row.keys()
+    base = _row_to_pipeline_item(row, ctx)  # те же числа торга, теги, язык, что во «Входящих»
     score = 0.0
     reasons: list[str] = []
     # 1) ожидание: до 40 баллов за первые сутки
@@ -314,9 +392,9 @@ def _triage_item(row: Any, now: datetime) -> dict[str, Any]:
         score -= 25
         reasons.append("сомнительный")
     # 3) цена: предложение покупателя против цены объявления и минимума
-    listed = _parse_listed_price_eur(row["ad_price"])
-    offered = brief.get("negotiated_price_eur")
-    floor = row["autopilot_floor_price_eur"] if "autopilot_floor_price_eur" in keys else None
+    listed = base["ad_price_eur"]
+    offered = base["offer_eur"] if base["offer_eur"] is not None else brief.get("negotiated_price_eur")
+    floor = base["floor_eur"]
     if isinstance(offered, (int, float)) and offered > 0:
         if listed:
             ratio = offered / listed
@@ -342,7 +420,14 @@ def _triage_item(row: Any, now: datetime) -> dict[str, Any]:
         "ad_price": row["ad_price"],
         "ad_price_eur": listed,
         "offered_eur": offered if isinstance(offered, (int, float)) else None,
+        "offer_eur": base["offer_eur"],
+        "our_last_eur": base["our_last_eur"],
         "floor_eur": floor,
+        "client_lang": base["client_lang"],
+        "tags": base["tags"],
+        "maybe_same": base["maybe_same"],
+        "is_hot": base["is_hot"],
+        "hot_reason": base["hot_reason"],
         "client_message_ru": _preview(row["ru_client"] if "ru_client" in keys else None),
         "last_event_at": row["last_event_at"],
         "wait_hours": round(wait_h, 1) if wait_h is not None else None,
@@ -363,7 +448,9 @@ def ma_triage(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """«Разбор»: треды, где ход за нами (последним писал покупатель), без активного автопилота —
     по убыванию балла (ожидание, горячесть, цена против объявления/минимума, готовый черновик)."""
     now = datetime.utcnow()
-    items = [_triage_item(r, now) for r in _pipeline_rows()
+    rows = _pipeline_rows()
+    ctx = _pipeline_context_cached(rows)
+    items = [_triage_item(r, now, ctx) for r in rows
              if r["last_event_kind"] == "in" and not r["autopilot_active"]]
     items.sort(key=lambda x: (x["score"], x["last_event_at"] or ""), reverse=True)
     return {"items": items, "count": len(items)}
@@ -411,6 +498,49 @@ class ThreadOpenBody(BaseModel):
     acquire: bool = True        # взять лок на этот черновик
 
 
+def _dossier_items(d: Any) -> "list[Any]":
+    """Досье (client_dossiers) в форме, которую рисует экран треда: список строк или {date, text}."""
+    if d is None:
+        return []
+    items: list[Any] = []
+    if d["summary_md"]:
+        items.append(" ".join(str(d["summary_md"]).split())[:400])
+    try:
+        facts = json.loads(d["facts_json"] or "[]")
+    except ValueError:
+        logger.error("досье #%s: facts_json не JSON — показываю только сводку", d["id"])
+        facts = []
+    if isinstance(facts, dict):
+        facts = [f"{k}: {v}" for k, v in facts.items()]
+    for f in facts if isinstance(facts, list) else []:
+        if isinstance(f, (str, dict)):
+            items.append(f)
+    return items[:5]
+
+
+def _enrich_header(thread_id: str, header: "dict[str, Any]") -> None:
+    """Поля шапки треда, которые читает экран: числа торга (как во «Входящих»), теги, заметка, досье."""
+    rows = _pipeline_rows()
+    row = next((r for r in rows if r["gmail_thread_id"] == thread_id), None)
+    header.setdefault("ad_price_eur", _parse_listed_price_eur(header.get("ad_price")))
+    for k in ("offer_eur", "our_last_eur", "floor_eur", "client_lang", "is_hot", "hot_reason", "maybe_same"):
+        header.setdefault(k, None)
+    if row is not None:
+        item = _row_to_pipeline_item(row, _pipeline_context_cached(rows))
+        for k in ("offer_eur", "our_last_eur", "floor_eur", "ad_price_eur", "client_lang",
+                  "is_hot", "hot_reason", "maybe_same"):
+            header[k] = item[k]
+    email = header.get("buyer_email")
+    profile = db.get_client_profile(email) if email else None
+    try:
+        tags = json.loads(profile["tags_json"]) if profile is not None else []
+    except (ValueError, TypeError):
+        tags = []
+    header["tags"] = tags if isinstance(tags, list) else []
+    header["client_note"] = (profile["note"] if profile is not None else "") or None
+    header["dossier"] = _dossier_items(db.get_dossier_for_email(email) if email else None)
+
+
 @router.post("/threads/{thread_id}/open")
 def ma_thread_open(thread_id: str, body: "ThreadOpenBody | None" = None,
                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
@@ -423,6 +553,7 @@ def ma_thread_open(thread_id: str, body: "ThreadOpenBody | None" = None,
     b = body or ThreadOpenBody()
     data = _thread_dict(thread_id)
     data["review"], data["lock"] = None, None
+    _enrich_header(thread_id, data["header"])
     msg_id = b.focus
     if msg_id is None:
         drafts = [e["msg_id"] for e in data["events"]
@@ -847,7 +978,10 @@ def _send_now(msg_id: int, actor: str) -> "dict[str, Any]":
     if status in ("sent", "sent_debug"):
         # Оператор переписал черновик LLM → урок для следующих ответов (Sonnet, в фоне; ошибка — в лог)
         _LEARN_POOL.submit(_learn_from_sent, msg_id)
-    return {"ok": True, "status": status, "closed_drafts": closed_drafts}
+    # kind/mode — из результата send_one (sent+production / sent+redirect / skipped+disabled …):
+    # фронт (utils.sendOutcome) честно пишет «отправлено» / «тестовый адрес» / «отправка выключена»
+    return {"ok": True, "status": status, "closed_drafts": closed_drafts,
+            "kind": result.get("kind"), "mode": result.get("mode")}
 
 
 # ── Отложенная отправка ───────────────────────────────────────────────────
@@ -1147,21 +1281,35 @@ def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
         else:
             result = db.mark_thread_sold(msg_id, sold_price_eur=float(price),
                                          close_other_threads_for_ad=b.close_other_threads_for_ad)
-            closed_other = result["closed_other_threads"]
             sale_ref = None
+            closed_other = result["closed_other_threads"]
             if b.note.strip():
                 prev = (latest_in["extra_notes"] if "extra_notes" in latest_in.keys() else None) or ""
                 db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
     finally:
         telegram_bot._release_lock(msg_id, actor)
-    # Продажа отдельной строкой (тред уже отвечен) живёт под своим тредом manual-… — склад пишем под ним
-    # и с source='manual', как его увидит sync_sales (иначе джоб списал бы товар второй раз)
-    stock = _record_stock_sale(
-        price=float(price), thread_id=sale_ref["thread_id"] if sale_ref else thread_id, msg_row=latest_in,
-        source="manual" if sale_ref else "thread", actor=actor)
+    if sale_ref:
+        # Продажа отдельной строкой (тред уже отвечен) живёт под своим тредом manual-… — склад пишем под ним
+        # и с source='manual', как его увидит sync_sales (иначе джоб списал бы товар второй раз)
+        stock = _record_stock_sale(price=float(price), thread_id=sale_ref["thread_id"], msg_row=latest_in,
+                                   source="manual", actor=actor)
+    else:
+        # db.mark_thread_sold уже списал по ad_id; повтор идемпотентен по треду, но с заголовком
+        # находит товар и без привязки объявления, и отдаёт product_id=None («привяжите»)
+        stock = _record_stock_sale(price=float(price), thread_id=thread_id, msg_row=latest_in,
+                                   source="thread", actor=actor) or result.get("stock")
     return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price),
             "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref,
-            "stock": stock}
+            "stock": stock, **_others_kept(b.close_other_threads_for_ad, closed_other, stock)}
+
+
+def _others_kept(requested: bool, closed_other: list, stock: "dict | None") -> "dict[str, Any]":
+    """Просили закрыть другие треды по объявлению, но db не закрыла: товар ещё есть —
+    фронт показывает «на складе ещё N» (None — остаток не ведётся / неизвестен)."""
+    if not requested or closed_other:
+        return {"others_kept_stock_left": None}
+    left = stock.get("qty_after") if stock and stock.get("stock_tracked") else None
+    return {"others_kept_stock_left": left}
 
 
 def _record_stock_sale(*, price: float, thread_id: str, msg_row: Any, source: str, actor: str) -> "dict[str, Any] | None":
@@ -1199,15 +1347,16 @@ def ma_sold(msg_id: int, body: SoldBody,
     finally:
         telegram_bot._release_lock(msg_id, actor)
     sold_row = db.get_message(msg_id)
-    stock = _record_stock_sale(price=float(body.price_eur), thread_id=sold_row["gmail_thread_id"] or "",
-                               msg_row=sold_row, source="thread", actor=actor) \
-        if sold_row is not None and sold_row["gmail_thread_id"] else None
+    stock = (_record_stock_sale(price=float(body.price_eur), thread_id=sold_row["gmail_thread_id"],
+                                msg_row=sold_row, source="thread", actor=actor)
+             if sold_row is not None and sold_row["gmail_thread_id"] else None) or result.get("stock")
     return {
         "ok": True,
         "status": "skipped_sold",
         "sold_price_eur": body.price_eur,
         "closed_other_threads": result["closed_other_threads"],
         "stock": stock,
+        **_others_kept(body.close_other_threads_for_ad, result["closed_other_threads"], stock),
     }
 
 
@@ -1490,6 +1639,8 @@ def ma_compose(thread_id: str, body: ComposeSendBody,
         "sent_msg_id": result.get("message_id"),
         "closed_drafts": closed_drafts,
         "thread_id": thread_id,
+        "kind": result.get("kind"),
+        "mode": result.get("mode"),
     }
 
 

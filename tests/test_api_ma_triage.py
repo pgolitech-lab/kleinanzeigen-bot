@@ -15,7 +15,9 @@ def _row(**over):
     d = dict(id=1, gmail_thread_id="t", account_id=1, buyer_display_name="B", ad_title="X", ad_price="1000 €",
              deal_brief_json=None, last_event_at=datetime.utcnow().isoformat(), last_event_kind="in",
              autopilot_active=0, autopilot_floor_price_eur=None, has_pending_draft=0, de_answer=None,
-             ru_answer=None, ru_translation=None, ru_client="Привет", status="pending")
+             ru_answer=None, ru_translation=None, ru_client="Привет", status="pending",
+             pending_drafts_count=0, ad_id=None, buyer_name="b@x", client_lang="de", ad_url=None,
+             is_pinned=0, operator_unread=0)
     d.update(over)
     r = MagicMock()
     r.__getitem__.side_effect = d.__getitem__
@@ -28,6 +30,7 @@ def client():
     with patch("modules.tg_init_data.config") as mc, patch("web.api_ma.db") as mdb:
         mc.telegram_bot_token.return_value = TEST_BOT_TOKEN
         mc.telegram_authorized_ids.return_value = {"999"}
+        mdb.norm_name.side_effect = lambda n: (n or "").lower() or None
         from web.app import app
         from web.api_ma import invalidate_pipeline_cache
         invalidate_pipeline_cache()
