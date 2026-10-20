@@ -301,7 +301,8 @@ def test_ad_state_from_latest_title_and_sold_brief(tmp_db):
     assert claude.ad_state_for(tmp_db.get_message(old)) == "deleted"
     tmp_db.upsert_ad_brief(ad_id="A1", ad_title="x", ad_url="", ad_price="", brief_md="b", key_facts_json="{}")
     tmp_db.mark_ad_sold("A1")
-    assert claude.ad_state_for(tmp_db.get_message(old)) == "sold"
+    # склад ничего не знает о товаре: «sold» — отметка объявления, а не товара → 'deleted'
+    assert claude.ad_state_for(tmp_db.get_message(old)) == "deleted"
 
 
 def test_translate_accepts_text_already_in_target_and_names(fake_llm):
@@ -312,3 +313,61 @@ def test_translate_accepts_text_already_in_target_and_names(fake_llm):
     # Обратный перевод на RU для «имён/моделей/цен» законно остаётся латиницей
     fake_llm.response = _resp({"translation": "Peugeot Expert 1200 €"})
     assert claude.translate_only("Peugeot Expert 1200 €", target_lang="ru", source_lang="de")
+
+
+@pytest.mark.parametrize("state,title", [("sold", "Sitzbank"), ("deleted", "Gelöscht • Sitzbank"),
+                                         ("reserved", "Reserviert • Sitzbank"), (None, "Gelöscht • Sitzbank")])
+def test_ad_status_never_tells_model_item_is_gone(fake_llm, state, title):
+    # Товар обычно не кончается: статус объявления — не повод писать «продано/нет в наличии»
+    fake_llm.response = _resp(DRAFT)
+    claude.generate_draft("Noch da?", ad_title=title, ad_state=state)
+    user = fake_llm.calls[-1]["messages"][0]["content"]
+    assert "НЕ значит, что товара нет" in user and "НЕ пиши клиенту, что товар продан" in user
+    for bad in ("ТОВАР УЖЕ ПРОДАН", "не продаётся", "Сообщи клиенту что товар зарезервирован",
+                "объясни клиенту что объявление снято"):
+        assert bad not in user
+
+
+def test_autopilot_prompt_status_neutral(fake_llm):
+    fake_llm.response = _resp({**DRAFT, "ru_client": "x", "should_stop": False, "stop_reason": "",
+                               "client_pressing_below_floor": False})
+    claude.generate_autopilot_reply("Noch da?", ad_title="Gelöscht • Sitzbank", floor_eur=100)
+    assert "НЕ значит, что товара нет" in fake_llm.calls[-1]["messages"][0]["content"]
+
+
+def test_stock_out_of_stock_and_note_in_prompt(fake_llm):
+    fake_llm.response = _resp(DRAFT)
+    claude.generate_draft("Noch da?", ad_title="Sitzbank", ad_state="out_of_stock",
+                          stock_note="Склад: по учёту товара сейчас нет (остаток 0).")
+    user = fake_llm.calls[-1]["messages"][0]["content"]
+    assert "остаток 0" in user and "НЕ значит, что товара нет" not in user
+
+
+def test_in_stock_hides_deleted_status(fake_llm):
+    # товар есть на складе → effective_ad_state даёт '' → о «Gelöscht» модель не слышит
+    fake_llm.response = _resp(DRAFT)
+    claude.generate_draft("Noch da?", ad_title="Gelöscht • Sitzbank", ad_state="",
+                          stock_note="Склад: товар в наличии (3 шт.).")
+    user = fake_llm.calls[-1]["messages"][0]["content"]
+    assert "в наличии (3 шт.)" in user and "Примечание о статусе" not in user
+
+
+def test_ad_state_uses_inventory(tmp_db):
+    mid = tmp_db.add_message(1, "in", gmail_thread_id="ts", ad_id="A9", ad_title="Gelöscht • Sitzbank",
+                             de_client="x")
+    with patch("modules.inventory.effective_ad_state", return_value="out_of_stock") as eff:
+        assert claude.ad_state_for(tmp_db.get_message(mid)) == "out_of_stock"
+    eff.assert_called_once_with("A9", "deleted")
+
+
+def test_autopilot_gets_stock_from_history_ad_id(fake_llm):
+    fake_llm.response = _resp({**DRAFT, "ru_client": "x", "should_stop": False, "stop_reason": "",
+                               "client_pressing_below_floor": False})
+    hist = [{"id": 1, "direction": "in", "de_client": "Hallo", "status": "new", "ad_id": "A9",
+             "gmail_thread_id": "t"}]
+    with patch("modules.inventory.prompt_note", return_value="Склад: товар в наличии (2 шт.).") as pn, \
+         patch("modules.inventory.effective_ad_state", return_value=""):
+        claude.generate_autopilot_reply("Noch da?", ad_title="Gelöscht • Sitzbank", history=hist, floor_eur=1)
+    pn.assert_called_once_with("A9")
+    user = fake_llm.calls[-1]["messages"][0]["content"]
+    assert "в наличии (2 шт.)" in user and "Примечание о статусе" not in user

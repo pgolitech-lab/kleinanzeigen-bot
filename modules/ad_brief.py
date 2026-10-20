@@ -125,6 +125,56 @@ def generate_brief(
     }
 
 
+def _parse_eur(text: Any) -> Optional[float]:
+    """«1.350 €» / «1,350 €» / «1350» / 1350.0 → 1350.0; «2 Stück à 400 €» → 400; иначе None."""
+    if isinstance(text, (int, float)):
+        return float(text) if text > 0 else None
+    import re
+    from modules.guardrails import prices_in_text
+    raw = str(text or "")
+    found = prices_in_text(raw)  # число рядом с валютой надёжнее первого попавшегося
+    if found:
+        return found[0] if found[0] > 0 else None
+    m = re.search(r"(?<![\d-])(\d{1,3}(?:[.,\s]\d{3})+|\d+)(?![.,]\d{1,2}\b)", raw)
+    if not m:
+        return None
+    val = float(re.sub(r"[.,\s]", "", m.group(1)))
+    return val if val > 0 else None
+
+
+def ad_min_eur(ad_id: Optional[str]) -> Optional[float]:
+    """Минимально допустимая цена объявления: ad_briefs.min_price_eur (задаёт оператор),
+    иначе key_facts.min_acceptable_eur из брифа; None, если не известна."""
+    if not ad_id:
+        return None
+    import database as db
+    bf = db.get_ad_brief(ad_id)
+    if bf is None:
+        return None
+    if "min_price_eur" in bf.keys() and bf["min_price_eur"]:
+        return _parse_eur(bf["min_price_eur"])
+    try:
+        return _parse_eur(json.loads(bf["key_facts_json"] or "{}").get("min_acceptable_eur"))
+    except (json.JSONDecodeError, AttributeError):
+        logger.warning("ad_briefs[%s]: битый key_facts_json — минимум неизвестен", ad_id)
+        return None
+
+
+def ad_price_eur(ad_id: Optional[str], fallback_text: Any = None) -> Optional[float]:
+    """Цена объявления в евро: key_facts.price_eur, иначе из текста цены строки."""
+    if ad_id:
+        import database as db
+        bf = db.get_ad_brief(ad_id)
+        if bf is not None:
+            try:
+                p = _parse_eur(json.loads(bf["key_facts_json"] or "{}").get("price_eur"))
+                if p:
+                    return p
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    return _parse_eur(fallback_text)
+
+
 def brief_text_for(ad_id: Optional[str]) -> str:
     """Текст брифа из кэша ad_briefs для подачи в промпт ("" если брифа нет).
 
