@@ -38,20 +38,31 @@ def _copy_db(src: Path) -> Path:
     return dst
 
 
+def db_inventory_costs() -> dict[str, float]:
+    from modules import db_inventory
+    return db_inventory.category_costs()
+
+
 def _fmt_price(p) -> str:
     return f"{p:.0f} €" if p else "—"
 
 
 def render(plan: dict, ads_total: int, skipped: list[str]) -> str:
-    groups = plan["groups"]
+    hidden = [g for g in plan["groups"] if inventory.detect_category(g.title) in inventory.NON_STOCK_CATEGORIES]
+    groups = [g for g in plan["groups"] if g not in hidden]
     multi = [g for g in groups if len(g.ads) > 1]
     single = [g for g in groups if len(g.ads) == 1]
+    merged = plan.get("merged_doubts") or []
     out = [
-        "# Склад: начальное заполнение (dry-run)",
+        "# Склад: начальное заполнение",
         "",
         f"Объявлений с названием: {ads_total}; без названия (рассылки, мусор): {len(skipped)}.",
-        f"Товаров: {len(groups)} — из них перепощенных (> 1 объявления): {len(multi)}, одиночных: {len(single)}.",
-        f"Сомнительных пар «это тот же товар?»: {len(plan['doubtful'])}.",
+        f"Товаров склада: {len(groups)} — из них с несколькими объявлениями: {len(multi)}, одиночных: {len(single)}.",
+        f"Скрыто со склада (не запчасти: гараж, дом, личное, машины): {len(hidden)}.",
+        f"Сведено по решению владельца (похожие запчасти одной категории): {len(merged)}.",
+        f"Сомнительных пар «это тот же товар?» (вопрос оператору): {len(plan['doubtful'])}.",
+        f"Тип не ясен («какой тип?»): "
+        f"{sum(1 for g in groups if inventory.detect_category(g.title) in inventory.AMBIGUOUS_CATEGORIES)}.",
         "",
         "## Товары с несколькими объявлениями",
         "",
@@ -66,12 +77,19 @@ def render(plan: dict, ads_total: int, skipped: list[str]) -> str:
             out.append(f"- {a.ad_id} · акк {a.account_id} · {_fmt_price(a.price)} · "
                        f"{a.first_seen[:10]}…{a.last_seen[:10]}{st} · «{a.title}»")
         out.append("")
+    if merged:
+        out += ["## Сведены по решению владельца", ""]
+        for d in merged:
+            a = d["ad"]
+            g = next(x for x in plan["groups"] if x.gid == d["gid"])
+            out.append(f"- {a.ad_id} «{a.title}» ({_fmt_price(a.price)}) → #{g.gid} «{g.title}» · {d['reason']}")
+        out.append("")
     out += ["## Сомнительные — спросить оператора", ""]
     if not plan["doubtful"]:
         out.append("нет")
     for d in plan["doubtful"]:
         a = d["ad"]
-        sg = next(g for g in groups if g.gid == d["suggested_gid"])
+        sg = next(g for g in plan["groups"] if g.gid == d["suggested_gid"])
         out.append(f"- {a.ad_id} «{a.title}» ({_fmt_price(a.price)}) → товар #{d['gid']}; "
                    f"возможно, это #{sg.gid} «{sg.title}» ({_fmt_price(sg.latest.price)}) · "
                    f"score {d['score']:.2f} · {d['reason']}")
@@ -85,7 +103,24 @@ def render(plan: dict, ads_total: int, skipped: list[str]) -> str:
             a = g.ads[0]
             out.append(f"- #{g.gid} {a.ad_id} · {_fmt_price(a.price)} · {a.last_seen[:10]} · {g.title}")
         out.append("")
-    out += ["## Без названия (не заведены)", "", ", ".join(skipped) or "нет", ""]
+    costs = db_inventory_costs()
+    by_type: dict[str, int] = {}
+    for g in groups:
+        by_type[inventory.detect_category(g.title)] = by_type.get(inventory.detect_category(g.title), 0) + 1
+    out += ["## Себестоимость по типам", "",
+            "| тип | товаров | стандартная себестоимость |", "|---|---|---|"]
+    for cat, n in sorted(by_type.items(), key=lambda x: (x[0] not in costs, -x[1])):
+        std = f"{costs[cat]:.0f} €" if cat in costs else "вручную на товаре или партией"
+        out.append(f"| {inventory.CATEGORY_LABELS.get(cat, cat)} | {n} | {std} |")
+    amb = [g for g in groups if inventory.detect_category(g.title) in inventory.AMBIGUOUS_CATEGORIES]
+    out += ["", f"## Какой тип? — очередь оператору ({len(amb)})", ""]
+    for g in sorted(amb, key=lambda g: g.title):
+        out.append(f"- #{g.gid} {g.title} ({_fmt_price(g.latest.price)})")
+    out.append("")
+    out += ["## Скрыто со склада (non_stock)", ""]
+    for g in sorted(hidden, key=lambda g: g.title):
+        out.append(f"- #{g.gid} [{inventory.detect_category(g.title)}] {g.title} ({len(g.ads)} объявл.)")
+    out += ["", "## Без названия (не заведены)", "", ", ".join(skipped) or "нет", ""]
     return "\n".join(out)
 
 
@@ -95,6 +130,8 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true",
                     help="записать в --db (обязателен явный --db; перед записью — копия в /home/pg/backups)")
     ap.add_argument("--llm", action="store_true", help="сомнительные пары спросить у Haiku")
+    ap.add_argument("--merge-doubtful", action="store_true",
+                    help="сомнительные пары (кроме комплектов) свести в один товар — решение владельца 20.10")
     ap.add_argument("--out", type=Path, help="куда записать отчёт (markdown)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
@@ -111,7 +148,12 @@ def main() -> int:
         # Бэкап — вне репозитория (он публичный): /home/pg/backups, иначе рядом с расширением .db
         # (*.db в .gitignore). В БД пароли Gmail, токен бота и переписка покупателей.
         bdir = Path("/home/pg/backups")
-        bdir = bdir if bdir.is_dir() else src.parent
+        # Копии из /tmp (эксперименты) бэкапим рядом, всё остальное (прод) — в /home/pg/backups
+        in_tmp = str(src.resolve()).startswith("/tmp/")
+        if not in_tmp and not bdir.is_dir():
+            print(f"нет каталога бэкапов {bdir} — --apply не выполнен", file=sys.stderr)
+            return 2
+        bdir = src.parent if in_tmp else bdir
         backup = bdir / f"{src.stem}-pre-inventory-{datetime.now():%Y%m%d-%H%M%S}.db"
         with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as s, sqlite3.connect(backup) as d:
             s.backup(d)
@@ -135,7 +177,8 @@ def _run(args: argparse.Namespace, src: Path) -> int:
         all_ids = {r["ad_id"] for r in conn.execute(
             "SELECT DISTINCT ad_id FROM messages WHERE ad_id IS NOT NULL AND ad_id != ''")}
     skipped = sorted(all_ids - {a.ad_id for a in ads})
-    plan = inventory.plan_seed(ads, judge=inventory.llm_same_product if args.llm else None)
+    plan = inventory.plan_seed(ads, judge=inventory.llm_same_product if args.llm else None,
+                               merge_doubtful=args.merge_doubtful)
     text = render(plan, len(ads), skipped)
     if args.out:
         args.out.write_text(text, encoding="utf-8")

@@ -20,6 +20,18 @@
 считается «неизвестно» (`negative_stock=True` — оператору проверить приход). Ни то ни другое не
 значит «нет в наличии».
 
+## Решения владельца (20.10) и как они сделаны
+| № | Решение | В коде |
+|---|---|---|
+| 4 | Скамья «для Traveller» и «для SpaceTourer/ProAce/Zafira» — один товар | `core_key`: категория + ядро заголовка без моделей авто (+ флаги defekt/neu/vip) совпали → тот же товар автоматически. Остальные похожие пары при начальном заполнении сведены флагом `--merge-doubtful` (кроме комплектов) |
+| 5 | Одно объявление на двух аккаунтах — разные экземпляры, остаток общий | товар = позиция склада, у него много объявлений; остаток один на товар |
+| 2 | Себестоимость только с сегодня | учёт с первой инвентаризации; история продаж в остаток не входит |
+| 9 | Остаток 0 → решает оператор | `ad_context()["stock"] == "out_of_stock"` — mail/llm: автопилот не отвечает, карточка «на складе 0», черновик «уточню» |
+| 8 | Минимум — общий % от цены, не ниже себестоимости, на товаре можно переопределить | `effective_min_price(product, unit_cost)` → `(цена, 'product'|'percent'|'cost')`; в `ad_context`, отчётах, профиле |
+| 6 | Комплекты бывают | `inv_kit_components`; `set_kit(kit_id, [(товар, шт.)])`; доступность = min(остаток // шт.); продажа комплекта списывает составляющие, цена делится по их цене объявления |
+| 10 | Не запчасти — скрыть | `non_stock=1` (категории immobilie / haushalt / dienst / fahrzeug — автоматически); `set_non_stock(id, bool)`; скрыты из списков и отчётов, `ad_context` о них ничего не утверждает |
+| 1, 3 | Пока без ответа | `receive_batch([(товар, шт.)], общая_сумма)`: сумма делится по цене объявления × шт.; окупаемость по партии в `monthly_report()["batches"]` |
+
 ## Логика (modules/inventory.py)
 - **Заголовки**: из `messages.ad_title` убираются «Nutzer-Anfrage zu deiner Anzeige "…"», «Gelöscht •»,
   «Reserviert •», промо «… bis zu 25 % schneller verkaufen*»; темы рассылок без цены/описания — мусор.
@@ -101,6 +113,12 @@
 | POST | `/stock/products/{id}/count` | `inventory.set_stock(id, qty, created_by=actor)` |
 | POST | `/stock/products/{id}/archive` | `db_inventory.archive_product(id, archived)` |
 | POST | `/stock/merge` | `db_inventory.merge_products(src_id, dst_id)` |
+| POST | `/stock/batches` | `inventory.receive_batch([(product_id, qty)], total_cost_eur, occurred_at=, note=, created_by=actor)` — «купили партией / машину на разбор» |
+| PUT | `/stock/products/{id}/kit` | `inventory.set_kit(id, [(component_id, qty)])` (пусто — не комплект) → `stock_view` |
+| POST | `/stock/products/{id}/non-stock` | `inventory.set_non_stock(id, bool)` — скрыть / вернуть |
+| GET | `/stock/products/{id}` | добавить `inventory.stock_view(id)` (у комплекта — доступность и состав) и `effective_min_price` |
+- `db_inventory.list_products()` теперь по умолчанию **без non_stock**; для экрана «скрытые» — `list_products(include_non_stock=True)`.
+- Ответ `record_sale` получил ключ `kit` (продан комплект); `product_id` — то, что продали (комплект).
 | POST | `/stock/listings/{ad_id}/relink` | `db_inventory.relink_listing(ad_id, product_id)` |
 | GET | `/stock/questions` | `db_inventory.list_open_questions()` |
 | POST | `/stock/questions/{id}` | `inventory.answer_question(id, same: bool)` |
