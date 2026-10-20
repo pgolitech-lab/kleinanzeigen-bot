@@ -135,6 +135,12 @@ def health(request: Request) -> dict[str, Any]:
     except Exception as e:
         logger.exception("/health: статус почты недоступен")
         out["mail_status_error"] = type(e).__name__
+    try:
+        from web.api_ma import backup_age_sec
+        out["backup_age_sec"] = backup_age_sec()  # None — метки нет (бэкапа не было / путь)
+    except Exception as e:
+        logger.exception("/health: возраст бэкапа недоступен")
+        out["backup_age_sec"] = None
     if _is_local(request):
         try:
             from modules import telegram_bot
