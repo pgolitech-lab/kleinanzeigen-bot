@@ -2,6 +2,7 @@
 // (вместо трёх разных: inline-морф кнопки / tg.showConfirm / window.confirm).
 
 import { el } from "../utils.js";
+import { confirm as tgConfirm } from "../tg.js";
 
 let _ov = null, _sh = null;
 
@@ -11,7 +12,32 @@ function ensureMounted() {
   _sh = el(`<div id="sheet" role="dialog" aria-modal="true"></div>`);
   document.body.appendChild(_ov);
   document.body.appendChild(_sh);
-  _ov.addEventListener("click", () => closeSheet());
+  _ov.addEventListener("click", () => { requestCloseSheet(); });
+}
+
+const _FIELDS = "textarea, input[type=text], input[type=number], input:not([type])";
+
+// Запомнить исходные значения полей — чтобы отличить набранный текст от
+// предзаполненного (черновик ИИ и т.п.).
+function snapshotFields() {
+  _sh.querySelectorAll(_FIELDS).forEach(f => { f.dataset.initVal = f.value; });
+}
+
+export function isSheetOpen() {
+  return !!_sh && _sh.classList.contains("on");
+}
+
+function isDirty() {
+  return [..._sh.querySelectorAll(_FIELDS)].some(f => f.value !== (f.dataset.initVal ?? f.value));
+}
+
+// Закрыть шит по «Назад»/тапу по фону. Если оператор что-то набрал — сначала
+// спросить (нативный диалог Telegram, шит при этом не трогаем). true — закрыт.
+export async function requestCloseSheet() {
+  if (!isSheetOpen()) return true;
+  if (isDirty() && !(await tgConfirm("Закрыть? Набранный текст пропадёт."))) return false;
+  closeSheet();
+  return true;
 }
 
 // content: DOM-узел или массив узлов. title — опциональный заголовок.
@@ -25,6 +51,7 @@ export function openSheet(content, title) {
   }
   (Array.isArray(content) ? content : [content]).forEach(n => { if (n) _sh.appendChild(n); });
   // form-элементам внутри шита не нужен нижний отступ таб-бара
+  snapshotFields();
   requestAnimationFrame(() => {
     _ov.classList.add("on");
     _sh.classList.add("on");

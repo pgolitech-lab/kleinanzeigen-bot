@@ -7,6 +7,7 @@ import * as dashboard from "./screens/dashboard.js";
 import * as clients from "./screens/clients.js";
 import { setError, setLoading } from "./utils.js";
 import { hideBack, showBack, setTitle } from "./components/backbar.js";
+import { closeSheet, isSheetOpen, requestCloseSheet } from "./components/sheet.js";
 
 // Редкие экраны грузятся лениво — при первом заходе, а не при старте MA.
 const client   = () => import("./screens/client.js");
@@ -43,6 +44,12 @@ async function loadScreen(screen) {
 }
 
 function navigateBack() {
+  // Открыт шит (отправка, правка, меню) — «Назад» сначала закрывает его,
+  // а не уводит с экрана вместе с набранным текстом.
+  if (isSheetOpen()) {
+    requestCloseSheet();
+    return;
+  }
   // Используем browser history если есть куда — это сохраняет «откуда пришёл»
   // (например из /detected открыл тред → back возвращает в /detected, не /pipeline).
   // Если истории нет — fallback на /pipeline.
@@ -83,6 +90,8 @@ export function start(mount) {
         // экрана (опрос, медленный fetch, LLM) пишет в отцепленный от DOM div и
         // не перерисовывает чужой экран; экраны проверяют mount.isConnected,
         // чтобы остановить таймеры и не захватывать локи впустую.
+        // Шит прошлого экрана не должен висеть поверх нового (B-01)
+        closeSheet();
         const screenMount = document.createElement("div");
         mount.replaceChildren(screenMount);
         if (typeof r.screen === "function") setLoading(screenMount);

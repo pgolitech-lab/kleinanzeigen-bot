@@ -4,7 +4,12 @@
 // например тред ставит название объявления после загрузки).
 // mountBackbar() оставлен для совместимости с app.js — шапка уже в index.html.
 
+import { showBack as tgShowBack, hideBack as tgHideBack } from "../tg.js";
+
 let _handler = null;
+// Нативная кнопка «Назад» Telegram (в шапке клиента / системный жест Android)
+// ведёт туда же, куда и наша в #hd.
+const _tgHandler = () => { if (_handler) _handler(); };
 
 export function mountBackbar() {
   const btn = document.querySelector("#hd .hback");
@@ -23,10 +28,12 @@ export function showBack(handler) {
   _handler = handler;
   const btn = document.querySelector("#hd .hback");
   if (btn) btn.classList.remove("d-none");
+  tgShowBack(_tgHandler);
 }
 
 export function hideBack() {
   _handler = null;
   const btn = document.querySelector("#hd .hback");
   if (btn) btn.classList.add("d-none");
+  tgHideBack();
 }
