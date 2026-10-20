@@ -848,6 +848,7 @@ from modules.db_scout import (  # noqa: F401
     delete_scout_query,
     scout_query_exists,
     upsert_scout_listing,
+    upsert_scout_listings,
     deactivate_stale_scout_listings,
     list_scout_listings,
     scout_region_summary,
