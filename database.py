@@ -235,6 +235,18 @@ def init_db() -> None:
             "ON lessons(source_type, source_ref) "
             "WHERE source_type IS NOT NULL AND source_ref IS NOT NULL"
         )
+        # Уроки из разбора истории (сессия llm, 2026-10-20). У старых 21 урока — NULL.
+        #   lesson_ru  — сам урок одной-двумя фразами по-русски
+        #   source     — 'operator_edit' | 'mined'
+        #   outcome    — исход треда: 'sold' | 'lost' | 'silent' | 'open'
+        #   category   — тема (торг, доставка, состояние, …) — свободная строка
+        _add_column_if_missing(conn, "lessons", "lesson_ru", "TEXT")
+        _add_column_if_missing(conn, "lessons", "source", "TEXT")
+        _add_column_if_missing(conn, "lessons", "gmail_thread_id", "TEXT")
+        _add_column_if_missing(conn, "lessons", "buyer_email", "TEXT")
+        _add_column_if_missing(conn, "lessons", "outcome", "TEXT")
+        _add_column_if_missing(conn, "lessons", "category", "TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lessons_thread ON lessons(gmail_thread_id)")
 
         # Индексы для частых запросов
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_account ON messages(account_id)")
@@ -516,6 +528,41 @@ def init_db() -> None:
                 updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
+
+        # Досье клиента (сессия llm пишет краткое досье по всей истории переписки).
+        # Relay-email Kleinanzeigen живёт на паре «покупатель + объявление», поэтому
+        # у одного человека бывает несколько email: досье — по (account_id, name_key),
+        # email-ы — отдельной таблицей. name_key = norm_name(display_name), а без имени
+        # — 'email:<адрес>'. dossier_max_msg_id — последний учтённый messages.id:
+        # пересчитывать досье только когда у клиента появились письма новее.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_dossiers (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id          INTEGER NOT NULL,
+                name_key            TEXT NOT NULL,
+                display_name        TEXT,
+                summary_md          TEXT,
+                facts_json          TEXT,
+                source_threads_json TEXT,
+                dossier_max_msg_id  INTEGER,
+                model               TEXT,
+                created_at          TEXT NOT NULL,
+                updated_at          TEXT NOT NULL,
+                UNIQUE (account_id, name_key)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_dossier_emails (
+                buyer_email TEXT PRIMARY KEY,
+                dossier_id  INTEGER NOT NULL
+                            REFERENCES client_dossiers(id) ON DELETE CASCADE,
+                added_at    TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dossier_emails_dossier "
+            "ON client_dossier_emails(dossier_id)"
+        )
 
         # thread_flags — операторские флаги тредов: закрепить, непрочитано.
         conn.execute("""
@@ -951,6 +998,11 @@ from modules.db_threads import (  # noqa: F401
     upsert_client_profile,
     get_thread_flags,
     set_thread_flags,
+    upsert_client_dossier,
+    get_dossier_for_email,
+    get_dossier,
+    list_dossier_emails,
+    latest_msg_id_for_emails,
 )
 
 # re-export sales-функций (перенесены в modules/db_sales.py)
@@ -965,6 +1017,7 @@ from modules.db_sales import (  # noqa: F401
     reject_detection,
     mark_thread_sold,
     add_lesson,
+    has_mined_lessons,
     find_relevant_lessons,
     list_lessons_for_ad,
 )
