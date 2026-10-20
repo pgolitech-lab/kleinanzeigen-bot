@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import config
@@ -30,6 +30,25 @@ app.add_middleware(
     max_age=600,
 )
 app.include_router(ma_router)
+
+
+# Через cloudflared-туннель (публичный адрес) наружу видны только Mini App API и /health.
+# Старая веб-морда, /api/settings, /debug/*, /accounts/* и т. п. — только из локальной сети / с сервера.
+_TUNNEL_ALLOWED_PREFIXES = ("/api/ma/", "/health")
+
+
+def _via_tunnel(request: Request) -> bool:
+    h = request.headers
+    host = (h.get("host") or "").split(":")[0].lower()
+    return bool(h.get("cf-ray") or h.get("cf-connecting-ip") or host.endswith(".trycloudflare.com"))
+
+
+@app.middleware("http")
+async def _tunnel_guard(request: Request, call_next):
+    path = request.url.path
+    if _via_tunnel(request) and not (path == "/health" or path.startswith(_TUNNEL_ALLOWED_PREFIXES)):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await call_next(request)
 
 # Шаблоны лежат в web/templates/ относительно корня проекта
 BASE_DIR = Path(__file__).parent
