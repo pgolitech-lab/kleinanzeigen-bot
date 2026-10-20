@@ -131,8 +131,12 @@ def _send_auto_ack(
     # RU-перевод текста ack для отображения в веб/тг (Haiku ~$0.0003).
     # Если клиент уже на русском — просто копируем текст.
     ack_lang = ack.get("client_lang") or "de"
-    ru_translation = ""
-    if ack_lang == "ru":
+    # opt/llm отдаёт RU-зеркало сразу (ack_text_ru) — отдельный перевод не нужен;
+    # фолбэк на translate_only, если ключа нет.
+    ru_translation = (ack.get("ack_text_ru") or "").strip()
+    if ru_translation:
+        pass
+    elif ack_lang == "ru":
         ru_translation = ack["ack_text"]
     else:
         try:
@@ -250,18 +254,30 @@ def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any,
     if thread_lang and model_lang and thread_lang != model_lang:
         return "guard_language"
     lang = thread_lang or model_lang
-    if not guardrails.outgoing_language_ok(text, "ru" if lang in _CYRILLIC_LANGS else lang):
-        return "guard_language"
-    # Второй слой (как lang-check в MA): независимая детекция языка текста Haiku —
-    # ловит английский/польский немецкому клиенту, которые алфавит не видит.
-    # Сбой детектора — fail-closed: без вердикта не шлём.
-    try:
-        detected = (claude.detect_text_lang(text).get("lang") or "").strip().lower()[:2]
-    except Exception:
-        logger.exception("autopilot: detect_text_lang упал — ответ задерживаем")
-        return "guard_language"
-    if not lang or (detected not in ("", "un") and detected != lang):
-        return "guard_language"
+    if not lang:
+        return "guard_language"  # язык клиента неизвестен — вслепую не шлём
+    # После слияния opt/llm — общий guard guardrails.outgoing_language_ok_llm
+    # (эвристика по стоп-словам/буквам + Haiku при неуверенности, fail-closed).
+    llm_guard = getattr(guardrails, "outgoing_language_ok_llm", None)
+    if llm_guard is not None:
+        try:
+            ok = llm_guard(text, lang)
+        except Exception:
+            logger.exception("autopilot: language guard упал — ответ задерживаем")
+            ok = False
+        if not ok:
+            return "guard_language"
+    else:
+        # Фолбэк до слияния: алфавит + независимая детекция Haiku (как lang-check в MA).
+        if not guardrails.outgoing_language_ok(text, "ru" if lang in _CYRILLIC_LANGS else lang):
+            return "guard_language"
+        try:
+            detected = (claude.detect_text_lang(text).get("lang") or "").strip().lower()[:2]
+        except Exception:
+            logger.exception("autopilot: detect_text_lang упал — ответ задерживаем")
+            return "guard_language"
+        if detected not in ("", "un") and detected != lang:
+            return "guard_language"
     floor = autopilot_row["floor_price_eur"]
     if floor:
         price = (reply.get("deal_brief") or {}).get("negotiated_price_eur")
@@ -543,6 +559,9 @@ def _known_thread_ad(thread_id: str, exclude_id: Optional[int] = None) -> Option
     }
 
 
+# Пометка в ru_client, если перевод входящего не удался (вместо пустоты и выдуманного языка).
+TRANSLATION_FAILED_RU = "⚠️ перевод не удался — см. оригинал"
+
 # Письмо старше стольких дней — «запоздало»: без автопилота и auto-ack.
 LATE_AFTER_DAYS = 1.0
 
@@ -588,6 +607,33 @@ def _notify_late(message_id: int, thread_id: str, age_days: float, autopilot_on:
         telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
     except Exception:
         logger.exception("Уведомление о запоздалом письме не ушло msg=%s", message_id)
+
+
+def _history_for_prompt(thread_id: str, exclude_id: int) -> list[dict[str, Any]]:
+    """История треда для модели без текущего письма (по id строки, не по тексту).
+
+    Источник — claude.history_for(thread_id, exclude_id=...) из opt/llm (до слияния —
+    фолбэк на сборку здесь). Наш ответ оставляем, только если он реально ушёл
+    клиенту: задержанный guard'ом или неотправленный черновик клиент не видел —
+    модель не должна на него ссылаться. Пустой thread_id → без истории."""
+    if not thread_id:
+        return []
+    try:
+        rows = claude.history_for(thread_id, exclude_id=exclude_id)
+    except TypeError:
+        # До слияния opt/llm: history_for(thread_id) без exclude_id и без id/status.
+        rows = [
+            {"id": r["id"], "direction": r["direction"], "de_client": r["de_client"],
+             "de_answer": r["de_answer"], "status": r["status"]}
+            for r in db.thread_history(thread_id) if r["id"] != exclude_id
+        ]
+    out = []
+    for h in rows:
+        h = dict(h)
+        if h.get("status") not in _SENT_STATUSES:
+            h["de_answer"] = None
+        out.append(h)
+    return out
 
 
 def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) -> None:
@@ -977,18 +1023,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             except Exception as e:
                 logger.warning("Не удалось сгенерить бриф для ad_id=%s: %s", ad_id, e)
 
-    # История треда из БД без только что вставленного письма — отсекаем по id
-    # строки, а не по тексту (одинаковые короткие «Ok»/«Danke» иначе выпадали).
-    # Наш ответ в истории — только если он реально ушёл клиенту (задержанный guard'ом
-    # или не отправленный черновик клиент не видел — модель не должна на него ссылаться).
-    # Пустой thread_id → без истории (иначе WHERE gmail_thread_id='' = чужие переписки).
-    hist_thread = email.get("gmail_thread_id") or ""
-    history = [
-        {"direction": r["direction"], "de_client": r["de_client"],
-         "de_answer": r["de_answer"] if r["status"] in _SENT_STATUSES else None}
-        for r in (db.thread_history(hist_thread) if hist_thread else [])
-        if r["id"] != inserted_id
-    ]
+    history = _history_for_prompt(email.get("gmail_thread_id") or "", inserted_id)
 
     # Релевантные уроки от оператора — топ-5
     lessons_rows = db.find_relevant_lessons(
@@ -1067,14 +1102,15 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # тапнет «🤖 Предложить ответ» когда захочет (см. handler `propose`).
     try:
         tr = claude.detect_and_translate_to_ru(body)
-        db.update_message(
-            inserted_id,
-            ru_client=tr.get("translation_ru") or "",
-            client_lang=tr.get("lang") or "de",
-            cost_usd=tr.get("cost_usd", 0.0),
-        )
+        fields: dict[str, Any] = {"ru_client": tr.get("translation_ru") or TRANSLATION_FAILED_RU,
+                                  "cost_usd": tr.get("cost_usd", 0.0)}
+        if tr.get("lang"):
+            fields["client_lang"] = tr["lang"]  # язык не выдумываем: нет — остаётся пустым
+        db.update_message(inserted_id, **fields)
     except Exception:
         logger.exception("incoming RU-translation fail msg=%s", inserted_id)
+        # Пометка в карточке вместо пустого перевода; client_lang не подставляем.
+        db.update_message(inserted_id, ru_client=TRANSLATION_FAILED_RU)
 
     # Если тред занят (оператор работает с любой row или идёт SMTP) —
     # откладываем review-карточку. Drain поднимет её при release_lock или

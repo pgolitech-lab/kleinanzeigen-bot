@@ -424,7 +424,8 @@ def test_autopilot_detector_failure_is_fail_closed(inc, tmp_db, monkeypatch):
     mid, ap = _ap_msg(tmp_db)
     monkeypatch.setattr(inc.claude, "detect_text_lang",
                         lambda t: (_ for _ in ()).throw(RuntimeError("cli down")))
-    inc._autopilot_dispatch(mid, ap, _reply())
+    # Короткий текст без явных признаков языка — эвристика не уверена, нужен детектор.
+    inc._autopilot_dispatch(mid, ap, _reply(de_answer="Okay, passt."))
     assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
 
 
@@ -683,3 +684,55 @@ def test_monitor_errors_collects_dedups_realerts(monkeypatch):
     log.error("send fail msg=%s", 90)
     assert "posted 1" in scheduler.monitor_errors_job()
     assert scheduler.monitor_errors_job() == "ok, no issues"
+
+
+# ---------------------------------------------------------------------------
+# Совместимость с opt/llm (через getattr / фолбэки)
+# ---------------------------------------------------------------------------
+
+def test_history_uses_llm_history_for_and_hides_unsent(inc, monkeypatch):
+    got: dict = {}
+
+    def history_for(tid, exclude_id=None, before=None):
+        got["args"] = (tid, exclude_id)
+        return [{"id": 1, "direction": "in", "de_client": "Preis?", "de_answer": "50 €", "status": "edited"},
+                {"id": 2, "direction": "in", "de_client": "Hallo", "de_answer": "Ja", "status": "sent"},
+                {"id": 3, "direction": "out", "de_client": None, "de_answer": "ack", "status": "skipped"}]
+
+    monkeypatch.setattr(inc.claude, "history_for", history_for)
+    h = inc._history_for_prompt("T1", 99)
+    assert got["args"] == ("T1", 99)
+    assert [x["de_answer"] for x in h] == [None, "Ja", None]
+    assert inc._history_for_prompt("", 99) == []
+
+
+def test_translation_failure_marks_card_keeps_lang_empty(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc.claude, "detect_and_translate_to_ru",
+                        lambda body: (_ for _ in ()).throw(RuntimeError("cli down")))
+    inc._process_incoming(ACC, _email())
+    row = tmp_db.find_by_gmail_message_id("<m1@x>")
+    assert row["ru_client"] == inc.TRANSLATION_FAILED_RU
+    assert not row["client_lang"]
+    assert inc._calls["review"] == [row["id"]]
+
+
+def test_auto_ack_uses_ack_text_ru_without_translate(inc, tmp_db, monkeypatch):
+    tmp_db.set_setting("send_mode", "redirect")  # _send_reply подменён — реально ничего не шлётся
+    monkeypatch.setattr(inc.claude, "generate_auto_ack", lambda **kw: {
+        "ack_text": "Danke, melde mich gleich.", "ack_text_ru": "Спасибо, скоро отвечу.",
+        "client_lang": "de", "tokens_in": 1, "tokens_out": 1, "cost_usd": 0.0})
+    monkeypatch.setattr(inc.claude, "translate_only",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("не нужен")))
+    inc._process_incoming({**ACC, "auto_ack_enabled": 1}, _email())
+    with tmp_db.get_conn() as conn:
+        r = conn.execute("SELECT ru_translation FROM messages WHERE is_auto_ack=1").fetchone()
+    assert r["ru_translation"] == "Спасибо, скоро отвечу."
+
+
+def test_language_guard_prefers_llm_guard_when_present(inc, tmp_db, monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(inc.guardrails, "outgoing_language_ok_llm",
+                        lambda text, lang: seen.append(lang) or False, raising=False)
+    mid, ap = _ap_msg(tmp_db)
+    inc._autopilot_dispatch(mid, ap, _reply())
+    assert seen == ["de"] and inc._calls["send"] == [] and inc._calls["review"] == [mid]
