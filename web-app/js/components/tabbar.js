@@ -15,9 +15,9 @@ const ICONS = {
 const TABS = [
   { icon: "inbox",    label: "Входящие",   hash: "#/pipeline", match: /^#\/(pipeline|thread|review|triage)/ },
   { icon: "users",    label: "Клиенты",    hash: "#/clients",  match: /^#\/(clients|client)/ },
-  { icon: "sales",    label: "Продажи",    hash: "#/sales",    match: /^#\/sales/ },
+  { icon: "sales",    label: "Продажи",    hash: "#/sales",    match: /^#\/(sales|detected)/ },
   { icon: "listings", label: "Объявления", hash: "#/listings", match: /^#\/(listings|scout)/ },
-  { icon: "more",     label: "Ещё",        hash: "#/more",     match: /^#\/(more|settings|accounts|detected|dashboard)/ },
+  { icon: "more",     label: "Ещё",        hash: "#/more",     match: /^#\/(more|settings|accounts|dashboard|scout)/ },
 ];
 
 export function mountTabbar() {

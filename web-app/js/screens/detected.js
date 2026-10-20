@@ -1,148 +1,155 @@
+// 🔍 Найденные продажи (v3, итог QA «ленивый продажник»): ИИ нашёл в переписке
+// похожие на продажу сделки — оператор подтверждает или отклоняет.
+// «Точно / вероятно / сомнительно» вместо high/medium/low, дата по Берлину,
+// «Принять все уверенные» одной кнопкой (по одному запросу на продажу).
 import { api } from "../api.js";
-import { el, esc, berlinTime, setLoading, setError, eur } from "../utils.js";
+import { el, setLoading, setError, eur, berlinTime } from "../utils.js";
+import { confirmSheet } from "../components/sheet.js";
+import { toast } from "../components/kit.js";
 
-function confidenceBadge(conf) {
-  const map = {
-    high:   "bg-success",
-    medium: "bg-warning text-dark",
-    low:    "bg-secondary",
-  };
-  return `<span class="badge ${map[conf] || "bg-secondary"}">${esc(conf)}</span>`;
-}
+const CONF = {
+  high: ["good", "точно"],
+  medium: ["warn", "вероятно"],
+  low: ["mut", "сомнительно"],
+};
 
-function detectionCard(d, onApply, onReject) {
-  const card = el(`
-    <div class="card mb-2">
-      <div class="card-body p-3">
-        <div class="d-flex justify-content-between align-items-baseline gap-2 mb-1">
-          <div class="fw-semibold ad-title flex-grow-1"></div>
-          <div class="conf"></div>
-        </div>
-        <div class="small text-muted mb-2 meta"></div>
-        <div class="alert alert-info small py-2 mb-2 evidence"></div>
-        <div class="row g-2 align-items-center mb-2">
-          <div class="col-auto">
-            <label class="form-label small mb-0">Цена €:</label>
-          </div>
-          <div class="col">
-            <input type="number" inputmode="decimal" min="0" step="0.01"
-                   class="form-control form-control-sm price-input">
-          </div>
-          <div class="col-auto small text-muted disc"></div>
-        </div>
-        <div class="d-flex gap-2">
-          <button class="btn btn-sm btn-success flex-grow-1 apply-btn">✅ Принять</button>
-          <button class="btn btn-sm btn-outline-danger reject-btn">❌ Отклонить</button>
-          <a class="btn btn-sm btn-outline-secondary" href="#/thread/" data-thread>📂 Тред</a>
-        </div>
+const apply = (id, price) => api(`/api/ma/detected-sales/${id}/apply`, { method: "POST", body: {price_eur: price} });
+const reject = id => api(`/api/ma/detected-sales/${id}/reject`, { method: "POST" });
+
+function card(d, onDone) {
+  const c = el(`
+    <article class="det">
+      <div class="det-1"><b class="det-t"></b><span class="det-c"></span></div>
+      <div class="det-meta"></div>
+      <blockquote class="det-q"></blockquote>
+      <div class="det-price">
+        <label>Цена продажи, €</label>
+        <input type="number" inputmode="decimal" min="0" step="1" class="form-control">
+        <span class="det-disc"></span>
       </div>
-    </div>
-  `);
-  card.querySelector(".ad-title").textContent = d.thread_ad_title || d.detected_ad_title || "?";
-  card.querySelector(".conf").innerHTML = confidenceBadge(d.confidence);
+      <div class="det-acts">
+        <a class="btn det-open">Переписка</a>
+        <button class="btn det-no" type="button">Не продано</button>
+        <button class="btn btn-primary det-yes" type="button">✅ Продано</button>
+      </div>
+    </article>`);
+  c.querySelector(".det-t").textContent = d.thread_ad_title || d.detected_ad_title || "(без названия)";
+  const [cls, label] = CONF[d.confidence] ?? ["mut", "сомнительно"];
+  const conf = c.querySelector(".det-c");
+  conf.textContent = label;
+  conf.classList.add(cls);
+  const meta = [];
+  if (d.detected_sold_at) meta.push(berlinTime(d.detected_sold_at) || d.detected_sold_at);
+  if (d.buyer_display_name) meta.push(d.buyer_display_name);
+  if (d.account_name) meta.push(d.account_name);
+  if (d.thread_ad_price) meta.push(`в объявлении ${d.thread_ad_price}`);
+  c.querySelector(".det-meta").textContent = meta.join(" · ");
+  const q = c.querySelector(".det-q");
+  const quote = d.evidence_ru || d.evidence;
+  if (quote) q.textContent = `«${quote}»`; else q.remove();
 
-  const metaParts = [];
-  if (d.detected_sold_at) metaParts.push(`🕒 ${d.detected_sold_at}`);
-  if (d.buyer_display_name) metaParts.push(`👤 ${d.buyer_display_name}`);
-  if (d.account_name) metaParts.push(`@${d.account_name}`);
-  if (d.thread_ad_price) metaParts.push(`объявлено: ${d.thread_ad_price}`);
-  card.querySelector(".meta").textContent = metaParts.join(" · ");
-
-  card.querySelector(".evidence").textContent = d.evidence
-    ? `«${d.evidence}»`
-    : "(нет evidence)";
-
-  const priceInput = card.querySelector(".price-input");
-  if (d.sold_price_eur != null) priceInput.value = d.sold_price_eur;
-
-  const discEl = card.querySelector(".disc");
-  function updateDiscount() {
-    const p = Number(priceInput.value);
-    if (!Number.isFinite(p) || !d.thread_ad_price_eur) {
-      discEl.textContent = "";
-      return;
-    }
+  const input = c.querySelector("input");
+  if (d.sold_price_eur != null) input.value = String(d.sold_price_eur);
+  const disc = c.querySelector(".det-disc");
+  const upd = () => {
+    const p = Number(input.value);
+    if (!input.value || !Number.isFinite(p) || !d.thread_ad_price_eur) { disc.textContent = ""; return; }
     const diff = d.thread_ad_price_eur - p;
-    const sign = diff >= 0 ? "−" : "+";
-    discEl.textContent = `(${sign}${eur(Math.abs(diff))})`;
-  }
-  priceInput.addEventListener("input", updateDiscount);
-  updateDiscount();
+    disc.textContent = diff > 0 ? `скидка ${eur(diff)}` : diff < 0 ? `+${eur(-diff)}` : "без скидки";
+  };
+  input.addEventListener("input", upd);
+  upd();
+  c.querySelector(".det-open").href = `#/thread/${encodeURIComponent(d.thread_id)}`;
 
-  const link = card.querySelector("[data-thread]");
-  link.href = `#/thread/${encodeURIComponent(d.thread_id)}`;
-
-  card.querySelector(".apply-btn").addEventListener("click", async () => {
-    const p = Number(priceInput.value);
-    if (!Number.isFinite(p) || p < 0) {
-      priceInput.classList.add("is-invalid");
-      return;
-    }
-    card.querySelectorAll("button").forEach(b => b.disabled = true);
+  const btns = () => c.querySelectorAll("button");
+  c.querySelector(".det-yes").addEventListener("click", async () => {
+    const p = Number(input.value);
+    if (!input.value || !Number.isFinite(p) || p < 0) { input.classList.add("is-invalid"); return; }
+    btns().forEach(b => { b.disabled = true; });
     try {
-      await onApply(d.id, p);
+      await apply(d.id, p);
+      toast(`✅ Продажа ${eur(p)} записана`);
+      onDone(d.id);
     } catch (e) {
-      alert("Ошибка: " + (e.message || e));
-      card.querySelectorAll("button").forEach(b => b.disabled = false);
+      toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+      btns().forEach(b => { b.disabled = false; });
     }
   });
-
-  card.querySelector(".reject-btn").addEventListener("click", async () => {
-    card.querySelectorAll("button").forEach(b => b.disabled = true);
+  c.querySelector(".det-no").addEventListener("click", async () => {
+    btns().forEach(b => { b.disabled = true; });
     try {
-      await onReject(d.id);
+      await reject(d.id);
+      onDone(d.id);
     } catch (e) {
-      alert("Ошибка: " + (e.message || e));
-      card.querySelectorAll("button").forEach(b => b.disabled = false);
+      toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+      btns().forEach(b => { b.disabled = false; });
     }
   });
-
-  return card;
+  return c;
 }
 
-export async function render(mount, params) {
-  setLoading(mount, "Загружаю detections…");
+export async function render(mount) {
+  setLoading(mount, "Ищу найденные продажи…");
+  let data;
   try {
-    const data = await api("/api/ma/detected-sales");
-    paint(mount, data);
+    data = await api("/api/ma/detected-sales");
   } catch (e) {
-    setError(mount, e.message ?? String(e));
+    if (mount.isConnected) setError(mount, e.message ?? String(e));
+    return;
   }
-}
+  if (!mount.isConnected) return;
+  let items = data.items ?? [];
 
-function paint(mount, data) {
-  const root = el(`<div></div>`);
-  root.appendChild(el(`<div class="sec">Возможные продажи · <b>${data.count}</b></div>`));
+  const root = el(`<div class="detected"><div class="det-head"></div><div class="det-list"></div></div>`);
+  const head = root.querySelector(".det-head");
+  const list = root.querySelector(".det-list");
 
-  root.appendChild(el(`
-    <div class="alert alert-secondary small mb-3">
-      LLM-сканер прошёл по архиву переписки и нашёл возможные сделки.<br>
-      High-confidence уже автоматически записаны в Продажи.<br>
-      Здесь — кандидаты которые требуют твоей проверки. Поправь цену если LLM ошиблась.
-    </div>
-  `));
-
-  if (!data.count) {
-    root.appendChild(el(`
-      <div class="text-center text-muted fst-italic py-4">
-        Нет кандидатов на review. Все обработаны 👍
-      </div>
-    `));
+  function onDone(id) {
+    items = items.filter(x => x.id !== id);
+    list.querySelector(`[data-id="${CSS.escape(String(id))}"]`)?.remove();
+    paintHead();
+    if (!items.length) paintEmpty();
   }
 
-  async function onApply(id, price) {
-    await api(`/api/ma/detected-sales/${id}/apply`, {
-      method: "POST", body: {price_eur: price},
-    });
-    render(mount);  // re-fetch
-  }
-  async function onReject(id) {
-    await api(`/api/ma/detected-sales/${id}/reject`, {method: "POST"});
-    render(mount);
+  function paintEmpty() {
+    list.replaceChildren(el(`<div class="empty"><p>Всё проверено — новых находок нет.</p></div>`));
   }
 
-  for (const d of data.items) {
-    root.appendChild(detectionCard(d, onApply, onReject));
+  function paintHead() {
+    head.replaceChildren();
+    const sure = items.filter(x => x.confidence === "high" && x.sold_price_eur != null);
+    const t = el(`<div class="lsec"><span>На проверку</span><i></i></div>`);
+    t.querySelector("i").textContent = String(items.length);
+    head.appendChild(t);
+    if (sure.length) {
+      const sum = sure.reduce((a, x) => a + Number(x.sold_price_eur || 0), 0);
+      const b = el(`<button class="btn btn-primary det-all" type="button"></button>`);
+      b.textContent = `✅ Принять все уверенные: ${sure.length} · ${eur(sum)}`;
+      b.addEventListener("click", async () => {
+        if (!(await confirmSheet(`Записать ${sure.length} продаж на ${eur(sum)}?`, "Записать"))) return;
+        b.disabled = true;
+        let ok = 0;
+        for (const d of sure) {
+          try {
+            await apply(d.id, Number(d.sold_price_eur));
+            ok++;
+            onDone(d.id);
+          } catch (e) {
+            toast(`«${d.thread_ad_title || "?"}»: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+          }
+        }
+        toast(`✅ Записано продаж: ${ok}`);
+      });
+      head.appendChild(b);
+    }
   }
+
+  paintHead();
+  if (!items.length) paintEmpty();
+  items.forEach(d => {
+    const c = card(d, onDone);
+    c.dataset.id = String(d.id);
+    list.appendChild(c);
+  });
   mount.replaceChildren(root);
 }
