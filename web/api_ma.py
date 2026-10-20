@@ -7,7 +7,7 @@ existing scheduler.* helpers — никакой бизнес-логики.
 """
 from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1567,15 +1567,142 @@ def ma_autopilot_stop(thread_id: str,
     return _thread_dict(thread_id)
 
 
+class WaitBody(BaseModel):
+    # «Жду до…»: не напоминать про молчание клиента до этой даты (ISO) или N дней
+    until: "str | None" = None
+    days: "float | None" = Field(None, gt=0, le=60)
+
+
 @router.post("/threads/{thread_id}/wait")
-def ma_thread_wait(thread_id: str,
+def ma_thread_wait(thread_id: str, body: "WaitBody | None" = None,
                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """«Ждём клиента» (тред уходит из «ждут нас»). С until/days — ещё и без напоминаний до срока."""
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
     actor = actor_from_user(user)
     db.mark_thread_waiting(thread_id, marked_by=actor)
-    return _thread_dict(thread_id)
+    b = body or WaitBody()
+    until = None
+    if b.days:
+        until = (datetime.utcnow() + timedelta(days=b.days)).isoformat(timespec="seconds")
+    elif b.until:
+        try:
+            until = datetime.fromisoformat(b.until.replace("Z", "")).isoformat(timespec="seconds")
+        except ValueError:
+            raise HTTPException(400, "until: ожидается дата ISO, например 2026-10-25T10:00")
+    if until:
+        # find_reminder_candidates смотрит reminder_snooze_until строки последнего ответа — ставим всем строкам треда
+        with db.get_conn() as conn:
+            conn.execute("UPDATE messages SET reminder_snooze_until=? WHERE gmail_thread_id=?", (until, thread_id))
+    data = _thread_dict(thread_id)
+    data["wait_until"] = until
+    return data
+
+
+def _preview_in_client_lang(thread_id: str, ru_text: str) -> dict[str, Any]:
+    """RU-текст → язык покупателя треда + обратный перевод; формат как /compose-preview,
+    отправка — обычным /compose (оператор видит и может поправить)."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    last_in = next((r for r in reversed(history) if r["direction"] == "in"), history[-1])
+    lang = _client_lang(last_in)
+    if lang == "ru":
+        return {"translated": ru_text, "back_ru": ru_text, "target_lang": "ru", "ru_text": ru_text}
+    translated, back = _translate_with_back(ru_text, lang, context=last_in["ad_title"])
+    if not translated.strip():
+        raise HTTPException(502, "перевод вернулся пустым")
+    return {"translated": translated, "back_ru": back, "target_lang": lang, "ru_text": ru_text}
+
+
+@router.post("/threads/{thread_id}/followup")
+def ma_thread_followup(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Напоминание молчащему покупателю: готовый текст на его языке (не отправляет — через /compose)."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    ad = next((r["ad_title"] for r in reversed(history) if r["ad_title"]), None) or "товар"
+    ru = (f"Здравствуйте! Хотел уточнить, актуален ли ещё ваш интерес к «{ad}»? "
+          "Если остались вопросы — с радостью отвечу. Если решили иначе, дайте, пожалуйста, знать.")
+    return _preview_in_client_lang(thread_id, ru)
+
+
+# ── Быстрые ответы: справка аккаунта (город, часы, доставка, оплата) ──
+_QUICK_KINDS = ("city", "hours", "delivery", "payment")
+_QUICK_TEMPLATES = {
+    "city": "Товар находится здесь: {v}. Можно посмотреть и забрать на месте.",
+    "hours": "Посмотреть и забрать можно {v}. Напишите, когда вам удобно.",
+    "delivery": "Доставка: {v}.",
+    "payment": "Оплата: {v}.",
+}
+
+
+def _quick_key(account_id: int) -> str:
+    return f"account_quick_{account_id}"
+
+
+def _quick_info(account_id: int) -> dict[str, str]:
+    try:
+        data = json.loads(config.get(_quick_key(account_id)) or "{}")
+    except ValueError:
+        logger.error("справка быстрых ответов аккаунта %s нечитаема — считаю пустой", account_id)
+        data = {}
+    return {k: str(data.get(k) or "") for k in _QUICK_KINDS}
+
+
+class QuickInfoBody(BaseModel):
+    city: "str | None" = Field(None, max_length=300)
+    hours: "str | None" = Field(None, max_length=300)
+    delivery: "str | None" = Field(None, max_length=500)
+    payment: "str | None" = Field(None, max_length=300)
+
+
+@router.get("/accounts/{account_id}/quick-info")
+def ma_quick_info_get(account_id: int, user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
+    if db.get_account(account_id) is None:
+        raise HTTPException(404, "account not found")
+    return _quick_info(account_id)
+
+
+@router.post("/accounts/{account_id}/quick-info")
+def ma_quick_info_set(account_id: int, body: QuickInfoBody,
+                      user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
+    """Справка для быстрых ответов (по-русски; на язык покупателя переводится при вставке)."""
+    if db.get_account(account_id) is None:
+        raise HTTPException(404, "account not found")
+    info = _quick_info(account_id)
+    for k in _QUICK_KINDS:
+        v = getattr(body, k)
+        if v is not None:
+            info[k] = v.strip()
+    db.set_setting(_quick_key(account_id), json.dumps(info, ensure_ascii=False))
+    return info
+
+
+class QuickBody(BaseModel):
+    kind: str
+
+    @field_validator("kind")
+    @classmethod
+    def _check_kind(cls, v: str) -> str:
+        if v not in _QUICK_KINDS:
+            raise ValueError(f"kind: один из {list(_QUICK_KINDS)}")
+        return v
+
+
+@router.post("/messages/{msg_id}/quick")
+def ma_quick(msg_id: int, body: QuickBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Быстрый ответ (город/часы/доставка/оплата) из справки аккаунта — на языке покупателя.
+    Ничего не пишет: фронт вставляет в черновик или отправляет через /compose."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    value = _quick_info(row["account_id"])[body.kind]
+    if not value:
+        raise HTTPException(400, "В справке аккаунта это не заполнено — заполните в «Аккаунты»")
+    ru = _QUICK_TEMPLATES[body.kind].format(v=value)
+    return {"kind": body.kind, **_preview_in_client_lang(row["gmail_thread_id"], ru)}
 
 
 @router.post("/threads/{thread_id}/suggest-reply")
