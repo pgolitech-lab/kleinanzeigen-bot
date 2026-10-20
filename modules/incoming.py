@@ -566,6 +566,24 @@ TRANSLATION_FAILED_RU = "⚠️ перевод не удался — см. ор�
 LATE_AFTER_DAYS = 1.0
 
 
+_MESSAGES_COLUMNS: set[str] = set()
+
+
+def _messages_has_column(name: str) -> bool:
+    """Есть ли колонка в messages (миграцию добавляет модуль db; до неё — не пишем).
+    Кэшируем только положительный ответ, чтобы колонка подхватилась без рестарта."""
+    if name in _MESSAGES_COLUMNS:
+        return True
+    try:
+        with db.get_conn() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    except Exception:
+        logger.exception("PRAGMA table_info(messages) упал")
+        return False
+    _MESSAGES_COLUMNS.update(cols)
+    return name in cols
+
+
 def _email_age_days(email: dict[str, Any]) -> Optional[float]:
     """Возраст письма в днях по Date-header (None — даты нет или не разобралась)."""
     from email.utils import parsedate_to_datetime
@@ -893,6 +911,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     )
     if real_created_at:
         add_kwargs["created_at"] = real_created_at
+    conv_id = (email.get("kz_conversation_id") or "").strip()
+    if conv_id and _messages_has_column("kz_conversation_id"):
+        add_kwargs["kz_conversation_id"] = conv_id
     inserted_id = db.add_message(
         account_id=account["id"],
         direction="in",
