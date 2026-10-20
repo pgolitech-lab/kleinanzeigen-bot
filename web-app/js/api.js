@@ -93,9 +93,11 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
     // Сетевая ошибка (CORS, offline, мёртвый тоннель) — fetch реджектит TypeError.
     // Чаще всего это сменившийся адрес туннеля: свежий ?api= приходит только
     // с кнопкой меню бота.
-    throw new Error(
-      "Адрес сервера сменился. Закройте мини-приложение и откройте его " +
-      "кнопкой меню бота. (Если пропал интернет — сначала проверьте связь.)");
+    const ne = new Error(
+      "Нет связи с сервером. Проверьте интернет и нажмите «Повторить». " +
+      "Если не помогает — закройте мини-приложение и откройте его кнопкой меню бота (адрес мог смениться).");
+    ne.network = true;
+    throw ne;
   } finally {
     clearTimeout(timer);
   }
@@ -127,7 +129,8 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
     } catch (e) { /* не JSON — оставляем text */ }
     // 409 без причины — состояние за это время изменилось (ушло, в очереди, чужой лок)
     const fallback = res.status === 409 ? "Состояние изменилось, пока вы смотрели: письмо уже ушло, стоит в очереди или занято другим оператором. Обновите экран." : `HTTP ${res.status}: ${text}`;
-    const err = new Error(detail ?? fallback);
+    const human = res.status >= 500 ? "Сервер сейчас не справился. Нажмите «Повторить» через минуту." : null;
+    const err = new Error(detail ?? human ?? fallback);
     err.status = res.status;
     err.detail = detail;
     throw err;

@@ -1518,3 +1518,20 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 :root[data-layout="flex"] .nextup { min-height: 44px; padding: 6px 10px; }
 .mk-line { margin: -4px 2px 8px; color: var(--sub); }
 :root[data-layout="flex"] .mk-line { display: none; }
+
+/* жёсткий прогон: повтор, подсказка горячему, предупреждение перевыкладки, «Расширенное» */
+.retry-row { margin-top: 10px; }
+.retry-btn { min-height: 44px; }
+.mk-warn { margin: 4px 0; color: var(--warn); }
+.d2-hot { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; padding: 10px 12px; border-radius: var(--r); background: color-mix(in srgb, var(--good) 12%, var(--card)); border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line)); }
+.d2-hot p { margin: 0; font-weight: 600; }
+.set-adv { margin-top: 8px; }
+.set-adv > summary { min-height: 44px; display: flex; align-items: center; padding: 0 4px; font-weight: 700; color: var(--sub); cursor: pointer; }
+/* чипы Входящих не обрезаются, а переносятся; никакого вылета за 100% ширины */
+.fchips { flex-wrap: wrap; overflow-x: visible; }
+.tbar { align-items: flex-start; }
+.tlist, .inbox, .pane { max-width: 100%; box-sizing: border-box; }
+.tlist { overflow-x: clip; }
+:root[data-layout="flex"] .pane :is(button, a, .btn, .fchip, .prow, .crow, .mv, .st-k) { max-width: 100%; }
+:root[data-layout="flex"] .pane { overflow-x: hidden; }
+:root[data-layout="flex"] .st-list, :root[data-layout="flex"] .tlist { margin-left: 0; margin-right: 0; }

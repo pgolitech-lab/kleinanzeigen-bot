@@ -395,6 +395,23 @@ function renderThread(mount, params, data, opts = {}) {
     card.querySelector('[data-tab="client"]').textContent = `Клиенту · ${LANG}`;
     card.querySelector(".d2-hint").textContent = `Измените идею — при отправке ИИ переведёт её: ${langName(clientLang)}.`;
     const de = card.querySelector(".d2-de"), ru = card.querySelector(".d2-ru");
+    // горячий покупатель и пустой черновик: подсказка и готовая инструкция «договорились»
+    const dn = dealNumbers(data);
+    if (!lastDe && canAct && dn.offer != null) {
+      const hot = el(`<div class="d2-hot"><p></p><button class="btn btn-primary" type="button">✅ Ответить: договорились</button></div>`);
+      hot.querySelector("p").textContent = `Покупатель называет ${fmtEur(dn.offer)} — закрывайте сделку.`;
+      hot.querySelector("button").addEventListener("click", async ev => {
+        ev.currentTarget.disabled = true;
+        try {
+          await api(`/api/ma/messages/${msgId}/instruction`, { method: "POST", body: { text: `Договорились на ${Math.round(dn.offer)} €. Подтверди и уточни самовывоз и способ оплаты.` }, timeoutMs: LLM_TIMEOUT_MS });
+          if (mount.isConnected) render(mount, params);
+        } catch (e) {
+          ev.currentTarget.disabled = false;
+          toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 5000 });
+        }
+      });
+      card.querySelector(".d2-tabs").before(hot);
+    }
     de.value = lastDe;
     ru.value = lastRu;
     // «Назад» не должно терять набранное: правка живёт в sessionStorage, пока черновик на сервере тот же

@@ -280,8 +280,10 @@ async function renderProduct(mount, id) {
   const p = d.product ?? d;
   const ctx = d.context ?? d.ad_context ?? {};
   setTitle(p.title ?? "Товар");
-  const qty = p.qty ?? ctx.qty ?? null;
-  const tracked = !!(p.stock_tracked ?? ctx.stock_tracked);
+  // остаток: из карточки/контекста, иначе — сумма невычеркнутых движений (товар без объявлений)
+  const mvs = (d.movements ?? []).filter(m => !m.voided_at && Number.isFinite(m.qty));
+  const qty = p.qty ?? ctx.qty ?? (mvs.length ? mvs.reduce((a, m) => a + m.qty, 0) : null);
+  const tracked = !!(p.stock_tracked ?? ctx.stock_tracked) || mvs.length > 0;
   const root = el(`
     <div class="product">
       <div class="pd-hero"><div class="pd-qty"></div><h2></h2><div class="pd-sub"></div></div>

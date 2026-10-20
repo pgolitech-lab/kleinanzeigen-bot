@@ -95,7 +95,7 @@ function dupCard(g) {
 function repostCard(it) {
   const c = el(`<article class="mk-card"><b class="mk-h"></b><ul class="mk-why"></ul><small class="mk-win"></small><div class="mk-ads"></div><div class="mk-txt" hidden></div><ol class="mk-steps"></ol></article>`);
   text(c, ".mk-h", `${it.action === "repost" ? "🔁 Перевыложить" : "🧹 Сначала снять лишние"}: ${it.title}`);
-  (it.reasons_ru ?? []).forEach(r => c.querySelector(".mk-why").appendChild(el(`<li></li>`)).textContent = r);
+  [].concat(it.reasons_ru ?? []).forEach(r => c.querySelector(".mk-why").appendChild(el(`<li></li>`)).textContent = r);
   if (it.window?.label_ru) text(c, ".mk-win", `Когда: ${it.window.label_ru}`);
   if (it.old_ad) c.querySelector(".mk-ads").appendChild(adLine(it.old_ad, "удалить старое:"));
   const t = it.text;
@@ -103,6 +103,9 @@ function repostCard(it) {
     const box = c.querySelector(".mk-txt");
     box.hidden = false;
     box.appendChild(el(`<h4>Готовый текст</h4>`));
+    // без ИИ текст собран по шаблону — честно говорим об этом
+    const warn = t.warning || it.warning || (t.source && t.source !== "llm" ? "Текст собран по шаблону, без ИИ — проверьте заголовок и допишите описание." : "");
+    if (warn) box.appendChild(el(`<p class="mk-warn small"></p>`)).textContent = `⚠️ ${warn}`;
     const parts = [["Заголовок", t.title], ["Описание", t.description]];
     parts.forEach(([k, v]) => {
       if (!v) return;
@@ -115,9 +118,11 @@ function repostCard(it) {
     });
     const pr = it.price?.suggested ?? t.price_eur;
     if (pr != null) box.appendChild(el(`<small></small>`)).textContent = `Цена: ${money(pr)}${it.price?.advice_ru ? " — " + it.price.advice_ru : ""}`;
-    (t.changes_ru ?? []).forEach(x => box.appendChild(el(`<small class="mk-ch"></small>`)).textContent = `• ${x}`);
+    // контракт гибкий: строка → [строка], не-массив/пусто → []
+    const chg = Array.isArray(t.changes_ru) ? t.changes_ru : (t.changes_ru ? [String(t.changes_ru)] : []);
+    chg.forEach(x => box.appendChild(el(`<small class="mk-ch"></small>`)).textContent = `• ${x}`);
   }
-  (it.steps_ru ?? []).forEach(s => c.querySelector(".mk-steps").appendChild(el(`<li></li>`)).textContent = s);
+  [].concat(it.steps_ru ?? []).forEach(s => c.querySelector(".mk-steps").appendChild(el(`<li></li>`)).textContent = s);
   if (!(it.reasons_ru ?? []).length) c.querySelector(".mk-why").remove();
   if (!(it.steps_ru ?? []).length) c.querySelector(".mk-steps").remove();
   return c;
