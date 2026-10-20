@@ -1,23 +1,21 @@
-# Отправка исходящих сообщений: SMTP, followup, ручной compose, drain-deferred.
+# Отправка исходящих сообщений: SMTP, ручной compose, drain-deferred.
 # Выделено из scheduler.py. Публичный API:
 #   drain_deferred_thread, drain_all_deferred
-#   _send_reply, send_one, send_approved_replies
-#   send_followup_ping, send_manual_compose
+#   _send_reply, send_one, send_approved_replies, send_manual_compose
+#   reset_stuck_sending (при старте)
 #
 # send_manual_compose НЕ переводит текст — перевод и обязательное подтверждение
 # оператором происходят на шаге /compose-preview (web/api_ma.py). Это намеренно:
 # см. инцидент 2026-07-02 — оператор написал ответ на немецком без предпросмотра,
 # бэкенд "перевёл" его вслепую и результат ушёл клиенту на русском.
 
-import json
 import logging
-import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import config
 import database as db
-from modules import claude, gmail, telegram_bot
+from modules import gmail, telegram_bot
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +48,12 @@ def drain_deferred_thread(thread_id: str) -> int:
     for r in rows:
         try:
             db.update_message(r["id"], status="pending")
-            telegram_bot.send_for_review(r["id"])
+            if not telegram_bot.send_for_review(r["id"]):
+                # Ни одна копия не дошла — возвращаем в deferred, поднимем следующим drain.
+                db.update_message(r["id"], status="deferred")
+                logger.error("drain_deferred: карточка msg=%s не доставлена — оставлена deferred",
+                             r["id"])
+                continue
             raised += 1
         except Exception:
             logger.exception("drain_deferred: send_for_review fail msg=%s", r["id"])
@@ -59,10 +62,6 @@ def drain_deferred_thread(thread_id: str) -> int:
             "drain_deferred: подняли %d отложенных карточек в треде %s",
             raised, thread_id,
         )
-        try:
-            telegram_bot.refresh_pipeline_for_active_chats()
-        except Exception:
-            logger.exception("refresh_pipeline after drain_deferred fail")
     return raised
 
 
@@ -263,16 +262,6 @@ def _send_reply(msg: Any) -> dict[str, Any]:
             f"📝 Тема: {actual_subject}\n"
             f"🕒 {sent_at}"
         )
-    try:
-        # Thread-state обновление: все мини-карточки треда покажут «мы ответили at HH:MM»
-        if send_thread_id:
-            telegram_bot.broadcast_thread_state(send_thread_id)
-    except Exception:
-        logger.exception("broadcast_thread_state after send_reply fail")
-    try:
-        telegram_bot.refresh_pipeline_for_active_chats()
-    except Exception:
-        logger.exception("refresh_pipeline after send_reply fail")
     return {
         "kind": "sent", "mode": mode,
         "to": actual_to, "real_to": to_email,
@@ -293,6 +282,33 @@ def send_one(message_id: int) -> dict[str, Any]:
     return _send_reply(row)
 
 
+def reset_stuck_sending() -> int:
+    """При старте: строки, застрявшие в 'sending' (процесс упал посреди SMTP), →
+    'error_send_failed'. НЕ переотправляем: письмо могло уйти до падения, а
+    дубль клиенту хуже, чем ручная повторная отправка оператором.
+    Возвращает число сброшенных строк."""
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT id FROM messages WHERE status = 'sending'").fetchall()
+        if not rows:
+            return 0
+        conn.execute("UPDATE messages SET status = 'error_send_failed' WHERE status = 'sending'")
+    ids = [r["id"] for r in rows]
+    logger.error(
+        "Startup: %d писем застряли в 'sending' (падение во время SMTP) → error_send_failed, "
+        "оператору проверить и отправить вручную: ids=%s", len(ids), ids,
+    )
+    try:
+        telegram_bot.notify(
+            f"⚠️ <b>После рестарта: {len(ids)} писем не подтвердили отправку</b>\n"
+            f"Процесс упал во время SMTP — письма могли уйти, а могли и нет. "
+            f"Статус → error_send_failed, проверьте и при необходимости отправьте вручную: "
+            f"{', '.join('#' + str(i) for i in ids[:20])}"
+        )
+    except Exception:
+        logger.exception("reset_stuck_sending: уведомление оператору не ушло")
+    return len(ids)
+
+
 def send_approved_replies() -> str:
     """Job: отправить все ответы со status='approved'."""
     queue = db.list_messages(status="approved", limit=100)
@@ -303,89 +319,6 @@ def send_approved_replies() -> str:
             logger.exception("send_approved_replies: ошибка для msg=%s", msg["id"])
     return f"Режим {config.send_mode()}, в очереди было {len(queue)}"
 
-
-
-def send_followup_ping(out_message_id: int) -> dict[str, Any]:
-    """Сгенерить и отправить follow-up клиенту по конкретному «висящему» исходящему.
-
-    out_message_id — id исходящего сообщения, на которое клиент не ответил.
-    Возвращает result dict (как send_one): kind, message и т.п.
-    """
-    src = db.get_message(out_message_id)
-    if not src:
-        return {"kind": "error", "message": f"❌ msg={out_message_id} не найдено"}
-    # Висящим исходящим может быть либо direction='out' (отдельная исходящая —
-    # например предыдущий ping), либо direction='in' но status='sent'/'sent_debug'
-    # (гибридный формат: incoming-вопрос + outgoing-ответ в одной row).
-    if not (src["direction"] == "out" or src["status"] in ("sent", "sent_debug")):
-        return {"kind": "error",
-                "message": f"❌ msg={out_message_id}: не висящий исходящий (direction={src['direction']}, status={src['status']})"}
-
-    account = db.get_account(src["account_id"])
-    if not account:
-        return {"kind": "error", "message": f"❌ msg={out_message_id}: аккаунт удалён"}
-
-    thread_id = src["gmail_thread_id"] or ""
-    history = claude.history_for(thread_id) if thread_id else []
-    client_lang = src["client_lang"] or src["answer_lang"] or "de"
-
-    # Бриф (если есть) — для контекста
-    brief_text = ""
-    ad_id_val = src["ad_id"] if "ad_id" in src.keys() else None
-    if ad_id_val:
-        bf = db.get_ad_brief(ad_id_val)
-        if bf:
-            try:
-                kf = json.loads(bf["key_facts_json"] or "{}")
-            except json.JSONDecodeError:
-                kf = {}
-            brief_text = ad_brief.format_brief_for_claude(bf["brief_md"], kf)
-
-    # Уроки от оператора (только good_answer_ru — для подражания стилю)
-    lessons = [dict(r) for r in db.find_relevant_lessons(
-        ad_id=ad_id_val, account_id=src["account_id"], limit=3,
-    )]
-
-    days_silent = config.reminder_after_days()
-    try:
-        ping = claude.generate_followup_ping(
-            history=history, client_lang=client_lang,
-            days_silent=days_silent, brief_text=brief_text, lessons=lessons,
-        )
-    except Exception as e:
-        logger.exception("Claude follow-up ping упал для out_msg=%s", out_message_id)
-        return {"kind": "error", "message": f"❌ Claude упал: {e}"}
-
-    # Найдём оригинал входящего треда, чтобы взять адрес покупателя и In-Reply-To
-    rows = db.thread_history(thread_id) if thread_id else []
-    original_in = None
-    for r in reversed(rows):
-        if r["direction"] == "in":
-            original_in = r
-            break
-    if not original_in:
-        return {"kind": "error", "message": f"❌ msg={out_message_id}: нет оригинала в треде"}
-
-    # Создаём новую исходящую запись со статусом approved + is_reminder=1,
-    # затем тут же отправляем через _send_reply.
-    new_id = db.add_message(
-        account_id=src["account_id"],
-        direction="out",
-        gmail_thread_id=thread_id,
-        ad_url=src["ad_url"], ad_title=src["ad_title"], ad_price=src["ad_price"],
-        ad_id=ad_id_val,
-        seller_name=src["seller_name"], buyer_name=src["buyer_name"],
-        ru_answer=ping["ru_text"], de_answer=ping["client_text"],
-        client_lang=client_lang, answer_lang=client_lang,
-        tokens_in=ping["tokens_in"], tokens_out=ping["tokens_out"], cost_usd=ping["cost_usd"],
-        is_reminder=1,
-        status="approved",
-    )
-    new_row = db.get_message(new_id)
-    result = _send_reply(new_row)
-    # Помечаем оригинальное «висящее» исходящее как обработанное
-    db.update_message(out_message_id, reminder_state="approved")
-    return result
 
 
 def send_manual_compose(source_msg_id: int, ru_text: str, final_text: str, target_lang: str) -> dict[str, Any]:

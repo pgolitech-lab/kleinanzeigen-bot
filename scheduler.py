@@ -1,12 +1,12 @@
 # APScheduler: polling Gmail, отправка одобренных ответов, бекап в Drive.
 # Все задачи sync, ошибки логируются, но не валят весь процесс.
 
+import concurrent.futures
 import hashlib
-import json
 import logging
-import random
-import re
 import subprocess
+import threading
+import time
 import zoneinfo
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 import config
 import database as db
-from modules import ad_brief, backup, claude, gmail, parser, scout, telegram_bot
+from modules import backup, gmail, mail_queue, scout, telegram_bot
 
 logger = logging.getLogger(__name__)
 from modules.incoming import (  # noqa: F401
@@ -35,7 +35,7 @@ from modules.drafts import (  # noqa: F401
 from modules.outgoing import (  # noqa: F401
     drain_deferred_thread, drain_all_deferred,
     _send_reply, send_one, send_approved_replies,
-    send_followup_ping, send_manual_compose,
+    send_manual_compose, reset_stuck_sending,
 )
 
 JOB_STATUS: dict[str, dict[str, Any]] = {}
@@ -62,86 +62,190 @@ def _job_listener(event: Any) -> None:
 # Polling Gmail: входящие → парсинг → Claude → Telegram
 # ============================================================
 
-def _poll_one_account(acc: Any, from_filter: Any) -> tuple[int, int, int]:
-    """Опросить один аккаунт: fetch + process + orphan-recovery.
-    
-    Возвращает (new_count, orphans_count, failed_flag).
-    Запускается в отдельном потоке из poll_all_accounts.
+# Общий пул потоков для IMAP-опроса (по потоку на аккаунт), живёт весь процесс —
+# не создаём новый на каждый 15-секундный проход.
+_IMAP_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="imap-poll")
+# Бюджет времени прохода: дольше не ждём (IMAP_TIMEOUT=30 с + 1 ретрай). Аккаунт,
+# чей прошлый опрос ещё висит, в следующем проходе пропускается (`_POLLING`).
+POLL_BUDGET_SEC = 40
+ORPHAN_SCAN_MINUTES = 20
+
+_POLLING: set[int] = set()
+_POLLING_LOCK = threading.Lock()
+# last_ok_at — последний проход, где реально опрошен хотя бы один аккаунт.
+# accounts[id] — {last_ok_at, fails_in_row, skipped_busy} для поиска «тихо сломанного» ящика.
+POLL_STATE: dict[str, Any] = {"last_ok_at": None, "last_ok_ts": None, "last_pass_sec": None,
+                              "last_errors": 0, "accounts": {}}
+# Порог подряд идущих неудач опроса аккаунта (≈5 мин при 15 с), после которого ERROR
+# (его подберёт monitor_errors_job и пришлёт в Telegram). Повторяется раз в ACCOUNT_FAIL_REPEAT.
+ACCOUNT_FAIL_ALERT = 20
+ACCOUNT_FAIL_REPEAT = 240
+# Обработка одного письма дольше этого — ERROR «очередь стоит».
+QUEUE_STUCK_SEC = 300
+_stuck_reported_uid: Optional[str] = None
+
+
+def _acc_state(acc_id: int) -> dict[str, Any]:
+    return POLL_STATE["accounts"].setdefault(
+        acc_id, {"last_ok_at": None, "fails_in_row": 0, "skipped_busy": 0})
+
+
+def _poll_one_account(acc: Any, from_filter: Any) -> tuple[str, int]:
+    """Забрать новые письма одного аккаунта в очередь обработки (без обработки).
+
+    Возвращает (исход 'ok'|'fail'|'busy', поставлено_в_очередь). Запускается в пуле _IMAP_POOL.
     """
-    new_count = orphans_count = failed = 0
+    acc_id = acc["id"]
+    with _POLLING_LOCK:
+        if acc_id in _POLLING:
+            logger.info("IMAP-опрос аккаунта %s ещё идёт с прошлого прохода — пропуск", acc_id)
+            return "busy", 0
+        _POLLING.add(acc_id)
     try:
         new_emails = gmail._imap_retry(
             gmail.fetch_new,
             acc["gmail_email"], acc["gmail_app_password"],
             from_filter=from_filter,
+            skip_uids=mail_queue.inflight_uids(acc_id),
         )
     except Exception as e:
-        logger.error("IMAP fetch для аккаунта %s упал: %s", acc["id"], e)
-        return 0, 0, 1
-    if new_emails:
-        logger.info("Аккаунт %s: %d новых писем", acc["gmail_email"], len(new_emails))
-    new_count = len(new_emails)
-    for em in new_emails:
-        try:
-            _process_incoming(acc, em)
-        except Exception:
-            logger.exception("Ошибка обработки письма")
-    # Orphan-recovery (best-effort)
-    try:
-        known = db.known_message_ids_since(since_days=3)
-        orphans = gmail._imap_retry(
-            gmail.find_orphan_seen_uids,
-            acc["gmail_email"], acc["gmail_app_password"],
-            known_message_ids=known,
-            from_filter=from_filter,
-            since_days=2,
-        )
-        if orphans:
-            logger.warning(
-                "Orphan-recovery: account=%s найдено %d SEEN-сирот, "
-                "снимаю Seen → подхватятся следующим poll-ом",
-                acc["gmail_email"], len(orphans),
-            )
-            gmail.unmark_seen(
-                acc["gmail_email"], acc["gmail_app_password"], orphans,
-            )
-            orphans_count = len(orphans)
-    except Exception:
-        logger.exception("orphan-recovery упал для аккаунта %s", acc["id"])
-    return new_count, orphans_count, failed
+        logger.warning("IMAP fetch для аккаунта %s упал: %s", acc_id, e)
+        return "fail", 0
+    finally:
+        with _POLLING_LOCK:
+            _POLLING.discard(acc_id)
+    added = mail_queue.enqueue(acc, new_emails)
+    if added:
+        logger.info("Аккаунт %s: %d новых писем → очередь", acc["gmail_email"], added)
+    return "ok", added
+
+
+def _account_outcome(acc: Any, outcome: str) -> None:
+    st = _acc_state(acc["id"])
+    if outcome == "ok":
+        st["last_ok_at"] = datetime.utcnow().isoformat()
+        st["fails_in_row"] = 0
+        return
+    if outcome == "busy":
+        st["skipped_busy"] += 1
+    st["fails_in_row"] += 1
+    n = st["fails_in_row"]
+    if n == ACCOUNT_FAIL_ALERT or (n > ACCOUNT_FAIL_ALERT and n % ACCOUNT_FAIL_REPEAT == 0):
+        logger.error("IMAP: аккаунт %s (%s) не опрашивается %d проходов подряд, последний успех %s",
+                     acc["id"], acc["gmail_email"], n, st["last_ok_at"] or "никогда")
+
+
+def _check_queue_stuck() -> None:
+    global _stuck_reported_uid
+    q = mail_queue.status()
+    if q["busy_sec"] > QUEUE_STUCK_SEC and q["current_uid"] != _stuck_reported_uid:
+        _stuck_reported_uid = q["current_uid"]
+        logger.error("Очередь писем стоит: uid=%s обрабатывается %.0f с, в очереди %d",
+                     q["current_uid"], q["busy_sec"], q["queue_len"])
 
 
 def poll_all_accounts() -> str:
-    """Job: пройти по всем активным аккаунтам параллельно и обработать новые письма.
+    """Job: опросить все активные аккаунты параллельно и поставить новые письма в очередь.
 
-    Аккаунты опрашиваются в параллельных потоках — максимальное время цикла
-    равно самому медленному аккаунту (не сумме). Каждый поток: fetch_new →
-    _process_incoming → orphan-recovery.
+    Только IMAP (UID SEARCH + пакетный FETCH) — обработку (LLM, Playwright, SMTP)
+    делает поток `mail_queue`, поэтому проход укладывается в секунды и не
+    задерживает опрос остальных аккаунтов. Orphan-recovery — отдельный джоб.
 
     Возвращает короткое summary для отображения в /api/status.
     """
-    import concurrent.futures
+    # Поток очереди поднимаем и на паузе: уже забранные письма должны дообработаться.
+    mail_queue.start()
     if config.polling_paused():
         return "⏸ Polling на паузе (через /pause)"
+    mail_queue.release_due_retries()
+    _check_queue_stuck()
+    started = time.monotonic()
     accounts = db.list_accounts(only_active=True)
     from_filter = config.gmail_from_filter() or None
-    total_new = total_orphans = total_failed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(accounts) or 1) as ex:
-        futures = {ex.submit(_poll_one_account, acc, from_filter): acc for acc in accounts}
-        for fut in concurrent.futures.as_completed(futures):
-            try:
-                new_c, orphans_c, fail_c = fut.result()
-                total_new += new_c
-                total_orphans += orphans_c
-                total_failed += fail_c
-            except Exception:
-                logger.exception("poll_one_account future failed")
-                total_failed += 1
+    futures = {_IMAP_POOL.submit(_poll_one_account, acc, from_filter): acc for acc in accounts}
+    done, not_done = concurrent.futures.wait(futures, timeout=POLL_BUDGET_SEC)
+    total_new = 0
+    counts = {"ok": 0, "fail": 0, "busy": 0}
+    for fut in done:
+        try:
+            outcome, new_c = fut.result()
+        except Exception:
+            logger.exception("poll_one_account future failed")
+            outcome, new_c = "fail", 0
+        counts[outcome] += 1
+        total_new += new_c
+        _account_outcome(futures[fut], outcome)
+    for fut in not_done:
+        counts["busy"] += 1
+        _account_outcome(futures[fut], "busy")
+    if not_done:
+        logger.warning("IMAP-опрос: %d аккаунтов не уложились в %d с — дочитают в фоне",
+                       len(not_done), POLL_BUDGET_SEC)
+    POLL_STATE["last_pass_sec"] = round(time.monotonic() - started, 2)
+    POLL_STATE["last_errors"] = counts["fail"] + counts["busy"]
+    if counts["ok"]:
+        POLL_STATE["last_ok_at"] = datetime.utcnow().isoformat()
+        POLL_STATE["last_ok_ts"] = time.time()
+    q = mail_queue.status()
     return (
-        f"Аккаунтов: {len(accounts)}, новых писем: {total_new}"
-        + (f", IMAP-ошибок: {total_failed}" if total_failed else "")
-        + (f", сирот восстановлено: {total_orphans}" if total_orphans else "")
+        f"Аккаунтов: {len(accounts)}, новых писем: {total_new}, в очереди: {q['queue_len']}"
+        + (f", IMAP-ошибок: {counts['fail']}" if counts["fail"] else "")
+        + (f", не опрошено (висит прошлый опрос): {counts['busy']}" if counts["busy"] else "")
     )
+
+
+def last_poll_ok_at() -> float | None:
+    """Unix ts последнего прохода poll_all_accounts, где хотя бы один аккаунт
+    опрошен без ошибки (None — с запуска ещё ни разу). Для /health → poll_age_sec."""
+    return POLL_STATE.get("last_ok_ts")
+
+
+def poll_status() -> dict[str, Any]:
+    """Состояние почтового конвейера для /health: последний удачный опрос + очередь."""
+    return {**POLL_STATE, "queue": mail_queue.status()}
+
+
+def orphan_recovery_job() -> str:
+    """Job: найти SEEN-письма, которые бот не сохранил и не журналил, и снять с них \\Seen.
+
+    Раньше шёл в каждом 15-секундном проходе (×5 аккаунтов) — отдельные IMAP-сессии
+    и половина таймаутов. Теперь раз в ORPHAN_SCAN_MINUTES + при старте.
+    Набор известных Message-ID читается из БД после IMAP FETCH каждого ящика.
+    """
+    if config.polling_paused():
+        return "⏸ Polling на паузе"
+    accounts = db.list_accounts(only_active=True)
+    from_filter = config.gmail_from_filter() or None
+    # Известные Message-ID читаем ПОСЛЕ IMAP FETCH (callable): очередь ставит \Seen
+    # только после коммита строки в БД, значит всё, что в IMAP уже SEEN, к моменту
+    # чтения видно в БД. Набор, прочитанный до цикла, давал гонку: письмо,
+    # обработанное за эти секунды, считалось сиротой и шло на повтор.
+    total = failed = 0
+    for acc in accounts:
+        try:
+            orphans = gmail._imap_retry(
+                gmail.find_orphan_seen_uids,
+                acc["gmail_email"], acc["gmail_app_password"],
+                known_message_ids=lambda: db.known_message_ids_since(since_days=7),
+                from_filter=from_filter,
+                since_days=2,
+            )
+            if orphans:
+                logger.warning(
+                    "Orphan-recovery: account=%s найдено %d SEEN-сирот, "
+                    "снимаю Seen → подхватятся следующим poll-ом",
+                    acc["gmail_email"], len(orphans),
+                )
+                gmail._imap_retry(
+                    gmail.unmark_seen,
+                    acc["gmail_email"], acc["gmail_app_password"], orphans,
+                )
+                total += len(orphans)
+        except Exception as e:
+            failed += 1
+            logger.warning("orphan-recovery для аккаунта %s не удался: %s", acc["id"], e)
+    return f"orphan-recovery: аккаунтов {len(accounts)}, сирот {total}" + (
+        f", ошибок {failed}" if failed else "")
 
 
 # ============================================================
@@ -369,6 +473,19 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
+    # Orphan-recovery — раз в ORPHAN_SCAN_MINUTES (+ первый прогон через минуту
+    # после старта), а не в каждом 15-секундном проходе опроса.
+    sched.add_job(
+        orphan_recovery_job,
+        trigger="interval",
+        minutes=ORPHAN_SCAN_MINUTES,
+        next_run_time=datetime.now(zoneinfo.ZoneInfo("Europe/Berlin")) + timedelta(minutes=1),
+        id="orphan_recovery",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     # Страховка от застрявших deferred-сообщений (когда operator-lock истёк без release).
     # При нормальной работе не делает ничего (drain_deferred_thread проверяет busy-флаг).
     sched.add_job(
@@ -394,6 +511,22 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
+    # Проверка входа в подписку Claude (LLM) — раз в 30 мин, алерт оператору.
+    # Функция живёт в ветке opt/api: через getattr, чтобы ветки сливались в любом порядке.
+    llm_login_job = getattr(telegram_bot, "check_llm_login_job", None)
+    if llm_login_job is not None:
+        sched.add_job(
+            llm_login_job,
+            trigger="interval",
+            minutes=30,
+            id="check_llm_login",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        logger.warning("telegram_bot.check_llm_login_job нет — проверка входа в LLM не зарегистрирована")
+
     return sched
 
 
@@ -403,6 +536,13 @@ _active_sched: BackgroundScheduler | None = None
 def start() -> BackgroundScheduler:
     """Поднять scheduler в фоне. Возвращает экземпляр для shutdown()."""
     global _active_sched
+    # До старта джобов: строки, упавшие посреди SMTP, — в error_send_failed
+    # (без переотправки — письмо могло уйти). Иначе висят в 'sending' вечно.
+    try:
+        reset_stuck_sending()
+    except Exception:
+        logger.exception("Startup reset_stuck_sending fail")
+    mail_queue.start()
     sched = build_scheduler()
     sched.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     sched.start()
