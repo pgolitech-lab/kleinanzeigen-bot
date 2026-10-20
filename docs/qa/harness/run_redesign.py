@@ -32,6 +32,9 @@ STATIC_PORT = int(os.environ.get("QA_STATIC_PORT", "8812"))
 STATIC = f"http://127.0.0.1:{STATIC_PORT}"
 DB = OUT / "qa-redesign.db"
 DEVICES = {k: v for k, v in run.DEVICES.items()}
+if os.environ.get("QA_ECO") == "1":  # режим экономии: 3 размера
+    DEVICES = {"flip5-main": dict(w=412, h=915, dpr=2.625), "flip5-flex": dict(w=306, h=340, dpr=2.35),
+               "fold-inner": dict(w=910, h=820, dpr=2.625)}
 CORS = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "*"}
 
 SCREENS = [("inbox", "#/pipeline"), ("triage", "#/triage"), ("dashboard", "#/dashboard"), ("clients", "#/clients"),
