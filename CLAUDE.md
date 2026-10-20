@@ -14,37 +14,26 @@ WSL2 — dev-зеркало, sshfs смонтирован → правки си�
 - SQLite + WAL
 - Google Drive API (бекап SQLite)
 - IMAP/SMTP Gmail (App Password)
-- Anthropic API: claude-sonnet-4-6 (драфты, бриф) + claude-haiku-4-5 (classifier, auto-ack, similarity)
+- LLM: подписка Claude через Claude Code CLI (`modules/llm.py`, Anthropic API не используется, `cost_usd`=0): Sonnet — драфты/бриф, Haiku — classifier, auto-ack, переводы, lang-check
 - python-telegram-bot 20+ (только исходящие — urllib напрямую, PTB не используется)
 - Playwright Python (парсинг Kleinanzeigen)
 - APScheduler
 - systemd
 ## Mini App (актуально 2026-06-23)
 - **URL:** https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/ (GitHub Pages из main:/web-app/, repo public)
-- **HTTPS бэкенд:** cloudflared Quick Tunnel → 127.0.0.1:8080. URL ротируется при ребуте — `tunnel-url-sync.service` автоматически правит `web-app/js/api.js:API_BASE` и пушит на GitHub Pages. Запустить вручную: `sudo systemctl start tunnel-url-sync`.
+- **HTTPS бэкенд:** cloudflared Quick Tunnel → 127.0.0.1:8080 (наружу только `/api/ma/*` и `/health`). URL ротируется; адрес приходит в MA параметром `?api=` (Menu Button и кнопки бота), `api.js`: `?api=` (строго `*.trycloudflare.com`) → sessionStorage → `FALLBACK_API_BASE` (последний известный). Туннель и его синхронизация — модуль ops (`docs/optimization/ops.md`).
 - **Auth:** Telegram WebApp initData HMAC-валидация в `modules/tg_init_data.py`, dependency `verify_init_data_dep` на всех `/api/ma/*` endpoint'ах
 - **Lock:** общий `modules/operator_lock.py` (msg_id → actor, auto-expire 5 мин) — используют и бот wrappers (`_acquire_lock`/`_release_lock`/`_check_lock`), и MA endpoints
 - **API surface:** `web/api_ma.py` — 20+ endpoint'ов под `/api/ma/*`: pipeline, threads, messages (review payload + lock), send/skip/sold/regenerate/edit-ru/edit-de/instruction, translate-draft, lang-check, compose, autopilot start/stop/preview, suggest-reply, thread wait, settings GET/POST
-- **Send-флоу треда (2026-07-19):** три bottom-sheet-этапа по «📨 Отправить» в `thread.js` (правки textarea применяются до входа через edit-ru/edit-de):
-  1. **Выбор**: [🌐 Перевести на язык клиента и отправить → `POST /messages/{id}/translate-draft` (перевод в de_answer + RU-зеркало при кириллице, БЕЗ отправки)] [📨 Отправить как есть] [🤖 Предложить текст от ЛЛМ → `/suggest-reply`] [Отменить]
-  2. **Подготовка**: превью + RU-зеркало, [Отправить] [✏️ Редактировать → `/edit-de`] [🤖 Переписать идею ЛЛМ… → `/instruction` со свободным текстом оператора] [Отменить]
-  3. **Финальный текст**: ровно то, что уйдёт клиенту. **Двухслойный языковой guard**: (а) мгновенная кириллическая эвристика `wrongLangForClient`; (б) `POST /messages/{id}/lang-check` → `claude.detect_text_lang` (Haiku) — до вердикта кнопка «Отправить» выключена. Несовпадение → блок; разблокировка ТОЛЬКО галочкой «Разрешаю отправить текст не на языке клиента» → `/send {mode:as_is, force:true}`. 502 от lang-check НЕ снимает блок эвристики; серверный 409-guard в `/send` (кириллица не-кириллическому клиенту без force) — последняя линия. ИНВАРИАНТ: клиенту никогда не уходит текст не на его языке без явного разрешения оператора.
-- **Frontend (web-app/js):** screens (pipeline/thread/history/settings/review) + components (action-grid, edit-form, compose-form, autopilot-form, suggest-form). Vanilla ESM + Bootstrap 5.3 + telegram-web-app.js. NO build step. Deploy = git push origin main → Pages пересобирает ~60 сек
-- **Cache-bust:** при изменении SPA bump `?v=YYYYMMDD-N` во ВСЕХ ESM-импортах + index.html. TG Desktop кэширует агрессивно — иногда нужен полный рестарт клиента
-- **Bot↔MA broadcast:** после action в MA → `telegram_bot.broadcast_after_external_action(msg_id)` (sync через `_http_post_single editMessageText`) — обновляет text всех DM-копий мини-карточки. Keyboard не трогает; в боте guard на устаревший status
-- **Action-grid layout** (когда есть pending):
-  ```
-  [🤖 Предложить] [✉️ Написать] [📋 История]
-  [📝 Своя инстр.] [✋ Ждать]
-  [❌ Пропустить]  [💰 Продано]
-  [🚀 Автопилот status]
-  ```
-  🤖 Предложить → unified suggest-form с RU/DE textareas + 🔁 regenerate + 📨 send (auto-edit). НЕТ отдельных «Правка RU/DE/Отправить» — это всё внутри Предложить/Написать
-- **Таб-бар MA:** Входящие (инбокс всех аккаунтов + RU-превью) / Клиенты (CRM + поиск) / Продажи / Обзор. 5 аккаунтов цвет-кодированы. Compose с предпросмотром перевода.
-- **Scout:** страница `/scout` в MA — тепловая карта → земля → города → объявления. Cron каждые 6ч. Haiku-проверка типа. Пометка/удаление/обучение.
-- **Backup point:** git tag `pre-phase4-2026-05-10` (commit `9d81f1d`); DB snapshot `/home/pg/backups/db-pre-phase4-2026-05-10.db`; rollback procedure `/home/pg/backups/ROLLBACK.md`
-- **Phase docs:** specs/plans в `docs/superpowers/{specs,plans}/2026-05-{09,10}-tg-mini-app-*.md` (Phase 1-4.5) и `2026-05-10-tg-bot-phase5-*.md` (slim bot)
-- **Тесты:** 201 unit-тестов (pytest) в `tests/test_*.py`
+- **Дизайн v3 (2026-10-20, гибрид «премиум-мессенджер» + «Разбор» + термометр/чипы цены):** тема из Telegram themeParams (`--tg-theme-*`, `html[data-theme]` по `tg.colorScheme`, `js/theme.js`); оболочка `#shell` по `--tg-viewport-height`, таб-бар в потоке и прячется при клавиатуре; раскладки `html[data-layout]` = phone / flex (Flip Flex Window) / split2 ≥760 / split3 ≥900 (`js/layout.js`): на Fold список слева, тред/клиент/товар справа, на split3 у треда — колонка сделки; при складывании панели переставляются без перерисовки. Концепции и скриншоты «до/после» — `docs/optimization/ui/`.
+- **Таб-бар:** Входящие (полоса-итог, термометр торга, свайп «Жду/Продано», выбор нескольких; кнопка «Разбор») · Клиенты · Продажи (+ Найденные продажи) · Склад (товары с объявлениями, приход строкой, «тот же товар?», отчёт за месяц) · Ещё (Обзор, Рынок, Аккаунты, Настройки). Во Flex Window вкладка Входящие = «Разбор» (одна карточка, «Позже/Отправить»).
+- **Тред:** открытие одним `POST /threads/{id}/open` (тред + черновик + лок); полоса сделки; двуязычные пузыри (RU крупно, тап — оригинал); черновик у дока «Клиенту · DE / По-русски» + чипы цены/тона (`/price`, `/regenerate`) с кэшем; «💰 Продано» в любом треде (`/threads/{id}/sold`, цена из `/threads/{id}/sale-price`).
+- **Отправка (3 тапа):** «Отправить» → финальный лист (ровно то, что уйдёт) → «✅». Языковой guard: кириллическая эвристика `wrongLangForClient` + `/lang-check` (таймаут LLM 120 с); несовпадение ИЛИ недоступная ИИ-проверка → отправка только по галочке «Разрешаю…» (`force:true`), «🌐 Перевести» прямо в листе; серверный 409 — последняя линия. В «Разборе» без проверки не отправляется (только через переписку), текст перечитывается перед `/send`. ИНВАРИАНТ: клиенту не уходит текст не на его языке без явного разрешения оператора. Итог — по ответу сервера (`utils.sendOutcome`: отправлено / режим выключен / тестовый адрес / уже было).
+- **Роутер:** каждому переходу — свежий контейнер; экран после каждого `await` проверяет `mount.isConnected` (запоздавший ответ не рисует чужой экран, таймеры/локи не текут). «Назад» (шапка и нативная Telegram BackButton) сначала закрывает лист; лист с набранным текстом спрашивает подтверждение.
+- **Frontend (web-app/js):** `screens/` (pipeline, thread, triage, clients, client, sales, detected, stock, accounts, dashboard, scout, settings, more, review) + `components/` (kit — иконки/аватар/флаги/бейдж языка/тост, thread-row, thermo, sold-sheet, sheet, backbar, tabbar, edit/compose/autopilot-form). Vanilla ESM, Bootstrap НЕ подключён (свой `css/app.css` + слой совместимости). NO build step. Деплой = merge в main → Pages ~60 с.
+- **Cache-bust:** импорты в .js — БЕЗ `?v=`; версии (хэш содержимого, «цифры-цифры») в import map `index.html` генерирует `scripts/bump_cache.sh` (`--check` — проверка). После любой правки `web-app/` — запустить и закоммитить `index.html`.
+- **Проверка вёрстки:** `docs/optimization/ui/shoot_app.py <web-app> <out> [--screens a,b] [--theme light]` — скриншоты на матрице Fold/Flip с моками из `qa_ma.py` (не-GET — фейк 200).
+- **Тесты:** ~760 тестов (pytest) в `tests/test_*.py`
 - **Bot legacy section ниже** описывает inline-keyboard UX до Phase 5 — большая часть удалена. Бот теперь только pipeline + reminders + daily_summary + hourly errors. send_for_review шлёт мини-карточку с одной web_app кнопкой. Pipeline-карточки тоже web_app deep-link
 
 
