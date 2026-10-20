@@ -740,6 +740,47 @@ def receive_batch(items: list[tuple[int, int]], total_cost_eur: Optional[float],
     return {"batch_id": bid, "movements": out}
 
 
+_RECEIPT_RE = re.compile(
+    r"^\s*(?P<qty>\d+)\s*(?:шт\.?|штук[аи]?|pcs|stk\.?|x|х|\*|×)?\s*(?:[x х*×]|по|à|a|@|за\s+шт\.?)?\s*"
+    r"(?P<price>\d+(?:[.,]\d{1,2})?)\s*(?:€|eur|евро|руб)?\s*(?P<total>всего|итого|total|gesamt)?\s*$", re.I)
+
+
+def parse_receipt_line(text: str) -> tuple[int, Optional[float]]:
+    """«10 шт × 45 €», «10x45», «10 по 45», «10 шт 450 всего» → (шт., цена за штуку | None).
+    Только число («10», «10 шт») — количество без цены (себестоимость остаётся неизвестной).
+    Непонятная строка → ValueError с подсказкой формата."""
+    t = (text or "").strip()
+    m = re.fullmatch(r"(\d+)\s*(?:шт\.?|штук[аи]?|pcs|stk\.?)?", t, re.I)
+    if m:
+        qty, price = int(m.group(1)), None
+    else:
+        m = _RECEIPT_RE.match(t)
+        if not m:
+            raise ValueError("не понял «%s». Пример: 10 шт × 45 €" % t)
+        qty = int(m.group("qty"))
+        price = float(m.group("price").replace(",", "."))
+        if m.group("total"):
+            price = price / qty if qty else price
+    if qty <= 0:
+        raise ValueError("количество должно быть больше нуля")
+    return qty, None if price is None else round(price, 2)
+
+
+def receive_line(product_id: int, text: str, *, occurred_at: Optional[str] = None,
+                 note: Optional[str] = None, created_by: Optional[str] = None) -> dict[str, Any]:
+    """Приход одной строкой («10 шт × 45 €») + подтверждение для оператора.
+    Возвращает {qty, unit_cost_eur, qty_after, message}; message — «Принято 10 шт × 45 € · на складе стало 12»."""
+    qty, unit = parse_receipt_line(text)
+    r = receive_batch([(product_id, qty)], None if unit is None else round(unit * qty, 2),
+                      occurred_at=occurred_at, note=note, created_by=created_by)
+    after = stock_view(product_id)
+    left = after["qty"] if after["tracked"] else None
+    price_txt = f" × {unit:g} €" if unit is not None else " (цена не указана)"
+    tail = f" · на складе стало {left}" if left is not None else " · остаток пока неизвестен"
+    return {"batch_id": r["batch_id"], "qty": qty, "unit_cost_eur": unit, "qty_after": left,
+            "message": f"Принято {qty} шт{price_txt}{tail}"}
+
+
 def set_kit(kit_product_id: int, components: list[tuple[int, int]]) -> dict[str, Any]:
     """Задать состав комплекта [(товар, шт.)] (пусто — не комплект). Возвращает stock_view комплекта."""
     inv.set_kit_components(kit_product_id, components)
