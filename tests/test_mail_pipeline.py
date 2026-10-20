@@ -230,6 +230,9 @@ def inc(tmp_db, monkeypatch):
                         lambda mid, reason: calls["stop"].append(reason))
     monkeypatch.setattr(incoming.telegram_bot, "send_autopilot_progress", lambda *a: None)
     calls["notify"] = []
+    calls["detected"] = "de"  # что вернёт Haiku-детектор языка
+    monkeypatch.setattr(incoming.claude, "detect_text_lang",
+                        lambda text: {"lang": calls["detected"]})
     monkeypatch.setattr(incoming.telegram_bot, "notify",
                         lambda text, *a, **kw: calls["notify"].append(text))
     monkeypatch.setattr(incoming.telegram_bot, "thread_is_busy", lambda tid: False)
@@ -383,6 +386,8 @@ def test_autopilot_floor_checks_price_in_text(inc, tmp_db):
 
 def test_prices_in_text():
     assert inc_prices("Für 80 € oder 1.200 EUR, € 95, 70,- Euro") == [80.0, 1200.0, 95.0, 70.0]
+    assert inc_prices("Ich gebe es für 80 ab, VB 75, letzter Preis: 90 oder 85,-") == [80.0, 75.0, 90.0, 85.0]
+    assert inc_prices("Baujahr 2015, 120 cm breit, für 2 Personen") == [2.0]
 
 
 def inc_prices(t):
@@ -402,8 +407,53 @@ def test_autopilot_language_vs_thread_lang(inc, tmp_db):
 
 def test_autopilot_ukrainian_client_cyrillic_ok(inc, tmp_db):
     mid, ap = _ap_msg(tmp_db)
+    inc._calls["detected"] = "uk"
     inc._autopilot_dispatch(mid, ap, _reply(client_lang="uk", de_answer="Так, ще є."))
     assert inc._calls["send"] == [mid]
+
+
+def test_autopilot_detector_catches_wrong_latin_language(inc, tmp_db):
+    """Модель заявила de, написала по-английски — алфавит не видит, Haiku ловит."""
+    mid, ap = _ap_msg(tmp_db)
+    inc._calls["detected"] = "en"
+    inc._autopilot_dispatch(mid, ap, _reply(de_answer="Yes, it is still available."))
+    assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
+
+
+def test_autopilot_detector_failure_is_fail_closed(inc, tmp_db, monkeypatch):
+    mid, ap = _ap_msg(tmp_db)
+    monkeypatch.setattr(inc.claude, "detect_text_lang",
+                        lambda t: (_ for _ in ()).throw(RuntimeError("cli down")))
+    inc._autopilot_dispatch(mid, ap, _reply())
+    assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
+
+
+def test_autopilot_detector_und_passes(inc, tmp_db):
+    mid, ap = _ap_msg(tmp_db)
+    inc._calls["detected"] = "und"
+    inc._autopilot_dispatch(mid, ap, _reply())
+    assert inc._calls["send"] == [mid]
+
+
+def test_autopilot_holds_while_previous_held_draft_open(inc, tmp_db):
+    """Прошлый ответ задержан и висит у оператора — новый не шлём поверх."""
+    mid1, ap = _ap_msg(tmp_db)
+    inc._autopilot_dispatch(mid1, ap, _reply(de_answer="Für 50 € gern. Viele Grüße"))
+    tmp_db.update_message(mid1, de_answer="Für 50 € gern. Viele Grüße")
+    mid2 = tmp_db.add_message(account_id=1, direction="in", gmail_thread_id="T1",
+                              de_client="und?", status="new")
+    inc._autopilot_dispatch(mid2, tmp_db.get_thread_autopilot("T1"), _reply())
+    assert inc._calls["send"] == [] and inc._calls["review"] == [mid1, mid2]
+    assert "черновик" in inc._calls["notify"][-1]
+
+
+def test_autopilot_threat_with_guard_only_stop_notification(inc, tmp_db):
+    mid, ap = _ap_msg(tmp_db)
+    inc._autopilot_dispatch(mid, ap, _reply(should_stop=True, stop_reason="threat",
+                                            de_answer="Пожалуйста, без угроз", deal_brief={}))
+    assert inc._calls["send"] == [] and inc._calls["stop"] == ["threat"]
+    assert inc._calls["notify"] == []
+    assert tmp_db.get_thread_autopilot("T1")["active"] == 0
 
 
 def test_autopilot_threat_smtp_failure_goes_to_review(inc, tmp_db, monkeypatch):
@@ -439,6 +489,20 @@ def test_history_excludes_current_by_id_not_text(inc, tmp_db, monkeypatch):
     monkeypatch.setattr(inc.claude, "generate_autopilot_reply", gen)
     inc._process_incoming(ACC, _email(body=body))
     assert [h["de_client"] for h in seen["history"]] == [same]
+
+
+def test_history_hides_unsent_answer(inc, tmp_db, monkeypatch):
+    """Задержанный/неотправленный de_answer клиент не видел — в истории его нет."""
+    seen: dict = {}
+    tmp_db.add_message(account_id=1, direction="in", gmail_thread_id="T1", de_client="Preis?",
+                       de_answer="Für 50 €", status="new", ad_id="123456789", ad_title="Sitzbank")
+    tmp_db.add_message(account_id=1, direction="in", gmail_thread_id="T1", de_client="Hallo",
+                       de_answer="Ja, da", status="sent", ad_id="123456789", ad_title="Sitzbank")
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
+                        lambda **kw: seen.update(kw) or _reply())
+    inc._process_incoming(ACC, _email())
+    assert [h["de_answer"] for h in seen["history"]] == [None, "Ja, da"]
 
 
 def test_last_poll_ok_at(monkeypatch):

@@ -200,10 +200,14 @@ def _deliver_review(message_id: int) -> None:
 # (сама функция знает только ru — иначе украинский ответ украинцу = «провал»).
 _CYRILLIC_LANGS = {"ru", "uk", "bg", "sr", "mk", "be"}
 
-# Цена в тексте клиенту: «80 €», «80,- €», «1.200 EUR», «€ 80», «80 Euro».
+# Цена в тексте клиенту: «80 €», «80,- €», «1.200 EUR», «€ 80», «80 Euro», а также
+# без валюты: «80,-», «für 80», «VB 80», «Preis 80», «letzter Preis: 80».
+_NUM = r"(\d{1,3}(?:[.\s]\d{3})+|\d+)"
 _PRICE_RE = re.compile(
-    r"(?:€|EUR)\s*(\d{1,3}(?:[.\s]\d{3})+|\d+)"
-    r"|(\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[,.](?:\d{1,2}|-))?\s*(?:€|EUR\b|Euro\b)",
+    r"(?:€|EUR)\s*" + _NUM
+    + r"|" + _NUM + r"(?:[,.](?:\d{1,2}|-))?\s*(?:€|EUR\b|Euro\b)"
+    + r"|" + _NUM + r",-"
+    + r"|\b(?:für|fuer|for|VB|Preis|price|Festpreis)\b\s*:?\s*" + _NUM + r"\b(?![.,]?\d|\s*(?:km|cm|mm|kg|Jahre|Stück|%))",
     re.IGNORECASE,
 )
 
@@ -211,7 +215,7 @@ _PRICE_RE = re.compile(
 def _prices_in_text(text: str) -> list[float]:
     out: list[float] = []
     for m in _PRICE_RE.finditer(text or ""):
-        raw = m.group(1) or m.group(2) or ""
+        raw = next((g for g in m.groups() if g), "")
         digits = re.sub(r"[.\s]", "", raw)
         if digits.isdigit():
             out.append(float(digits))
@@ -248,6 +252,16 @@ def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any,
     lang = thread_lang or model_lang
     if not guardrails.outgoing_language_ok(text, "ru" if lang in _CYRILLIC_LANGS else lang):
         return "guard_language"
+    # Второй слой (как lang-check в MA): независимая детекция языка текста Haiku —
+    # ловит английский/польский немецкому клиенту, которые алфавит не видит.
+    # Сбой детектора — fail-closed: без вердикта не шлём.
+    try:
+        detected = (claude.detect_text_lang(text).get("lang") or "").strip().lower()[:2]
+    except Exception:
+        logger.exception("autopilot: detect_text_lang упал — ответ задерживаем")
+        return "guard_language"
+    if not lang or (detected not in ("", "un") and detected != lang):
+        return "guard_language"
     floor = autopilot_row["floor_price_eur"]
     if floor:
         price = (reply.get("deal_brief") or {}).get("negotiated_price_eur")
@@ -263,6 +277,7 @@ def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any,
 _GUARD_HELD_TEXT = {
     "guard_language": "ответ не на языке клиента",
     "guard_floor": "цена ниже минимума",
+    "guard_operator_draft": "в треде ждёт решения оператора прошлый черновик",
 }
 
 
@@ -278,6 +293,22 @@ def _autopilot_held_notification(msg_id: int, thread_id: str, guard: str, floor:
         telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
     except Exception:
         logger.exception("autopilot held notification fail msg=%s", msg_id)
+
+
+_SENT_STATUSES = ("sent", "sent_debug")
+
+
+def _thread_has_open_draft(thread_id: str, exclude_id: int, since: Optional[str]) -> bool:
+    """Есть ли в треде прошлый ответ автопилота, задержанный guard'ом и ещё не
+    разобранный оператором: входящий со status='new' и готовым de_answer после
+    старта автопилота (ручной поток de_answer при приёме не генерит, а черновик,
+    с которого оператор включил автопилот, старше started_at)."""
+    for r in db.thread_history(thread_id) or []:
+        if (r["id"] != exclude_id and r["direction"] == "in" and r["status"] == "new"
+                and (r["de_answer"] or "").strip()
+                and (not since or (r["created_at"] or "") >= since)):
+            return True
+    return False
 
 
 def _autopilot_to_review(msg_id: int, thread_id: str, stop_reason: Optional[str]) -> None:
@@ -327,14 +358,25 @@ def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) 
         _autopilot_to_review(msg_id, thread_id, stop_reason)
         return
 
-    guard = _autopilot_guard_reason(reply, autopilot_row, msg_id)
-    if stop_reason == "threat" and guard == "guard_floor":
-        guard = None  # в предупреждении об угрозе цены нет — floor неприменим
+    # Оператор работает с тредом или в треде висит незакрытый черновик (прошлый
+    # задержанный ответ) — не отвечаем поверх него: клиент получил бы два ответа.
+    guard: Optional[str] = None
+    if telegram_bot.thread_is_busy(thread_id) or _thread_has_open_draft(
+            thread_id, msg_id, _row_get(autopilot_row, "started_at")):
+        guard = "guard_operator_draft"
+    else:
+        guard = _autopilot_guard_reason(reply, autopilot_row, msg_id)
+        if stop_reason == "threat" and guard == "guard_floor":
+            guard = None  # в предупреждении об угрозе цены нет — floor неприменим
     if guard:
-        logger.warning("autopilot guard %s: msg=%s thread=%s — ответ задержан, карточка оператору, "
-                       "автопилот остаётся active", guard, msg_id, thread_id)
-        # При угрозе предупреждение не ушло — автопилот всё равно стоп (stop-причина).
-        _autopilot_to_review(msg_id, thread_id, "threat" if stop_reason == "threat" else None)
+        logger.warning("autopilot guard %s: msg=%s thread=%s — ответ задержан, карточка оператору",
+                       guard, msg_id, thread_id)
+        if stop_reason == "threat":
+            # Предупреждение не ушло — стоп по stop-причине; уведомление об остановке
+            # шлёт _autopilot_to_review, «автопилот включён» тут было бы неправдой.
+            _autopilot_to_review(msg_id, thread_id, "threat")
+            return
+        _autopilot_to_review(msg_id, thread_id, None)
         _autopilot_held_notification(msg_id, thread_id, guard, autopilot_row["floor_price_eur"])
         return
 
@@ -896,9 +938,14 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 
     # История треда из БД без только что вставленного письма — отсекаем по id
     # строки, а не по тексту (одинаковые короткие «Ok»/«Danke» иначе выпадали).
+    # Наш ответ в истории — только если он реально ушёл клиенту (задержанный guard'ом
+    # или не отправленный черновик клиент не видел — модель не должна на него ссылаться).
+    # Пустой thread_id → без истории (иначе WHERE gmail_thread_id='' = чужие переписки).
+    hist_thread = email.get("gmail_thread_id") or ""
     history = [
-        {"direction": r["direction"], "de_client": r["de_client"], "de_answer": r["de_answer"]}
-        for r in db.thread_history(email.get("gmail_thread_id") or "")
+        {"direction": r["direction"], "de_client": r["de_client"],
+         "de_answer": r["de_answer"] if r["status"] in _SENT_STATUSES else None}
+        for r in (db.thread_history(hist_thread) if hist_thread else [])
         if r["id"] != inserted_id
     ]
 
@@ -919,6 +966,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         try:
             last_price = None
             for r in reversed(db.thread_history(ap_thread_id)):
+                if r["status"] not in _SENT_STATUSES:
+                    continue  # цена задержанного/неотправленного ответа — не «наша последняя»
                 bj = _row_get(r, "deal_brief_json")
                 if bj:
                     try:
