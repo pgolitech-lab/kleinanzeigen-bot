@@ -754,3 +754,43 @@ def test_conversation_id_saved_when_column_exists(inc, tmp_db, monkeypatch):
     inc._process_incoming(ACC, _email(gmail_message_id="<m2@x>", gmail_thread_id="T2", uid="9",
                                       ka_conversation_id="49sml:1:2"))
     assert tmp_db.find_by_gmail_message_id("<m2@x>")["ka_conversation_id"] == "49sml:1:2"
+
+
+# ---------------------------------------------------------------------------
+# Уроки через llm_memory и лимит подписки LLM
+# ---------------------------------------------------------------------------
+
+def test_autopilot_uses_llm_memory_lessons(inc, tmp_db, monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(inc.llm_memory, "lessons_for", lambda row: [{"lesson_ru": "урок", "id": row["id"]}])
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
+                        lambda **kw: seen.update(kw) or _reply())
+    inc._process_incoming(ACC, _email())
+    row = tmp_db.find_by_gmail_message_id("<m1@x>")
+    assert seen["lessons"] == [{"lesson_ru": "урок", "id": row["id"]}]
+
+
+def test_autopilot_llm_limit_card_and_note_keeps_active(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc, "_LLM_LIMIT_NOTIFIED", None)
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
+                        lambda **kw: (_ for _ in ()).throw(inc.llm.LLMLimitError("429")))
+    inc._process_incoming(ACC, _email())
+    row = tmp_db.find_by_gmail_message_id("<m1@x>")
+    assert inc._calls["review"] == [row["id"]] and inc._calls["send"] == []
+    assert any("Лимит подписки" in t for t in inc._calls["notify"])
+    assert tmp_db.get_thread_autopilot("T1")["active"] == 1
+    # второе письмо в том же окне лимита — карточка есть, повторного уведомления нет
+    n = len(inc._calls["notify"])
+    inc._process_incoming(ACC, _email(gmail_message_id="<m2@x>", uid="9", body="Und? https://www.kleinanzeigen.de/s-anzeige/sitzbank/123456789-223-1"))
+    assert len(inc._calls["review"]) == 2 and len(inc._calls["notify"]) == n
+
+
+def test_manual_translation_llm_limit_marks_card(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc.claude, "detect_and_translate_to_ru",
+                        lambda body: (_ for _ in ()).throw(inc.llm.LLMLimitError("429")))
+    inc._process_incoming(ACC, _email())
+    row = tmp_db.find_by_gmail_message_id("<m1@x>")
+    assert "Лимит подписки" in row["ru_client"] and not row["client_lang"]
+    assert inc._calls["review"] == [row["id"]]
