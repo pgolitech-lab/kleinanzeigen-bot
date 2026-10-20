@@ -573,7 +573,8 @@ def check_llm_login_job() -> str:
             return msg
     else:
         st["check_fails"] = 0
-    st["checked_at"] = checked_at  # время последнего ОПРЕДЕЛЁННОГО результата (не сбоя проверки)
+    # время последнего результата «нет входа» — или сбоя проверки, повторившегося LLM_CHECK_FAILS_ALERT раз
+    st["checked_at"] = checked_at
     if st["ok"] or not st["alerted_at"] or now - st["alerted_at"] >= LLM_LOGIN_REMIND_SEC:
         logger.error("LLM: нет входа в подписку Claude: %s", msg)
         if _notify_sent("🟥 <b>Нет входа в подписку Claude</b> — черновики и переводы не генерируются.\n"

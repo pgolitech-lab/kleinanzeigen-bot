@@ -6,7 +6,9 @@ existing scheduler.* helpers — никакой бизнес-логики.
 Все endpoint'ы требуют валидной Telegram initData через verify_init_data_dep.
 """
 from __future__ import annotations
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -14,6 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
 import hashlib
+import os
 import json
 import logging
 import re
@@ -289,29 +292,38 @@ _DRAFT_STATUSES = {"pending", "new", "edited", "approved"}
 
 
 @router.get("/threads/{thread_id}")
-def ma_thread(thread_id: str, focus: "int | None" = None, acquire: bool = False,
-              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Тред. С focus/acquire — всё для открытия экрана одним запросом (вместо thread → message → lock):
+def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    return _thread_dict(thread_id)
 
-    - review: карточка черновика focus (или последнего неотправленного черновика треда), иначе null;
-    - lock (только при acquire=1): попытка взять лок на этот черновик. Занят другим — не ошибка,
-      acquired=false и holder (экран откроется только для чтения).
+
+class ThreadOpenBody(BaseModel):
+    focus: "int | None" = None  # msg_id черновика; нет — последний неотправленный черновик треда
+    acquire: bool = True        # взять лок на этот черновик
+
+
+@router.post("/threads/{thread_id}/open")
+def ma_thread_open(thread_id: str, body: "ThreadOpenBody | None" = None,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Всё для открытия экрана треда одним запросом (вместо thread → message → lock/acquire).
+
+    Ответ = GET /threads/{id} + review (карточка черновика или null) + lock (при acquire:
+    {acquired, holder, remaining_min}; занят другим — acquired=false, экран только для чтения).
+    POST, а не GET: берёт лок, повтор/префетч GET не должен его захватывать.
     """
+    b = body or ThreadOpenBody()
     data = _thread_dict(thread_id)
-    if focus is None and not acquire:
-        return data
-    msg_id = focus
+    data["review"], data["lock"] = None, None
+    msg_id = b.focus
     if msg_id is None:
         drafts = [e["msg_id"] for e in data["events"]
                   if e["kind"] == "in" and e["msg_id"] and e["status"] in _DRAFT_STATUSES]
         msg_id = drafts[-1] if drafts else None
     if msg_id is None:
-        data["review"], data["lock"] = None, None
         return data
-    if acquire:
-        row = db.get_message(msg_id)
-        if row is None or row["gmail_thread_id"] != thread_id:
-            raise HTTPException(404, "message not found in thread")
+    row = db.get_message(msg_id)
+    if row is None or row["gmail_thread_id"] != thread_id:
+        raise HTTPException(404, "message not found in thread")
+    if b.acquire:
         actor = actor_from_user(user)
         # Отправленное/закрытое не лочим — его всё равно нельзя править
         foreign = None if _is_answered(row) else telegram_bot._claim_lock(msg_id, actor)
@@ -319,8 +331,6 @@ def ma_thread(thread_id: str, focus: "int | None" = None, acquire: bool = False,
         data["lock"] = {"acquired": acquired,
                         "holder": actor if acquired else foreign,
                         "remaining_min": operator_lock.remaining_min(msg_id)}
-    else:
-        data["lock"] = None
     data["review"] = _message_review_dict(msg_id)
     return data
 
@@ -711,13 +721,20 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     status = fresh["status"] if fresh else "sent"
     if status in ("sent", "sent_debug"):
         # Оператор переписал черновик LLM → урок для следующих ответов (Sonnet, в фоне; ошибка — в лог)
-        telegram_bot.run_in_background(_learn_from_sent, msg_id)
+        _LEARN_POOL.submit(_learn_from_sent, msg_id)
     return {"ok": True, "status": status, "closed_drafts": closed_drafts}
+
+
+# Свой однопоточный пул: Sonnet через CLI — десятки секунд, не занимать пул Telegram-уведомлений
+_LEARN_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-learn")
 
 
 def _learn_from_sent(msg_id: int) -> None:
     from modules import llm_memory
-    llm_memory.learn_from_sent(msg_id)
+    try:
+        llm_memory.learn_from_sent(msg_id)
+    except Exception:
+        logger.exception("learn_from_sent msg=%s упал — урок не извлечён", msg_id)
 
 
 class TranslateDraftBody(BaseModel):
@@ -1197,6 +1214,7 @@ def ma_suggest_reply(thread_id: str,
     _claim_or_409(msg_id, actor_from_user(user))  # не перезаписывать черновик, который правит другой
     result = scheduler.regenerate_draft(msg_id, "regen")
     if result.get("kind") == "error":
+        telegram_bot._release_lock(msg_id)  # не держать карточку 5 мин после сбоя LLM
         raise HTTPException(500, result.get("message", "regenerate failed"))
 
     return _thread_dict(thread_id)
@@ -1631,13 +1649,155 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     }
 
 
+# ──────────────────────── АККАУНТЫ И БЭКАП ────────────────────────
+# Пароли (Gmail App Password, пароль Kleinanzeigen) — только запись: наружу отдаём лишь факт,
+# что пароль задан. Через туннель доступно оператору с initData — как и всё остальное в MA.
+
+def _account_dict(a: Any) -> dict[str, Any]:
+    keys = a.keys()
+    return {
+        "id": a["id"],
+        "name": a["name"],
+        "active": bool(a["is_active"]),
+        "gmail_email": a["gmail_email"],
+        "gmail_app_password_set": bool(a["gmail_app_password"]),
+        "kleinanzeigen_email": a["kleinanzeigen_email"] if "kleinanzeigen_email" in keys else None,
+        "kleinanzeigen_password_set": bool("kleinanzeigen_password" in keys and a["kleinanzeigen_password"]),
+        "auto_ack_enabled": bool("auto_ack_enabled" in keys and a["auto_ack_enabled"]),
+        "created_at": a["created_at"] if "created_at" in keys else None,
+    }
+
+
 @router.get("/accounts")
 def ma_accounts(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Список аккаунтов (для фильтра инбокса и бейджей)."""
-    return {"accounts": [
-        {"id": a["id"], "name": a["name"], "active": bool(a["is_active"])}
-        for a in db.list_accounts()
-    ]}
+    """Список аккаунтов (фильтр инбокса, бейджи, экран «Аккаунты»). Без паролей."""
+    return {"accounts": [_account_dict(a) for a in db.list_accounts()]}
+
+
+class AccountUpdateBody(BaseModel):
+    # Только переданные поля меняются; пароли — пустая строка/None = не трогать
+    name: "str | None" = Field(None, min_length=1, max_length=100)
+    is_active: "bool | None" = None
+    auto_ack_enabled: "bool | None" = None
+    gmail_app_password: "str | None" = Field(None, max_length=200)
+    kleinanzeigen_email: "str | None" = Field(None, max_length=200)
+    kleinanzeigen_password: "str | None" = Field(None, max_length=200)
+
+
+@router.post("/accounts/{account_id}")
+def ma_account_update(account_id: int, body: AccountUpdateBody,
+                      user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Изменить аккаунт: вкл/выкл, авто-приветствие, имя, пароли (только запись)."""
+    if db.get_account(account_id) is None:
+        raise HTTPException(404, "account not found")
+    fields: dict[str, Any] = {}
+    if body.name is not None:
+        fields["name"] = body.name.strip()
+    if body.is_active is not None:
+        fields["is_active"] = 1 if body.is_active else 0
+    if body.auto_ack_enabled is not None:
+        fields["auto_ack_enabled"] = 1 if body.auto_ack_enabled else 0
+    if body.kleinanzeigen_email is not None:
+        fields["kleinanzeigen_email"] = body.kleinanzeigen_email.strip() or None
+    for key in ("gmail_app_password", "kleinanzeigen_password"):
+        value = getattr(body, key)
+        if value and value.strip():
+            # App Password Gmail показывают группами через пробел — пробелы не часть пароля
+            fields[key] = value.replace(" ", "") if key == "gmail_app_password" else value
+    if not fields:
+        raise HTTPException(400, "нечего менять")
+    db.update_account(account_id, **fields)
+    # Значения не логируем — только какие поля и кто
+    logger.info("аккаунт #%s изменён (%s) оператором %s",
+                account_id, ", ".join(sorted(fields)), actor_from_user(user))
+    return _account_dict(db.get_account(account_id))
+
+
+class TestImapBody(BaseModel):
+    # Проверить новый пароль до сохранения; пусто — сохранённый
+    gmail_app_password: "str | None" = Field(None, max_length=200)
+
+
+@router.post("/accounts/{account_id}/test-imap")
+def ma_account_test_imap(account_id: int, body: "TestImapBody | None" = None,
+                         user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Проверить вход в Gmail по IMAP (до 30 с)."""
+    from modules import gmail
+    acc = db.get_account(account_id)
+    if acc is None:
+        raise HTTPException(404, "account not found")
+    password = ((body.gmail_app_password if body else None) or "").replace(" ", "") or acc["gmail_app_password"]
+    if not password:
+        return {"ok": False, "message": "пароль приложения Gmail не задан"}
+    ok, message = gmail.test_connection(acc["gmail_email"], password)
+    return {"ok": ok, "message": message}
+
+
+_BACKUP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "backup.sh"
+BACKUP_MARKER = Path(os.environ.get(
+    "KAB_BACKUP_MARKER", "/home/pg/.local/state/kleinanzeigen-bot/last_backup_ok"))
+_backup_state: dict[str, Any] = {"running": False, "started_at": None, "finished_at": None,
+                                 "exit_code": None, "output_tail": None}
+_backup_lock = threading.Lock()
+_backup_marker_problem: list["str | None"] = [None]
+
+
+def backup_age_sec() -> "int | None":
+    """Возраст последнего ПОЛНОГО успешного бэкапа по метке scripts/backup.sh (строка 1 — unix-время).
+    None — метки нет или она нечитаема (бэкапа не было / сломан путь)."""
+    try:
+        ts = float(BACKUP_MARKER.read_text(encoding="utf-8").splitlines()[0].strip())
+    except (OSError, ValueError, IndexError) as e:
+        problem = f"{type(e).__name__}: {e}"
+        if problem != _backup_marker_problem[0]:  # /health дёргают каждые минуты — без повтора
+            logger.warning("метка бэкапа %s не читается: %s", BACKUP_MARKER, problem)
+            _backup_marker_problem[0] = problem
+        return None
+    _backup_marker_problem[0] = None
+    return max(0, int(time.time() - ts))
+
+
+def _run_backup() -> None:
+    import subprocess
+    try:
+        p = subprocess.run([str(_BACKUP_SCRIPT)], capture_output=True, text=True, timeout=1800)
+        code, out = p.returncode, (p.stdout + p.stderr)
+    except Exception as e:  # noqa: BLE001
+        code, out = -1, f"не запустился: {e}"
+    if code != 0:
+        logger.error("ручной бэкап из MA: код %s: %s", code, out[-500:])
+    with _backup_lock:
+        _backup_state.update(running=False, finished_at=datetime.utcnow().isoformat(timespec="seconds"),
+                             exit_code=code, output_tail=out[-2000:])
+
+
+def _backup_status() -> dict[str, Any]:
+    with _backup_lock:
+        st = dict(_backup_state)
+    st["ok"] = None if st["exit_code"] is None else st["exit_code"] == 0
+    st["backup_age_sec"] = backup_age_sec()
+    return st
+
+
+@router.post("/backup/run")
+def ma_backup_run(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Ручной бэкап (scripts/backup.sh: снимок + OneDrive) в фоне. Статус — GET /backup/status."""
+    with _backup_lock:
+        if _backup_state["running"]:
+            started = False
+        else:
+            _backup_state.update(running=True, started_at=datetime.utcnow().isoformat(timespec="seconds"),
+                                 finished_at=None, exit_code=None, output_tail=None)
+            started = True
+    if started:
+        logger.info("ручной бэкап запущен оператором %s", actor_from_user(user))
+        threading.Thread(target=_run_backup, daemon=True, name="manual-backup").start()
+    return {"started": started, **_backup_status()}
+
+
+@router.get("/backup/status")
+def ma_backup_status(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    return _backup_status()
 
 
 @router.get("/clients")

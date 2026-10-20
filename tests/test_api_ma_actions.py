@@ -82,21 +82,23 @@ def test_send_success(client):
     mtb._release_lock.assert_called_once_with(123)
 
 
-def test_send_learns_lesson_in_background_only_when_sent(client):
+def test_send_learns_lesson_in_background_only_when_sent(client, monkeypatch):
     """После УСПЕШНОЙ отправки — learn_from_sent в фоне; не отправлено — урока нет."""
     from web import api_ma
     c, mdb, mtb, msched, mclaude = client
     msched.send_one.return_value = {"kind": "ok", "message": "sent"}
     h = {"X-Telegram-Init-Data": make_init_data(TEST_USER)}
+    pool = MagicMock()
+    monkeypatch.setattr(api_ma, "_LEARN_POOL", pool)
     pending, sent = _full_msg_row(), _full_msg_row(status="sent")
     mdb.get_message.side_effect = [pending, sent]
     assert c.post("/api/ma/messages/123/send", headers=h).status_code == 200
-    mtb.run_in_background.assert_called_once_with(api_ma._learn_from_sent, 123)
+    pool.submit.assert_called_once_with(api_ma._learn_from_sent, 123)
 
-    mtb.run_in_background.reset_mock()
+    pool.submit.reset_mock()
     mdb.get_message.side_effect = [pending, _full_msg_row(status="not_sent_disabled")]
     assert c.post("/api/ma/messages/123/send", headers=h).status_code == 200
-    mtb.run_in_background.assert_not_called()
+    pool.submit.assert_not_called()
 
 
 def test_send_blocks_cyrillic_to_german_client(client):
