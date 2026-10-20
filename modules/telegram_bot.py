@@ -384,6 +384,7 @@ def send_for_review(message_id: int) -> Optional[int]:
     first_mid: Optional[int] = None
     for dm_id in dm_ids:
         try:
+            _card_drop(thread_id, str(dm_id))  # одна живая карточка на тред: прежняя не копится в чате
             r = _http_post_single("sendMessage", {
                 "chat_id": dm_id,
                 "text": text,
@@ -396,6 +397,7 @@ def send_for_review(message_id: int) -> Optional[int]:
             tg_mid = r.get("message_id") if isinstance(r, dict) else None
             if tg_mid:
                 db.add_card_dispatch(message_id, str(dm_id), tg_mid)
+                _card_record(thread_id, str(dm_id), tg_mid)
                 if first_mid is None:
                     first_mid = tg_mid
         except Exception:
@@ -425,7 +427,142 @@ def send_reminder_offer(out_message_id: int, days_silent: int) -> Optional[int]:
     return r.get("message_id") if isinstance(r, dict) else None
 
 
-# ---- Autopilot notifications (зовутся из scheduler._autopilot_dispatch / api_ma) ----
+# ---- Живая карточка треда: одна на тред и оператора, обновляется на месте ----
+# Новое письмо клиента = старая карточка удаляется, новая приходит со звуком (иначе правка не пингует).
+# Автопилот правит ту же карточку: прогресс — тихо, остановка, требующая человека, — новой со звуком.
+
+_CARDS_KEY = "tg_live_cards"
+_CARDS_TTL_SEC = 3 * 86400
+_CARDS_MAX = 300
+_CARDS_LOCK = threading.RLock()
+
+
+def _cards_load() -> dict[str, dict[str, Any]]:
+    raw = db.get_setting_fresh(_CARDS_KEY, "")
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        cards = json.loads(raw)
+    except ValueError:
+        logger.warning("живые карточки: %s не JSON — начинаем заново", _CARDS_KEY)
+        return {}
+    return cards if isinstance(cards, dict) else {}
+
+
+def _cards_save(cards: dict[str, dict[str, Any]]) -> None:
+    now = time.time()
+    live = {t: {c: e for c, e in per.items() if now - e.get("at", 0) < _CARDS_TTL_SEC}
+            for t, per in cards.items()}
+    live = {t: per for t, per in live.items() if per}
+    if len(live) > _CARDS_MAX:  # самые свежие
+        keep = sorted(live, key=lambda t: max(e.get("at", 0) for e in live[t].values()))[-_CARDS_MAX:]
+        live = {t: live[t] for t in keep}
+    db.set_setting(_CARDS_KEY, json.dumps(live))
+
+
+def _card_get(thread_id: str, chat: str) -> Optional[dict[str, Any]]:
+    with _CARDS_LOCK:
+        return (_cards_load().get(thread_id) or {}).get(str(chat))
+
+
+def _card_record(thread_id: str, chat: str, mid: int) -> None:
+    if not thread_id or not mid:
+        return
+    with _CARDS_LOCK:
+        cards = _cards_load()
+        cards.setdefault(thread_id, {})[str(chat)] = {"mid": int(mid), "at": time.time()}
+        _cards_save(cards)
+
+
+def _card_drop(thread_id: str, chat: str) -> None:
+    """Убрать прошлую карточку треда (удалить в Telegram — по возможности — и забыть)."""
+    if not thread_id:
+        return
+    ent = _card_get(thread_id, chat)
+    if not ent:
+        return
+    try:
+        _http_post_single("deleteMessage", {"chat_id": chat, "message_id": ent["mid"], "_kind": "card_drop"})
+    except Exception as e:  # старше 48 ч или уже удалена — не страшно, карточка просто останется в чате
+        logger.info("живая карточка: старую не удалить (chat=%s): %s", chat, e)
+    with _CARDS_LOCK:
+        cards = _cards_load()
+        (cards.get(thread_id) or {}).pop(str(chat), None)
+        _cards_save(cards)
+
+
+def _operator_chats() -> list[str]:
+    return [str(c) for c in (config.telegram_operator_dm_ids() or [config.telegram_chat_id()])]
+
+
+def _card_put(thread_id: str, text: str, start_param: str, label: str, *, kind: str,
+              urgent: bool = False, replace: bool = False) -> Optional[int]:
+    """Показать текст в живой карточке треда каждому оператору. Есть карточка и не replace — правим
+    на месте (без звука); иначе (нет / не правится / replace) — новое сообщение. Не доставлено
+    никому — RuntimeError, как у notify. Возвращает tg message_id первой доставленной."""
+    kb = _open_kb(start_param, label)
+    first: Optional[int] = None
+    failed = 0
+    chats = _operator_chats()
+    for chat in chats:
+        ent = None if replace else _card_get(thread_id, chat)
+        if ent:
+            try:
+                _http_post_single("editMessageText", {
+                    "chat_id": chat, "message_id": ent["mid"], "text": text, "parse_mode": "HTML",
+                    "disable_web_page_preview": True, "reply_markup": kb, "_kind": kind, "_thread": thread_id})
+                first = first or ent["mid"]
+                continue
+            except RuntimeError as e:
+                if "not modified" in str(e):
+                    first = first or ent["mid"]
+                    continue
+                logger.info("живая карточка: правка не вышла (%s) — шлём новую", e)
+        if replace:
+            _card_drop(thread_id, chat)
+        try:
+            r = _http_post_single("sendMessage", {
+                "chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True,
+                "reply_markup": kb, "disable_notification": (not urgent) and quiet_now(),
+                "_kind": kind, "_thread": thread_id})
+        except Exception as e:
+            logger.error("живая карточка: оператору %s не доставлено: %s", chat, e)
+            failed += 1
+            continue
+        mid = r.get("message_id") if isinstance(r, dict) else None
+        if mid:
+            _card_record(thread_id, chat, mid)
+            first = first or mid
+    if failed == len(chats):
+        raise RuntimeError(f"Telegram: карточка треда не доставлена ни одному оператору ({failed})")
+    return first
+
+
+# ---- Напоминания пачкой ----
+
+REMINDER_BATCH_LIST = 8  # строк в сводном сообщении; остальные — «и ещё N»
+
+
+def send_reminder_batch(out_message_ids: list[int], days_silent: float) -> Optional[int]:
+    """Одно сообщение «пора напомнить: N клиентов» вместо N отдельных. Кнопка — «Входящие».
+    Пустой список / ни одного читаемого письма — ничего не шлём (None)."""
+    rows = [m for m in (db.get_message(i) for i in out_message_ids) if m]
+    if not rows:
+        return None
+    if len(rows) == 1:
+        return send_reminder_offer(rows[0]["id"], days_silent)
+    days = int(days_silent) if float(days_silent) >= 1 else 1
+    lines = [f"⏰ <b>Пора напомнить: {len(rows)}</b> · молчат от {days} дн."]
+    for m in rows[:REMINDER_BATCH_LIST]:
+        buyer = _html(_safe(m, "buyer_display_name") or _safe(m, "buyer_name") or "клиент")
+        lines.append(f"• {buyer} — {_html(_oneline(_safe(m, 'ad_title') or '—', 40))}")
+    if len(rows) > REMINDER_BATCH_LIST:
+        lines.append(f"…и ещё {len(rows) - REMINDER_BATCH_LIST}")
+    r = notify("\n".join(lines), "pipeline", label="📥 Входящие", kind="reminder_batch")
+    return r.get("message_id") if isinstance(r, dict) else None
+
+
+# ---- Autopilot: одна карточка треда (зовутся из scheduler._autopilot_dispatch / api_ma) ----
 
 _AUTOPILOT_STOP_REASONS = {
     "limit": ("🛑", "исчерпан лимит сообщений"),
@@ -443,8 +580,22 @@ _AUTOPILOT_HOLD_REASONS = {
 }
 
 
+def _autopilot_card(msg: Any, head: str, status: str) -> str:
+    thread_id = _safe(msg, "gmail_thread_id") or ""
+    ap = db.get_thread_autopilot(thread_id)
+    who = _html(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент")
+    ad = _html(_oneline(_safe(msg, "ad_title") or "—", 50))
+    parts = [f"{head} · {who} · {ad}"]
+    if ap:
+        floor = ap["floor_price_eur"]
+        parts.append(f"Отправлено: <code>{ap['messages_sent']}/{config.autopilot_message_cap()}</code>"
+                     + (f" · floor <code>{int(floor)}€</code>" if floor else ""))
+    parts.append(status)
+    return "\n".join(parts)
+
+
 def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
-    """Пинг при остановке автопилота (reason='manual' — silent) или задержке ответа guard'ом."""
+    """Остановка автопилота (reason='manual' — молча) или задержка ответа guard'ом — в карточке треда."""
     hold = reason in _AUTOPILOT_HOLD_REASONS
     info = _AUTOPILOT_HOLD_REASONS.get(reason) or _AUTOPILOT_STOP_REASONS.get(reason, ("🛑", reason))
     if info[0] is None:
@@ -452,36 +603,33 @@ def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
     msg = db.get_message(msg_id)
     if not msg:
         return
-    ap = db.get_thread_autopilot(_safe(msg, "gmail_thread_id") or "")
-    sent_count = ap["messages_sent"] if ap else 0
-    head = ("⏸ <b>АВТОПИЛОТ: ОТВЕТ ЖДЁТ ПРОВЕРКИ</b>" if hold
-            else "🛑 <b>АВТОПИЛОТ ОСТАНОВЛЕН</b>")
-    text = (f"{head} · #{msg_id}\n"
-            f"Причина: {info[0]} {info[1]}\n"
-            f"Отправлено: <code>{sent_count}/{config.autopilot_message_cap()}</code>")
-    # Остановка, требующая человека (угроза, готов купить, просит контакты), — со звуком и ночью
+    head = "⏸ <b>Автопилот: ответ ждёт проверки</b>" if hold else "🛑 <b>Автопилот остановлен</b>"
+    # Остановка, требующая человека (угроза, готов купить, просит контакты), — новой карточкой со звуком
     urgent = reason in ("threat", "ready_to_buy", "wants_contact")
-    notify(text, f"thread_{_safe(msg, 'gmail_thread_id') or ''}", label="📋 Открыть тред",
-           kind="autopilot_stop", urgent=urgent)
+    thread_id = _safe(msg, "gmail_thread_id") or ""
+    _card_put(thread_id, _autopilot_card(msg, head, f"Причина: {info[0]} {info[1]}"), f"thread_{thread_id}",
+              "📋 Открыть тред", kind="autopilot_stop", urgent=urgent, replace=urgent)
 
 
 def send_autopilot_progress(msg_id: int, count: int) -> None:
-    """Короткий пинг на каждый авто-ответ (notify_mode='notify')."""
+    """Каждый авто-ответ (notify_mode='notify') — правка той же карточки, без нового пинга."""
     msg = db.get_message(msg_id)
     if not msg:
         return
     excerpt = _html((_safe(msg, "de_answer") or "").replace("\n", " ").strip()[:80])
-    notify(f"🤖 <code>#{msg_id}</code> · автопилот {count}/{config.autopilot_message_cap()}: <i>{excerpt}</i>",
-           f"thread_{_safe(msg, 'gmail_thread_id') or ''}", label="📋 Открыть тред")
+    thread_id = _safe(msg, "gmail_thread_id") or ""
+    _card_put(thread_id, _autopilot_card(msg, "🤖 <b>Автопилот</b>", f"Ответил: <i>{excerpt}</i>"),
+              f"thread_{thread_id}", "📋 Открыть тред", kind="autopilot_progress")
 
 
 def send_autopilot_start_notification(msg_id: int, floor: float, actor: str) -> None:
-    """Пинг при включении автопилота (notify mode)."""
+    """Включение автопилота (notify mode): карточка треда превращается в карточку автопилота."""
     msg = db.get_message(msg_id)
-    thread_id = _safe(msg, "gmail_thread_id") or "" if msg else ""
-    notify(f"🚀 <b>АВТОПИЛОТ ВКЛЮЧЁН</b> · #{msg_id}\n"
-           f"floor: <code>{int(floor)}€</code> · запустил {_html(actor)}",
-           f"thread_{thread_id}", label="📋 Открыть тред")
+    if not msg:
+        return
+    thread_id = _safe(msg, "gmail_thread_id") or ""
+    _card_put(thread_id, _autopilot_card(msg, "🚀 <b>Автопилот включён</b>", f"Запустил {_html(actor)}"),
+              f"thread_{thread_id}", "📋 Открыть тред", kind="autopilot_start")
 
 
 # ============================================================
@@ -592,6 +740,52 @@ def _drain_deferred(thread_id: str) -> None:
 # ============================================================
 # Итог дня (джоб scheduler, 20:00 по Берлину)
 # ============================================================
+
+def morning_summary_text() -> Optional[str]:
+    """Утренняя сводка: что ждёт сейчас, вчерашние продажи, напоминания, склад и рынок.
+    None — нечего сказать (не шлём)."""
+    from datetime import timedelta
+    from modules.db_sales import today_berlin
+    today = today_berlin()
+    yday = today - timedelta(days=1)
+    sales = db.sales_summary(yday, yday)
+    threads = db.pipeline_threads()
+    waiting = [t for t in threads if t["last_event_kind"] == "in" and not t["autopilot_active"]]
+    silent = [t for t in threads if t["last_event_kind"] == "out" and not t["autopilot_active"]]
+    lines = ["☀️ <b>Доброе утро</b>"]
+    lines.append(f"Ждут ответа: {len(waiting)}" if waiting else "Все ответы отправлены ✅")
+    if silent:
+        lines.append(f"Ждём клиентов: {len(silent)}")
+    if sales["count"]:
+        lines.append(f"Вчера продано: {sales['count']} на {int(sales['total_eur'])} €")
+    extra: list[str] = []
+    try:
+        from modules import inventory
+        stock = inventory.summary_text().strip()
+        if stock:
+            extra.append(_html(stock))
+    except Exception:
+        logger.exception("утренняя сводка: склад не собран — сводка без него")
+    try:
+        from modules import market_advisor
+        extra += [_html(x) for x in market_advisor.summary_lines()]
+    except Exception:
+        logger.exception("утренняя сводка: рынок не собран — сводка без него")
+    if extra:
+        lines += [""] + extra
+    if not (waiting or silent or sales["count"] or extra):
+        return None
+    return "\n".join(lines)
+
+
+def send_morning_summary() -> str:
+    """Job (08:00 Берлин, как раз после тихих часов): утренняя сводка."""
+    text = morning_summary_text()
+    if text is None:
+        return "утренняя сводка: пусто — не отправлена"
+    notify(text, "pipeline", label="📥 Входящие", kind="morning_summary")
+    return "утренняя сводка отправлена"
+
 
 def evening_summary_text() -> Optional[str]:
     """Итог дня: письма, ответы, продажи (те же числа, что «Сегодня» в Обзоре MA) + кто ждёт сейчас.

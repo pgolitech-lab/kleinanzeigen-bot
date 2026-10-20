@@ -182,3 +182,65 @@ def test_quiet_hours_and_urgent(cfg):
         tb.notify("x")
         tb.notify("🔥", urgent=True)
     assert [p["disable_notification"] for p in sent] == [True, True, False, False]
+
+
+def _live_env(tmp_path, monkeypatch):
+    import database
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "t.db")
+    database.init_db()
+    sent = []
+
+    def fake(method, p):
+        sent.append((method, p))
+        if method == "editMessageText" and p["message_id"] == 404:
+            raise RuntimeError("Telegram API ошибка: Bad Request: message to edit not found")
+        return {"message_id": 100 + len(sent)}
+    monkeypatch.setattr(tb, "_http_post_single", fake)
+    monkeypatch.setattr(tb.config, "telegram_operator_dm_ids", lambda: ["1"])
+    monkeypatch.setattr(tb, "quiet_now", lambda *a: False)
+    return database, sent
+
+
+def test_live_card_edits_in_place_and_resends_when_gone(tmp_path, monkeypatch):
+    database, sent = _live_env(tmp_path, monkeypatch)
+    tb._card_put("T", "a", "thread_T", "x", kind="k")
+    tb._card_put("T", "b", "thread_T", "x", kind="k")
+    assert [m for m, _ in sent] == ["sendMessage", "editMessageText"]  # вторая — правка, не новое сообщение
+    assert sent[1][1]["message_id"] == 101
+    tb._card_record("T", "1", 404)  # карточку в чате удалили
+    tb._card_put("T", "c", "thread_T", "x", kind="k")
+    assert [m for m, _ in sent][-2:] == ["editMessageText", "sendMessage"]
+    # replace: старую удаляем, новая со звуком (urgent)
+    tb._card_put("T", "d", "thread_T", "x", kind="k", urgent=True, replace=True)
+    assert [m for m, _ in sent][-2:] == ["deleteMessage", "sendMessage"]
+
+
+def test_live_card_all_failed_raises(tmp_path, monkeypatch):
+    _live_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(tb, "_http_post_single", lambda m, p: (_ for _ in ()).throw(RuntimeError("down")))
+    with pytest.raises(RuntimeError):
+        tb._card_put("T", "a", "thread_T", "x", kind="k")
+
+
+def test_autopilot_one_card_and_batch_reminders_and_morning(tmp_path, monkeypatch):
+    database, sent = _live_env(tmp_path, monkeypatch)
+    acc = database.add_account("a", "a@gmail.com", "pw")
+    m1 = database.add_message(acc, "in", gmail_thread_id="T", de_client="Hallo", status="pending",
+                              buyer_display_name="Klaus", ad_title="Bank", de_answer="Gern")
+    tb.send_autopilot_start_notification(m1, 300.0, "@pg")
+    tb.send_autopilot_progress(m1, 1)
+    tb.send_autopilot_stop_notification(m1, "limit")        # не срочная — правка
+    assert [m for m, _ in sent] == ["sendMessage", "editMessageText", "editMessageText"]
+    assert "Автопилот остановлен" in sent[-1][1]["text"]
+    tb.send_autopilot_stop_notification(m1, "threat")       # срочная — новая со звуком
+    assert [m for m, _ in sent][-2:] == ["deleteMessage", "sendMessage"]
+    assert sent[-1][1]["disable_notification"] is False
+    sent.clear()
+    m2 = database.add_message(acc, "in", gmail_thread_id="U", de_client="x", status="sent",
+                              buyer_display_name="Anna", ad_title="Tür")
+    assert tb.send_reminder_batch([], 2) is None
+    tb.send_reminder_batch([m1, m2], 2)
+    assert len(sent) == 1 and "Пора напомнить: 2" in sent[0][1]["text"] and "Anna" in sent[0][1]["text"]
+    sent.clear()
+    assert tb.send_morning_summary() == "утренняя сводка отправлена"
+    assert "Ждут ответа" in sent[0][1]["text"] and sent[0][1]["reply_markup"]
