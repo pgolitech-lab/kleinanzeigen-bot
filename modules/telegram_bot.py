@@ -145,11 +145,22 @@ def _truncate_html_safe(text: str, limit: int = 4090) -> str:
 # HTTP API (sync)
 # ============================================================
 
+_LOGGED_METHODS = {"sendMessage", "editMessageText", "deleteMessage"}
+
+
 def _http_post_single(method: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Сырой POST к Telegram Bot API. Длинный HTML auto-truncate."""
+    """Сырой POST к Telegram Bot API. Длинный HTML auto-truncate.
+
+    payload["_kind"] / ["_thread"] (необязательно) — только для строки журнала
+    «tg sent: <kind> chat=… thread=…» (по ней QA считает, сколько шлёт бот); в API не уходят.
+    """
     token = config.telegram_bot_token()
     if not token:
         raise RuntimeError("Не задан Telegram bot token в настройках")
+    kind = payload.get("_kind") or method
+    thread = payload.get("_thread")
+    if "_kind" in payload or "_thread" in payload:
+        payload = {k: v for k, v in payload.items() if k not in ("_kind", "_thread")}
     if method in ("sendMessage", "editMessageText"):
         text = payload.get("text")
         if isinstance(text, str) and len(text) > 4096:
@@ -171,18 +182,26 @@ def _http_post_single(method: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError(f"Telegram API HTTP {e.code}: {e.reason}")
     if not body.get("ok"):
         raise RuntimeError(f"Telegram API ошибка: {body.get('description')}")
+    if method in _LOGGED_METHODS:
+        logger.info("tg sent: %s chat=%s%s", kind, payload.get("chat_id"),
+                    f" thread={thread}" if thread else "")
     return body.get("result", {})
 
 
 def _http_post(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     """POST + DM-fanout: если operator_dm_ids непуст и chat_id == primary —
-    рассылаем sendMessage каждому DM-id. Возвращаем первый result."""
+    рассылаем sendMessage каждому DM-id. Возвращаем первый result.
+
+    Не дошло НИ одному оператору → RuntimeError (раньше возвращался {} и вызывающий
+    считал, что уведомление ушло). Не дошло части — ERROR в лог, результат успешных.
+    """
     if method == "sendMessage":
         dm_ids = config.telegram_operator_dm_ids()
         primary = config.telegram_chat_id()
         target = str(payload.get("chat_id", ""))
         if dm_ids and target == str(primary):
             first_result: dict[str, Any] = {}
+            failed: list[str] = []
             for dm_id in dm_ids:
                 p = dict(payload)
                 p["chat_id"] = dm_id
@@ -190,8 +209,11 @@ def _http_post(method: str, payload: dict[str, Any]) -> dict[str, Any]:
                     r = _http_post_single(method, p)
                     if not first_result:
                         first_result = r
-                except Exception:
-                    logger.exception("DM-fanout: send to %s failed", dm_id)
+                except Exception as e:
+                    logger.error("DM-fanout: оператору %s не доставлено: %s", dm_id, e)
+                    failed.append(str(dm_id))
+            if len(failed) == len(dm_ids):
+                raise RuntimeError(f"Telegram: уведомление не доставлено ни одному оператору ({len(failed)})")
             return first_result
     return _http_post_single(method, payload)
 
@@ -207,73 +229,83 @@ def _open_kb(start_param: str, label: str = "📋 Открыть в MA") -> dict
     }]]}
 
 
-def _review_kb(message_id: int) -> dict:
-    """Keyboard для review-уведомления: открыть MA + кнопка Прочитал."""
+def _review_kb(msg: Any) -> dict:
+    """Карточка письма: ответить (MA сразу на черновике) + вся переписка. Подписи ≤ 14 символов."""
+    mid = _safe(msg, "id")
+    thread_id = _safe(msg, "gmail_thread_id") or ""
     return {"inline_keyboard": [[
-        {"text": "📋 Открыть MA", "web_app": {"url": _ma_deep_link(f"review_{message_id}")}},
-        {"text": "👁 Прочитал", "callback_data": f"read_{message_id}"},
+        {"text": "✅ Ответить", "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
+        {"text": "💬 Переписка", "web_app": {"url": _ma_deep_link(f"thread_{thread_id}")}},
     ]]}
 
 
-def _build_review_text(message_id: int, reads: list[str]) -> str:
-    """Строит текст уведомления: событие + список активных задач + read-метки."""
-    msg = db.get_message(message_id)
-    if not msg:
-        return f"Сообщение #{message_id}"
+def _oneline(text: Optional[str], limit: int) -> str:
+    t = " ".join((text or "").split())
+    return t if len(t) <= limit else t[:limit - 1].rstrip() + "…"
+
+
+def _build_review_text(msg: Any) -> str:
+    """Карточка письма покупателя (≤ 4–5 строк, влезает на внешний экран ~306 px):
+    кто · что · перевод письма на русский · черновик бота (если уже есть)."""
     thread_id = _safe(msg, "gmail_thread_id") or ""
     is_followup = False
     try:
         is_followup = len(db.thread_history(thread_id)) > 1 if thread_id else False
     except Exception:
-        pass
-    buyer = _html(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент")
-    ad = _html(_safe(msg, "ad_title") or "—")
+        logger.exception("карточка письма: история треда %s не прочитана", thread_id)
+    buyer = _html(_oneline(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент", 24))
+    head = f"💬 <b>{buyer}</b> · ответил" if is_followup else f"🆕 <b>{buyer}</b> · новое"
     price = _safe(msg, "ad_price")
-    snippet = _html((_safe(msg, "de_client") or "").replace("\n", " ").strip()[:150])
-    head = "💬 <b>Ответил клиент</b>" if is_followup else "🆕 <b>Новое обращение</b>"
-    price_s = f" · {_html(str(price))}" if price else ""
-    text = (f"{head} · #{message_id}\n"
-            f"👤 {buyer} · 🏷 {ad}{price_s}\n"
-            f"<i>{snippet}</i>")
-    # Список других активных задач
-    try:
-        all_threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
-        others = [t for t in all_threads if _safe(t, "gmail_thread_id") != thread_id]
-        if others:
-            lines = []
-            for t in others[:5]:
-                b = (_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?")[:14]
-                sn = (_safe(t, "de_client") or "").replace("\n", " ").strip()[:28]
-                lines.append(f"• {_html(b)} — {_html(sn)}")
-            extra = f" (+{len(others) - 5})" if len(others) > 5 else ""
-            text += f"\n\n📋 Ещё активных: {len(all_threads)}{extra}\n" + "\n".join(lines)
-    except Exception:
-        pass
-    if reads:
-        text += "\n\n👁 " + " · ".join(reads)
-    return text
+    ad_line = _html(_oneline(_safe(msg, "ad_title") or "—", 40)) + (f" · {_html(str(price))}" if price else "")
+    # По-русски: перевод уже есть к моменту уведомления; немецкий — только если перевода нет
+    letter = _oneline(_safe(msg, "ru_client") or _safe(msg, "de_client"), 160)
+    lines = [head, ad_line, f"«{_html(letter)}»"]
+    draft = _oneline(_safe(msg, "ru_translation") or _safe(msg, "ru_answer"), 100)
+    if draft:
+        lines.append(f"<i>Черновик: «{_html(draft)}»</i>")
+    return "\n".join(lines)
 
 
 def notify(text: str, start_param: Optional[str] = None,
-           label: str = "📋 Открыть в MA") -> dict[str, Any]:
-    """Универсальное уведомление: текст + (если задан target) кнопка «Открыть»."""
+           label: str = "📋 Открыть в MA", kind: str = "notify") -> dict[str, Any]:
+    """Универсальное уведомление операторам: текст + (если задан target) кнопка «Открыть».
+    Не доставлено ни одному — RuntimeError (см. _http_post)."""
     payload: dict[str, Any] = {
         "chat_id": config.telegram_chat_id(),
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
+        "_kind": kind,
     }
     if start_param:
         payload["reply_markup"] = _open_kb(start_param, label)
     return _http_post("sendMessage", payload)
 
 
+def notify_admin(text: str, kind: str = "admin") -> bool:
+    """Технические сообщения (дайджест ошибок, поломка scout и т.п.) — в telegram_admin_chat_id,
+    а не в чат операторов. Пусто → не шлём (WARNING в лог). True — доставлено."""
+    chat = (config.get("telegram_admin_chat_id") or "").strip()
+    if not chat:
+        logger.warning("notify_admin: telegram_admin_chat_id не задан — тех.сообщение не отправлено: %s",
+                       _oneline(text, 200))
+        return False
+    try:
+        _http_post_single("sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML",
+                                          "disable_web_page_preview": True, "_kind": kind})
+        return True
+    except Exception:
+        logger.exception("notify_admin: не доставлено в chat=%s", chat)
+        return False
+
+
 def set_menu_button() -> int:
-    """Нативная Menu Button у поля ввода → MA-дашборд. Ставится при старте и скриптом ops
-    при смене туннеля. Возвращает число чатов, где setChatMenuButton прошёл."""
+    """Нативная Menu Button у поля ввода → MA, экран «Входящие» (главная задача оператора).
+    Ставится при старте и скриптом ops при смене туннеля. Возвращает число чатов, где
+    setChatMenuButton прошёл."""
     dm_ids = config.telegram_operator_dm_ids() or [config.telegram_chat_id()]
-    btn = {"type": "web_app", "text": "📋 MA",
-           "web_app": {"url": _ma_deep_link("dashboard")}}
+    btn = {"type": "web_app", "text": "📥 Входящие",
+           "web_app": {"url": _ma_deep_link("pipeline")}}
     ok = 0
     for chat in dm_ids:
         try:
@@ -285,10 +317,17 @@ def set_menu_button() -> int:
     return ok
 
 
+_REPLY_KB_FLAG = "tg_reply_keyboard_cleared"
+
+
 def clear_reply_keyboards() -> None:
-    """Убрать старую reply-keyboard (Обновить / Назад) в DM каждого оператора.
+    """Убрать старую reply-keyboard (Обновить / Назад) в DM каждого оператора — ОДИН раз
+    (флаг в settings). Раньше слалось при каждом рестарте: пуш «⚙️» у всех операторов.
     Отправляем служебное сообщение с remove_keyboard и сразу удаляем его."""
+    if config.get(_REPLY_KB_FLAG) == "1":
+        return
     dm_ids = config.telegram_operator_dm_ids() or [str(config.telegram_chat_id())]
+    ok = 0
     for chat in dm_ids:
         try:
             r = _http_post_single("sendMessage", {
@@ -301,18 +340,24 @@ def clear_reply_keyboards() -> None:
                 try:
                     _http_post_single("deleteMessage", {"chat_id": chat, "message_id": msg_id})
                 except Exception:
-                    pass
+                    logger.warning("clear_reply_keyboards: служебное «⚙️» не удалено chat=%s", chat)
+            ok += 1
         except Exception:
             logger.exception("clear_reply_keyboards fail chat=%s", chat)
+    if ok == len(dm_ids):
+        db.set_setting(_REPLY_KB_FLAG, "1")
 
 
 def send_for_review(message_id: int) -> Optional[int]:
-    """Уведомление о входящем: список активных + кнопки MA + Прочитал. Fanout в все DM."""
-    if not db.get_message(message_id):
+    """Карточка нового письма каждому оператору (DM-fanout). Возвращает tg message_id первой
+    доставленной копии или None (не доставлено никому / нет письма)."""
+    msg = db.get_message(message_id)
+    if not msg:
         logger.warning("send_for_review: сообщение %s не найдено", message_id)
         return None
-    text = _build_review_text(message_id, reads=[])
-    kb = _review_kb(message_id)
+    text = _build_review_text(msg)
+    kb = _review_kb(msg)
+    thread_id = _safe(msg, "gmail_thread_id") or ""
     dm_ids = config.telegram_operator_dm_ids() or [str(config.telegram_chat_id())]
     db.clear_card_dispatches(message_id)
     first_mid: Optional[int] = None
@@ -324,6 +369,7 @@ def send_for_review(message_id: int) -> Optional[int]:
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
                 "reply_markup": kb,
+                "_kind": "review", "_thread": thread_id,
             })
             tg_mid = r.get("message_id") if isinstance(r, dict) else None
             if tg_mid:
@@ -333,30 +379,8 @@ def send_for_review(message_id: int) -> Optional[int]:
         except Exception:
             logger.exception("send_for_review fanout to %s failed", dm_id)
     if first_mid:
-        try:
-            db.update_message(message_id, telegram_message_id=first_mid)
-        except Exception:
-            pass
+        db.update_message(message_id, telegram_message_id=first_mid)
     return first_mid
-
-
-def _edit_all_dispatches(message_id: int, text: str, kb: dict) -> None:
-    """Обновить все fanout-копии уведомления (для read-receipt и пр.)."""
-    for d in db.list_card_dispatches(message_id):
-        try:
-            _http_post_single("editMessageText", {
-                "chat_id": d["chat_id"],
-                "message_id": d["tg_msg_id"],
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": kb,
-            })
-        except RuntimeError as e:
-            if "message is not modified" not in str(e):
-                logger.error("edit dispatch %s/%s fail: %s", d["chat_id"], d["tg_msg_id"], e)
-        except Exception:
-            logger.exception("edit dispatch %s/%s fail", d["chat_id"], d["tg_msg_id"])
 
 
 def send_reminder_offer(out_message_id: int, days_silent: int) -> Optional[int]:
@@ -590,75 +614,111 @@ def check_llm_login_job() -> str:
 # ============================================================
 
 def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int:
-    """Отправить/обновить сводку висячих задач. edit_msg_id → edit in-place."""
+    """/inbox (/tasks): кто ждёт ответа — кнопка на тред (имя покупателя), до 8 штук.
+    Закрытие тредов из бота убрано: только в MA (там есть отмена). edit_msg_id → edit in-place."""
     threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
-    ts = datetime.now().strftime("%H:%M:%S")
+    ts = datetime.now().strftime("%H:%M")
     if not threads:
-        text = f"✅ <b>Нет висячих задач</b>\n<i>Обновлено: {ts}</i>"
+        text = f"✅ <b>Никто не ждёт ответа</b>\n<i>{ts}</i>"
         kb: list = []
     else:
-        text = f"📋 <b>Висячих задач: {len(threads)}</b>\n<i>Обновлено: {ts}</i>"
+        text = f"📥 <b>Ждут ответа: {len(threads)}</b>\n<i>{ts}</i>"
         kb = []
-        for t in threads[:15]:
-            mid = _safe(t, "id")
-            thread_id = _safe(t, "gmail_thread_id") or ""
-            buyer = (_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?")[:18]
-            snippet = (_safe(t, "de_client") or "").replace("\n", " ").strip()[:35]
-            n = _safe(t, "pending_drafts_count") or 1
-            status = _safe(t, "status") or "new"
-            icon = {"new": "🆕", "pending": "⏳", "edited": "✏️",
-                    "approved": "✅", "deferred": "⏸"}.get(status, "❓")
-            count_s = f"({n}) " if n > 1 else ""
-            btn_label = f"{icon} {count_s}{buyer} · {snippet}"[:60]
-            kb.append([
-                {"text": btn_label, "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
-                {"text": "🗑", "callback_data": f"close_{thread_id}"},
-            ])
-    kb.append([{"text": "🔄 Обновить", "callback_data": "tasks"}])
+        for t in threads[:8]:
+            buyer = _oneline(_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?", 14)
+            snippet = _oneline(_safe(t, "ru_client") or _safe(t, "de_client"), 20)
+            kb.append([{"text": f"{buyer} · {snippet}"[:40],
+                        "web_app": {"url": _ma_deep_link(f"review_{_safe(t, 'id')}")}}])
+        if len(threads) > 8:
+            text += f"\nи ещё {len(threads) - 8}"
+    kb.append([{"text": "📥 Все входящие", "web_app": {"url": _ma_deep_link("pipeline")}},
+               {"text": "🔄 Обновить", "callback_data": "tasks"}])
     markup = {"inline_keyboard": kb}
     if edit_msg_id:
         try:
             _http_post_single("editMessageText", {
                 "chat_id": chat_id, "message_id": edit_msg_id,
-                "text": text, "parse_mode": "HTML",
-                "reply_markup": markup,
+                "text": text, "parse_mode": "HTML", "reply_markup": markup, "_kind": "inbox",
             })
         except RuntimeError as exc:
-            if "message is not modified" in str(exc):
-                logger.warning("send_pending_summary: сообщение не изменилось (не должно случаться с timestamp)")
-            else:
+            if "message is not modified" not in str(exc):
                 logger.error("send_pending_summary edit fail: %s", exc)
-        except Exception:
-            logger.exception("send_pending_summary edit fail")
     else:
-        try:
-            _http_post_single("sendMessage", {
-                "chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                "reply_markup": markup,
-            })
-        except Exception:
-            logger.exception("send_pending_summary send fail")
+        _http_post_single("sendMessage", {
+            "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+            "reply_markup": markup, "_kind": "inbox",
+        })
     return len(threads)
 
 
+_HELP_TEXT = (
+    "Бот присылает новые письма покупателей, напоминания и события автопилота.\n"
+    "«✅ Ответить» — открыть черновик в Mini App, «💬 Переписка» — весь тред.\n"
+    "/inbox — кто ждёт ответа.\n"
+    "Кнопка «📥 Входящие» внизу — открыть Mini App."
+)
+
+
 def set_bot_commands() -> None:
-    """Регистрация /tasks в меню бота (показывается при вводе /)."""
+    """Команды бота в меню «/» (с русскими описаниями)."""
     try:
         _http_post_single("setMyCommands", {"commands": [
-            {"command": "tasks", "description": "Список висячих задач"},
+            {"command": "inbox", "description": "Кто ждёт ответа"},
+            {"command": "help", "description": "Что умеет бот"},
         ]})
     except Exception:
         logger.exception("setMyCommands fail")
 
 
-def start_callback_poller() -> None:
-    """Daemon-поток: обрабатывать callback_query и команды (message).
+def _authorized(user_id: Any) -> bool:
+    """Нажимать кнопки и слать команды могут только операторы (telegram_authorized_ids)."""
+    return user_id is not None and str(user_id) in config.telegram_authorized_ids()
 
-    - /tasks → send_pending_summary в чат отправителя
-    - callback tasks → обновить сводку in-place
-    - callback close_THREAD_ID → закрыть тред + обновить сводку
-    - прочие callback → «кнопка устарела» (legacy до 2026-06-23)
-    """
+
+def _handle_update(u: dict[str, Any]) -> None:
+    """Один update из getUpdates. Всё от неавторизованных — молча игнорируем (WARNING в лог):
+    иначе любой, кто найдёт бота, получал по /tasks имена покупателей и мог закрывать треды."""
+    msg = u.get("message")
+    if msg:
+        chat_id = (msg.get("chat") or {}).get("id")
+        user_id = (msg.get("from") or {}).get("id")
+        if not chat_id:
+            return
+        if not _authorized(user_id):
+            logger.warning("tg: сообщение от неавторизованного user=%s chat=%s — игнор", user_id, chat_id)
+            return
+        text = (msg.get("text") or "").strip().lower()
+        if text.startswith(("/inbox", "/tasks", "/start")) or text == "обновить":
+            send_pending_summary(chat_id)
+        elif text.startswith("/help"):
+            _http_post_single("sendMessage", {"chat_id": chat_id, "text": _HELP_TEXT, "_kind": "help"})
+        return
+    cb = u.get("callback_query")
+    if not cb:
+        return
+    user_id = (cb.get("from") or {}).get("id")
+    if not _authorized(user_id):
+        logger.warning("tg: кнопка от неавторизованного user=%s data=%r — игнор", user_id, cb.get("data"))
+        return
+    data = (cb.get("data") or "").strip()
+    cb_msg = cb.get("message") or {}
+    cb_chat = (cb_msg.get("chat") or {}).get("id")
+    if data == "tasks":
+        count = send_pending_summary(cb_chat, edit_msg_id=cb_msg.get("message_id"))
+        _http_post_single("answerCallbackQuery", {
+            "callback_query_id": cb["id"], "text": f"Ждут ответа: {count}" if count else "Никто не ждёт"})
+    else:
+        # «👁 Прочитал», «🗑» и кнопки до 2026-06-23 — больше не действуют
+        _http_post_single("answerCallbackQuery", {
+            "callback_query_id": cb["id"],
+            "text": "Эта кнопка устарела. Откройте Mini App — кнопка «📥 Входящие» внизу чата.",
+            "show_alert": True,
+        })
+
+
+def start_callback_poller() -> None:
+    """Daemon-поток: long-poll getUpdates → _handle_update (команды /inbox /tasks /help и
+    кнопка «🔄 Обновить»; остальные кнопки — «устарела»). Только от авторизованных."""
     def _run() -> None:
         offset = 0
         while True:
@@ -670,76 +730,10 @@ def start_callback_poller() -> None:
                 })
                 for u in (r if isinstance(r, list) else []):
                     offset = u["update_id"] + 1
-                    # ── Команда /tasks ──────────────────────────────────────
-                    msg = u.get("message")
-                    if msg:
-                        text = (msg.get("text") or "").strip()
-                        chat_id = (msg.get("chat") or {}).get("id")
-                        if not chat_id:
-                            continue
-                        if text.lower().startswith("/tasks") or text == "Обновить":
-                            try:
-                                send_pending_summary(chat_id)
-                            except Exception:
-                                logger.exception("send_pending_summary fail")
-                        # Назад и прочие legacy-тексты — игнорируем молча
-                        continue
-                    # ── Callback-кнопки ─────────────────────────────────────
-                    cb = u.get("callback_query")
-                    if not cb:
-                        continue
-                    data = (cb.get("data") or "").strip()
-                    cb_msg = cb.get("message") or {}
-                    cb_chat = (cb_msg.get("chat") or {}).get("id")
-                    cb_mid = cb_msg.get("message_id")
                     try:
-                        if data == "tasks":
-                            count = send_pending_summary(cb_chat, edit_msg_id=cb_mid)
-                            cb_text = f"✅ {count} задач" if count else "✅ Нет задач"
-                            _http_post_single("answerCallbackQuery", {
-                                "callback_query_id": cb["id"],
-                                "text": cb_text,
-                            })
-                            logger.info("tasks refresh: chat=%s count=%d", cb_chat, count)
-                        elif data.startswith("read_"):
-                            # Прочитал — пометить + обновить все копии уведомления
-                            try:
-                                msg_id = int(data[5:])
-                            except ValueError:
-                                raise RuntimeError(f"bad read_ data: {data!r}")
-                            from_user = cb.get("from") or {}
-                            reader = from_user.get("first_name") or from_user.get("username") or "?"
-                            ts = datetime.now().strftime("%H:%M")
-                            db.mark_card_dispatch_read(msg_id, str(cb_chat), f"{reader} · {ts}")
-                            reads = [
-                                dict(d)["read_by"]
-                                for d in db.list_card_dispatches(msg_id)
-                                if dict(d).get("read_by")
-                            ]
-                            new_text = _build_review_text(msg_id, reads)
-                            _edit_all_dispatches(msg_id, new_text, _review_kb(msg_id))
-                            _http_post_single("answerCallbackQuery", {
-                                "callback_query_id": cb["id"],
-                                "text": "✅ Отмечено",
-                            })
-                            logger.info("read: msg=%s reader=%s", msg_id, reader)
-                        elif data.startswith("close_"):
-                            thread_id = data[6:]
-                            db.close_thread(thread_id, closed_by="bot-task-dismiss")
-                            count = send_pending_summary(cb_chat, edit_msg_id=cb_mid)
-                            _http_post_single("answerCallbackQuery", {
-                                "callback_query_id": cb["id"],
-                                "text": f"🏁 Тред закрыт · осталось {count}",
-                            })
-                            logger.info("close thread: %s remaining=%d", thread_id, count)
-                        else:
-                            _http_post_single("answerCallbackQuery", {
-                                "callback_query_id": cb["id"],
-                                "text": "Эта кнопка устарела. Используй Mini App — кнопка «📋 MA» снизу чата.",
-                                "show_alert": True,
-                            })
+                        _handle_update(u)
                     except Exception:
-                        logger.exception("callback handler fail data=%r", data)
+                        logger.exception("tg: обработка update %s упала", u.get("update_id"))
             except (TimeoutError, urllib.error.URLError) as e:
                 # Долгий long-poll getUpdates (timeout=25) периодически упирается
                 # в сокет-таймаут/сетевой блип — это НОРМА, не ошибка. Логируем тихо,

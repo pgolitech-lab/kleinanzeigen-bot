@@ -1483,7 +1483,7 @@ ALLOWED_SETTING_KEYS = {
     "inquiry_max_age_days",
     "reminders_enabled", "reminder_after_days",
     "polling_paused",
-    "telegram_authorized", "telegram_operator_dm_ids",
+    "telegram_authorized", "telegram_operator_dm_ids", "telegram_admin_chat_id",
     "max_discount_percent",
     "claude_model", "system_prompt",
     "chat_font_em", "chat_padding_v_rem", "chat_padding_h_rem",
