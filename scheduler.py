@@ -70,6 +70,7 @@ _IMAP_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_pr
 # чей прошлый опрос ещё висит, в следующем проходе пропускается (`_POLLING`).
 POLL_BUDGET_SEC = 40
 ORPHAN_SCAN_MINUTES = 20
+INVENTORY_SYNC_MINUTES = 30
 
 _POLLING: set[int] = set()
 _POLLING_LOCK = threading.Lock()
@@ -206,6 +207,17 @@ def poll_status() -> dict[str, Any]:
     return {**POLL_STATE, "queue": mail_queue.status()}
 
 
+def inventory_sync_job() -> str:
+    """Job: синхронизация склада (modules.inventory.sync_all). Никогда не бросает —
+    сбой пишется ERROR в лог (его подхватит monitor_errors), следующий запуск по расписанию."""
+    try:
+        from modules import inventory
+        return f"склад: {inventory.sync_all()}"
+    except Exception as e:
+        logger.exception("склад: sync_all упал")
+        return f"склад: ошибка {e}"
+
+
 def orphan_recovery_job() -> str:
     """Job: найти SEEN-письма, которые бот не сохранил и не журналил, и снять с них \\Seen.
 
@@ -286,6 +298,9 @@ def check_reminders() -> str:
     return f"Предложено пингов: {sent}, ошибок: {failed} (порог {after_days} дн.)"
 
 
+
+
+SCOUT_NOTIFY_MAX_PER_KIND = 8  # кап на кажд. секцию — чтобы машины не вытесняли запчасти (сиденья)
 
 
 def _fmt_scout_listing(item: dict) -> str:
@@ -482,6 +497,19 @@ def build_scheduler() -> BackgroundScheduler:
         trigger="interval",
         minutes=30,
         id="reclean_bodies",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Склад: объявления из писем + продажи → товары и остатки. Раз в 30 мин и через
+    # минуту после старта (не задерживая запуск); ошибки — в лог, джоб не валится.
+    sched.add_job(
+        inventory_sync_job,
+        trigger="interval",
+        minutes=INVENTORY_SYNC_MINUTES,
+        next_run_time=datetime.now(zoneinfo.ZoneInfo("Europe/Berlin")) + timedelta(minutes=1),
+        id="inventory_sync",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

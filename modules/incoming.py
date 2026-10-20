@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import config
 import database as db
-from modules import ad_brief, claude, guardrails, hot_buyer, llm, llm_memory, parser, telegram_bot
+from modules import ad_brief, claude, guardrails, hot_buyer, inventory, llm, llm_memory, parser, telegram_bot
 from modules.outgoing import _row_get, _send_reply
 
 logger = logging.getLogger(__name__)
@@ -662,6 +662,15 @@ def _notify_hot(message_id: int, thread_id: str, reason: str) -> None:
         logger.exception("Уведомление о горячем покупателе не ушло msg=%s", message_id)
 
 
+def _notify_out_of_stock(message_id: int, thread_id: str, ad_id: str) -> None:
+    text = (f"📦 <b>На складе 0</b> · #{message_id} (объявление {telegram_bot._html(str(ad_id))})\n"
+            f"Автопилот на это письмо не ответил — ответьте вручную. Автопилот треда включён.")
+    try:
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+    except Exception:
+        logger.exception("Уведомление «на складе 0» не ушло msg=%s", message_id)
+
+
 def _notify_llm_limit(message_id: int, thread_id: str, err: Exception) -> None:
     global _LLM_LIMIT_NOTIFIED
     if str(err) == _LLM_LIMIT_NOTIFIED:
@@ -931,25 +940,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             logger.exception("classifier упал, пропускаю проверку")
             # Fail-open: если classifier недоступен — продолжаем по cheap-правилам
 
-    # Проданное объявление — после классификатора: проверка бесплатная, но шлёт
-    # уведомление оператору, а на системную рассылку его слать незачем.
-    if ad_id and db.is_ad_sold(ad_id):
-        # Объявление помечено проданным — не обрабатываем, не зовём Claude.
-        # Тихая нотификация в Telegram чтобы оператор знал.
-        try:
-            telegram_bot._http_post("sendMessage", {
-                "chat_id": config.telegram_chat_id(),
-                "text": (
-                    f"📭 <b>Inquiry на проданное объявление</b>\n"
-                    f"От: {email.get('from_name') or email.get('from_email')}\n"
-                    f"Объявление #{ad_id} помечено как продано — пропустил."
-                ),
-                "parse_mode": "HTML",
-            })
-        except Exception:
-            logger.exception("Не удалось послать notification про sold")
-        _skip_email(account, email, "skipped_sold")
-        return
+    # Авто-пропуск по ad_briefs.sold_at убран (склад, 2026-10): «продано» больше не
+    # значит «товара нет» — остаток знает modules/inventory (см. ad_context ниже).
 
     # Сохраняем входящее СРАЗУ, до медленного Playwright-парсинга. Это:
     #  1) гарантирует что письмо не потеряется даже если parse упадёт
@@ -1080,6 +1072,19 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         seller_name=ad.get("seller_name"),
     )
 
+    # Склад: привязать объявление к товару (новое — заведётся, известное — обновится).
+    # Сбой склада не мешает обработке письма.
+    if ad_id:
+        try:
+            inventory.link_listing(
+                ad_id, title=ad.get("title"), price=ad.get("price"),
+                account_id=account["id"], url=ad_url, seen_at=real_created_at,
+                description=ad.get("description") or None,
+                has_ad_data=bool(ad.get("price") or ad.get("description")),
+            )
+        except Exception:
+            logger.exception("склад: link_listing(%s) упал msg=%s — продолжаю", ad_id, inserted_id)
+
     # Бриф объявления: достаём из кэша или генерим (если есть ad_id и хоть какие-то данные)
     brief_text = ""
     brief_extra_cost = 0.0
@@ -1143,6 +1148,17 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         # Запоздалое письмо — автопилот не отвечает, обычная карточка оператору.
         logger.info("autopilot пропущен: письмо запоздало (%.1f дн.) msg=%s", age_days, inserted_id)
         is_autopilot = False
+
+    if is_autopilot and ad_id:
+        # На складе 0 — автопилот не отвечает (пообещал бы несуществующий товар):
+        # карточка оператору с пометкой, автопилот на треде остаётся включённым.
+        stock = inventory.ad_context_safe(ad_id).get("stock")
+        if stock == "out_of_stock":
+            logger.info("autopilot пропущен: на складе 0 (ad_id=%s) msg=%s", ad_id, inserted_id)
+            _deliver_review(inserted_id)
+            _notify_out_of_stock(inserted_id, ap_thread_id, ad_id)
+            _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body, allow_llm=False)
+            return
 
     if is_autopilot:
         try:
