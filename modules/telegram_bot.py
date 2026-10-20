@@ -229,14 +229,34 @@ def _open_kb(start_param: str, label: str = "📋 Открыть в MA") -> dict
     }]]}
 
 
+_FLAGS = {"de": "🇩🇪", "en": "🇬🇧", "ru": "🇷🇺", "pl": "🇵🇱", "tr": "🇹🇷", "uk": "🇺🇦", "fr": "🇫🇷",
+          "es": "🇪🇸", "it": "🇮🇹", "nl": "🇳🇱", "ar": "🇸🇦", "ro": "🇷🇴"}
+
+
+def _flag(lang: Optional[str]) -> str:
+    return _FLAGS.get((lang or "").lower()[:2], "")
+
+
+def waiting_threads(threads: Optional[list] = None) -> list:
+    """Единый счёт «ждут ответа» — как полоса и бейдж вкладки в Mini App (api_ma.ma_pipeline):
+    последнее событие треда — письмо клиента (закреплённые тоже). Сводки и панель считают только так."""
+    rows = db.pipeline_threads() if threads is None else threads
+    return [t for t in rows if _safe(t, "last_event_kind") == "in"]
+
+
 def _review_kb(msg: Any) -> dict:
-    """Карточка письма: ответить (MA сразу на черновике) + вся переписка. Подписи ≤ 14 символов."""
+    """Карточка письма: ответить (MA сразу на черновике) · пропустить (одним тапом, с возвратом) ·
+    переписка · напомнить/продано (экран треда). Подписи короткие — влезают на внешний экран."""
     mid = _safe(msg, "id")
     thread_id = _safe(msg, "gmail_thread_id") or ""
-    return {"inline_keyboard": [[
-        {"text": "✅ Ответить", "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
-        {"text": "💬 Переписка", "web_app": {"url": _ma_deep_link(f"thread_{thread_id}" if thread_id else "pipeline")}},
-    ]]}
+    thread_link = _ma_deep_link(f"thread_{thread_id}" if thread_id else "pipeline")
+    return {"inline_keyboard": [
+        [{"text": "✅ Ответить", "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
+         {"text": "⏭ Пропустить", "callback_data": f"skip:{mid}"}],
+        [{"text": "💰 Продано", "web_app": {"url": thread_link}},
+         {"text": "⏰ Напомнить", "web_app": {"url": thread_link}}],
+        [{"text": "💬 Переписка", "web_app": {"url": thread_link}}],
+    ]}
 
 
 def _oneline(text: Optional[str], limit: int) -> str:
@@ -245,8 +265,8 @@ def _oneline(text: Optional[str], limit: int) -> str:
 
 
 def _build_review_text(msg: Any) -> str:
-    """Карточка письма покупателя (≤ 4–5 строк, влезает на внешний экран ~306 px):
-    кто · что · перевод письма на русский · черновик бота (если уже есть)."""
+    """Карточка письма покупателя (влезает на внешний экран ~306 px):
+    🆕/💬 флаг имя · объявление и цена · суть письма по-русски · автопилот · черновик бота."""
     thread_id = _safe(msg, "gmail_thread_id") or ""
     is_followup = False
     try:
@@ -256,15 +276,23 @@ def _build_review_text(msg: Any) -> str:
     except Exception:
         logger.exception("карточка письма: история треда %s не прочитана", thread_id)
     buyer = _html(_oneline(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент", 24))
-    head = f"💬 <b>{buyer}</b> · ответил" if is_followup else f"🆕 <b>{buyer}</b> · новое"
+    flag = _flag(_safe(msg, "client_lang"))
+    who = f"{flag} <b>{buyer}</b>" if flag else f"<b>{buyer}</b>"
+    head = f"💬 {who} · ответил" if is_followup else f"🆕 {who} · новое"
     price = _safe(msg, "ad_price")
-    ad_line = _html(_oneline(_safe(msg, "ad_title") or "—", 40)) + (f" · {_html(str(price))}" if price else "")
+    ad_line = "🏷 " + _html(_oneline(_safe(msg, "ad_title") or "—", 40)) + (f" · {_html(str(price))}" if price else "")
     # По-русски: перевод уже есть к моменту уведомления; немецкий — только если перевода нет
     letter = _oneline(_safe(msg, "ru_client") or _safe(msg, "de_client"), 160)
     lines = [head, ad_line, f"«{_html(letter)}»"]
     if _safe(msg, "is_hot"):
         reason = _oneline(_safe(msg, "hot_reason"), 60)
         lines.insert(0, "🔥 <b>горячий покупатель</b>" + (f": {_html(reason)}" if reason else ""))
+    try:
+        ap = db.get_thread_autopilot(thread_id)
+        if ap and ap["active"]:
+            lines.append(f"🤖 автопилот {ap['messages_sent']}/{config.autopilot_message_cap()}")
+    except Exception:
+        logger.exception("карточка письма: автопилот треда %s не прочитан", thread_id)
     draft = _oneline(_safe(msg, "ru_translation") or _safe(msg, "ru_answer"), 100)
     if draft:
         lines.append(f"<i>Черновик: «{_html(draft)}»</i>")
@@ -413,18 +441,18 @@ def send_for_review(message_id: int) -> Optional[int]:
     return first_mid
 
 
-def send_reminder_offer(out_message_id: int, days_silent: int) -> Optional[int]:
+def send_reminder_offer(out_message_id: int, days_silent: float) -> Optional[int]:
     """Уведомление: исходящее висит без ответа N дней — пора напомнить. Кнопка → тред MA."""
     msg = db.get_message(out_message_id)
     if not msg:
         return None
     buyer = _html(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент")
     ad = _html(_safe(msg, "ad_title") or "—")
-    text = (f"⏰ <b>Пора напомнить</b> · #{out_message_id}\n"
-            f"👤 {buyer} · 🏷 {ad}\n"
-            f"<i>Клиент молчит {days_silent} дн. — открой тред и напиши follow-up.</i>")
+    silent_for = f"{days_silent:g} дн." if float(days_silent) >= 1 else f"{round(float(days_silent) * 24)} ч"
+    text = (f"⏰ <b>Пора напомнить</b> · молчит {silent_for}\n"
+            + " ".join(x for x in (_flag(_safe(msg, "client_lang")), buyer, "· 🏷", ad) if x))
     thread_id = _safe(msg, "gmail_thread_id") or ""
-    r = notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+    r = notify(text, f"thread_{thread_id}", label="⏰ Напомнить")
     return r.get("message_id") if isinstance(r, dict) else None
 
 
@@ -761,14 +789,14 @@ def morning_summary_text() -> Optional[str]:
     yday = today - timedelta(days=1)
     sales = db.sales_summary(yday, yday)
     threads = db.pipeline_threads()
-    waiting = [t for t in threads if t["last_event_kind"] == "in" and not t["autopilot_active"]]
+    waiting = waiting_threads(threads)
     silent = [t for t in threads if t["last_event_kind"] == "out" and not t["autopilot_active"]]
     lines = ["☀️ <b>Доброе утро</b>"]
-    lines.append(f"Ждут ответа: {len(waiting)}" if waiting else "Все ответы отправлены ✅")
+    lines.append(f"📥 Ждут ответа: <b>{len(waiting)}</b>" if waiting else "✅ Все ответы отправлены")
     if silent:
-        lines.append(f"Ждём клиентов: {len(silent)}")
+        lines.append(f"⏳ Ждём клиентов: {len(silent)}")
     if sales["count"]:
-        lines.append(f"Вчера продано: {sales['count']} на {int(sales['total_eur'])} €")
+        lines.append(f"💰 Вчера продано: {sales['count']} на {int(sales['total_eur'])} €")
     extra: list[str] = []
     try:
         from modules import inventory
@@ -811,14 +839,13 @@ def evening_summary_text() -> Optional[str]:
                             "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?",
                             (t0, t1)).fetchone()["c"]
     sales = db.sales_summary(today, today)
-    waiting = sum(1 for t in db.pipeline_threads()
-                  if t["last_event_kind"] == "in" and not t["autopilot_active"])
+    waiting = len(waiting_threads())
     if not (new or sent or sales["count"] or waiting):
         return None
     lines = ["🌙 <b>Итог дня</b>",
-             f"Писем: {new} · ответили: {sent}",
-             f"Продано: {sales['count']}" + (f" на {int(sales['total_eur'])} €" if sales["count"] else "")]
-    lines.append(f"Ждут ответа сейчас: {waiting}" if waiting else "Все ответы отправлены ✅")
+             f"✉️ Писем: {new} · ответили: {sent}",
+             f"💰 Продано: {sales['count']}" + (f" на {int(sales['total_eur'])} €" if sales["count"] else "")]
+    lines.append(f"📥 Ждут ответа сейчас: <b>{waiting}</b>" if waiting else "✅ Все ответы отправлены")
     try:
         from modules import inventory
         stock = inventory.summary_text().strip()
@@ -904,27 +931,43 @@ def check_llm_login_job() -> str:
 # Обработка устаревших callback-кнопок (до переписки 2026-06-23)
 # ============================================================
 
-def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int:
-    """/inbox (/tasks): кто ждёт ответа — кнопка на тред (имя покупателя), до 8 штук.
-    Закрытие тредов из бота убрано: только в MA (там есть отмена). edit_msg_id → edit in-place."""
-    threads = [t for t in db.pipeline_threads() if t["has_pending_draft"]]
+PANEL_ROWS = 5  # тредов в панели «Входящие»; остальные — в приложении
+
+
+def _panel(threads: list) -> "tuple[str, dict]":
+    """Одно сообщение-панель: заголовок со счётом + по треду строка (имя · суть) и под ней
+    «Ответить / Пропустить»; внизу «Все входящие» и «Обновить»."""
     ts = datetime.now().strftime("%H:%M")
-    if not threads:
-        text = f"✅ <b>Никто не ждёт ответа</b>\n<i>{ts}</i>"
-        kb: list = []
+    waiting = waiting_threads(threads)
+    pinned = sum(1 for t in waiting if _safe(t, "is_pinned"))
+    kb: list = []
+    if not waiting:
+        text = f"✅ <b>Никто не ждёт ответа</b>\n<i>обновлено {ts}</i>"
     else:
-        text = f"📥 <b>Ждут ответа: {len(threads)}</b>\n<i>{ts}</i>"
-        kb = []
-        for t in threads[:8]:
-            buyer = _oneline(_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?", 14)
-            snippet = _oneline(_safe(t, "ru_client") or _safe(t, "de_client"), 20)
-            kb.append([{"text": f"{buyer} · {snippet}"[:40],
-                        "web_app": {"url": _ma_deep_link(f"review_{_safe(t, 'id')}")}}])
-        if len(threads) > 8:
-            text += f"\nи ещё {len(threads) - 8}"
+        text = f"📥 <b>Ждут ответа: {len(waiting)}</b>" + (f" (из них закреплено {pinned})" if pinned else "")
+        text += f"\n<i>обновлено {ts}</i>"
+        waiting = sorted(waiting, key=lambda t: _safe(t, "last_event_at") or "", reverse=True)
+        for t in waiting[:PANEL_ROWS]:
+            who = " ".join(x for x in (_flag(_safe(t, "client_lang")),
+                                       _oneline(_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "?", 14)) if x)
+            snippet = _oneline(_safe(t, "ru_client") or _safe(t, "de_client"), 44)
+            text += f"\n\n<b>{_html(who)}</b> · {_html(_oneline(_safe(t, 'ad_title') or '—', 24))}\n«{_html(snippet)}»"
+            mid = _safe(t, "id")
+            kb.append([{"text": f"✅ Ответить · {_oneline(_safe(t, 'buyer_display_name') or '?', 10)}"[:30],
+                        "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
+                       {"text": "⏭ Пропустить", "callback_data": f"skip:{mid}:p"}])
+        if len(waiting) > PANEL_ROWS:
+            text += f"\n\n…и ещё {len(waiting) - PANEL_ROWS} — в приложении"
     kb.append([{"text": "📥 Все входящие", "web_app": {"url": _ma_deep_link("pipeline")}},
                {"text": "🔄 Обновить", "callback_data": "tasks"}])
-    markup = {"inline_keyboard": kb}
+    return text, {"inline_keyboard": kb}
+
+
+def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int:
+    """/inbox (/tasks): панель «Входящие» одним сообщением. edit_msg_id → правка на месте
+    (обновить/пропустить не плодят сообщений). Возвращает число ждущих (тот же счёт, что в Mini App)."""
+    threads = db.pipeline_threads()
+    text, markup = _panel(threads)
     if edit_msg_id:
         try:
             _http_post_single("editMessageText", {
@@ -937,15 +980,66 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int
     else:
         _http_post_single("sendMessage", {
             "chat_id": chat_id, "text": text, "parse_mode": "HTML",
-            "reply_markup": markup, "_kind": "inbox",
+            "disable_web_page_preview": True, "reply_markup": markup, "_kind": "inbox",
         })
-    return len(threads)
+    return len(waiting_threads(threads))
+
+
+# Пропуск из бота: письмо в статусах «ждёт оператора» → skipped, с кнопкой «↩ Вернуть»
+_SKIPPABLE = ("new", "pending", "edited", "approved")
+
+
+def skip_from_bot(msg_id: int, actor: str) -> "tuple[bool, str]":
+    """Пропустить письмо кнопкой бота. (ok, человеческий текст). Чужой лок / уже отправлено / в очереди
+    отправки — не трогаем и объясняем, а не молча ничего."""
+    msg = db.get_message(msg_id)
+    if not msg:
+        return False, "Письмо не найдено — возможно, его уже убрали."
+    status = _safe(msg, "status")
+    if status == "send_queued":
+        return False, "Письмо уже в очереди на отправку — отмените отправку в приложении."
+    if status not in _SKIPPABLE:
+        return False, "Это письмо уже обработано — пропускать нечего."
+    try:
+        ap = db.get_thread_autopilot(_safe(msg, "gmail_thread_id"))
+        if ap and ap["active"]:
+            return False, "В этом треде работает автопилот — остановите его в приложении."
+    except Exception:
+        logger.exception("пропуск из бота: автопилот письма %s не прочитан", msg_id)
+    busy = _claim_lock(msg_id, actor)
+    if busy:
+        return False, f"Сейчас с этим письмом работает {busy}."
+    try:
+        fresh = db.get_message(msg_id)  # статус мог смениться между чтением и локом (очередь отправки в MA)
+        if not fresh or _safe(fresh, "status") not in _SKIPPABLE:
+            return False, "Письмо только что обработали — пропускать нечего."
+        db.update_message(msg_id, status="skipped")
+    finally:
+        _release_lock(msg_id)
+    return True, "Пропущено"
+
+
+def unskip_from_bot(msg_id: int) -> "tuple[bool, str]":
+    msg = db.get_message(msg_id)
+    if not msg or _safe(msg, "status") != "skipped":
+        return False, "Вернуть нельзя — письмо уже не в «пропущенных»."
+    thread_id = _safe(msg, "gmail_thread_id")
+    try:
+        later = [r for r in db.thread_history(thread_id) if _safe(r, "direction") == "in" and _safe(r, "id", 0) > msg_id]
+    except Exception:
+        logger.exception("возврат из пропущенных: история треда %s не прочитана", thread_id)
+        later = []
+    if later:
+        return False, "В треде уже есть новое письмо — откройте его в приложении."
+    db.update_message(msg_id, status="pending")
+    return True, "Вернул в очередь"
 
 
 _HELP_TEXT = (
     "Бот присылает новые письма покупателей, напоминания и события автопилота.\n"
-    "«✅ Ответить» — открыть черновик в Mini App, «💬 Переписка» — весь тред.\n"
-    "/inbox — кто ждёт ответа.\n"
+    "«✅ Ответить» — черновик в Mini App, «⏭ Пропустить» — убрать письмо (можно вернуть), "
+    "«💰 Продано» и «⏰ Напомнить» — в треде, «💬 Переписка» — весь диалог.\n"
+    "/inbox — панель: кто ждёт ответа.\n"
     "Кнопка «📥 Входящие» внизу — открыть Mini App."
 )
 
@@ -998,6 +1092,8 @@ def _handle_update(u: dict[str, Any]) -> None:
         count = send_pending_summary(cb_chat, edit_msg_id=cb_msg.get("message_id"))
         _http_post_single("answerCallbackQuery", {
             "callback_query_id": cb["id"], "text": f"Ждут ответа: {count}" if count else "Никто не ждёт"})
+    elif data.startswith(("skip:", "unskip:")):
+        _handle_skip_cb(cb, data, cb_chat, cb_msg)
     else:
         # «👁 Прочитал», «🗑» и кнопки до 2026-06-23 — больше не действуют
         _http_post_single("answerCallbackQuery", {
@@ -1005,6 +1101,51 @@ def _handle_update(u: dict[str, Any]) -> None:
             "text": "Эта кнопка устарела. Откройте Mini App — кнопка «📥 Входящие» внизу чата.",
             "show_alert": True,
         })
+
+
+def _handle_skip_cb(cb: dict, data: str, chat_id: Any, cb_msg: dict) -> None:
+    """«⏭ Пропустить» / «↩ Вернуть»: правит то же сообщение (панель или карточку), не плодит новых.
+    Ошибка — человеческим текстом в всплывающем окне."""
+    kind, _, rest = data.partition(":")
+    raw, _, where = rest.partition(":")  # where=='p' — нажато в панели «Входящие»
+    answer: dict[str, Any] = {"callback_query_id": cb["id"]}
+    try:
+        msg_id = int(raw)
+    except ValueError:
+        answer.update(text="Кнопка устарела — откройте «📥 Входящие».", show_alert=True)
+        _http_post_single("answerCallbackQuery", answer)
+        return
+    frm = cb.get("from") or {}
+    actor = f"tg:{frm.get('username') or frm.get('id')}"
+    try:
+        ok, text = skip_from_bot(msg_id, actor) if kind == "skip" else unskip_from_bot(msg_id)
+    except Exception:
+        logger.exception("tg: %s письма %s упало", kind, msg_id)
+        ok, text = False, "Не получилось — попробуйте ещё раз или откройте приложение."
+    answer.update(text=text, show_alert=not ok)
+    _http_post_single("answerCallbackQuery", answer)
+    if not ok:
+        return
+    mid = cb_msg.get("message_id")
+    try:
+        if where == "p":
+            send_pending_summary(chat_id, edit_msg_id=mid)  # панель: перерисовать без пропущенного
+        elif kind == "skip":
+            _http_post_single("editMessageText", {
+                "chat_id": chat_id, "message_id": mid, "parse_mode": "HTML", "_kind": "skip",
+                "text": f"⏭ <i>Пропущено</i>\n{_html(_oneline(cb_msg.get('text'), 120))}",
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": "↩ Вернуть", "callback_data": f"unskip:{msg_id}"},
+                    {"text": "📥 Входящие", "web_app": {"url": _ma_deep_link("pipeline")}}]]}})
+        else:
+            msg = db.get_message(msg_id)
+            if msg:
+                _http_post_single("editMessageText", {
+                    "chat_id": chat_id, "message_id": mid, "parse_mode": "HTML", "_kind": "skip",
+                    "text": _build_review_text(msg), "reply_markup": _review_kb(msg),
+                    "disable_web_page_preview": True})
+    except Exception:
+        logger.exception("tg: правка сообщения после %s письма %s не вышла", kind, msg_id)
 
 
 def start_callback_poller() -> None:
