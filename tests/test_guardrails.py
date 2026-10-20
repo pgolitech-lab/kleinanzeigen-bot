@@ -102,7 +102,13 @@ def test_language_verdict_ok(text, lang):
 ])
 def test_language_verdict_mismatch(text, lang):
     assert g.language_verdict(text, lang) == "mismatch"
-    assert g.outgoing_language_ok(text, lang) is False
+
+
+def test_outgoing_language_ok_checks_script_only():
+    assert g.outgoing_language_ok("Так, ще є.", "uk") is True
+    assert g.outgoing_language_ok("Так, ще є.", "ru") is True   # одна письменность — решает LLM-слой
+    assert g.outgoing_language_ok("Здравствуйте", "tr") is False
+    assert g.outgoing_language_ok("Hallo", "bg") is False
 
 
 def test_language_verdict_short_is_unsure_or_ok():

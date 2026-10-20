@@ -275,3 +275,18 @@ def test_translate_rejects_echo_and_wrong_language(fake_llm):
     fake_llm.response = _resp({"translation": "Ja, der Sitz ist noch da, Abholung am Samstag. MfG",
                                "back_translation_ru": "Да, ещё есть"})
     assert claude.translate_with_back(src, target_lang="de")["translation"].startswith("Ja")
+
+
+def test_regenerate_refuses_row_with_sent_message_id(tmp_db, fake_llm):
+    # P1 №45: строка уже ушла (есть наш Message-ID), хотя статус — edited
+    from modules import drafts
+    mid = tmp_db.add_message(1, "in", gmail_thread_id="t3", de_client="x", de_answer="ушло клиенту",
+                             status="edited", sent_message_id="<abc@mail>")
+    for call in (lambda: drafts.regenerate_draft(mid, "regen"),
+                 lambda: drafts.regenerate_draft_with_price(mid, 100),
+                 lambda: drafts.regenerate_draft_with_instruction(mid, "короче")):
+        assert call()["kind"] == "error"
+    assert tmp_db.get_message(mid)["de_answer"] == "ушло клиенту"
+    with pytest.raises(RuntimeError, match="уже обработано"):
+        claude.regenerate_with_strategy(tmp_db.get_message(mid), "short")
+    assert fake_llm.calls == []

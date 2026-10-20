@@ -13,9 +13,6 @@ from modules import claude, llm_memory
 
 logger = logging.getLogger(__name__)
 
-_FINAL_STATUSES = claude.FINAL_STATUSES
-
-
 def _final_msg(message_id: int, status: str) -> str:
     return (f"❌ Письмо #{message_id} уже обработано ({status}) — черновик не перезаписываю. "
             "Для нового сообщения клиенту используйте «✉️ Написать».")
@@ -65,7 +62,7 @@ def generate_draft_for_msg(message_id: int) -> dict[str, Any]:
     msg = db.get_message(message_id)
     if not msg:
         return {"kind": "error", "message": f"❌ msg={message_id} не найдено"}
-    if msg["status"] in _FINAL_STATUSES:
+    if claude.is_final(msg):
         return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     history, brief_text = claude.draft_context(msg)
     memory_text, lessons_text = claude.extra_context(msg)
@@ -98,7 +95,7 @@ def regenerate_draft(message_id: int, strategy: str) -> dict[str, Any]:
     msg = db.get_message(message_id)
     if not msg:
         return {"kind": "error", "message": f"❌ msg={message_id} не найдено"}
-    if msg["status"] in _FINAL_STATUSES:
+    if claude.is_final(msg):
         return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     if strategy == "regen" and not (msg["de_answer"] or "").strip():
         return generate_draft_for_msg(message_id)
@@ -119,7 +116,7 @@ def regenerate_draft_with_price(message_id: int, price_eur: float) -> dict[str, 
     msg = db.get_message(message_id)
     if not msg:
         return {"kind": "error", "message": f"❌ msg={message_id} не найдено"}
-    if msg["status"] in _FINAL_STATUSES:
+    if claude.is_final(msg):
         return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     history, brief_text, _ = _regen_context(msg)
     try:
@@ -138,7 +135,7 @@ def regenerate_draft_with_instruction(message_id: int, instruction: str) -> dict
     msg = db.get_message(message_id)
     if not msg:
         return {"kind": "error", "message": f"❌ msg={message_id} не найдено"}
-    if msg["status"] in _FINAL_STATUSES:
+    if claude.is_final(msg):
         return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     history, brief_text, _ = _regen_context(msg)
     try:

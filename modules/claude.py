@@ -694,6 +694,13 @@ def translate_with_back(
 # Письма в этих статусах уже ушли/закрыты — их черновик не перегенерируем
 FINAL_STATUSES = ("sent", "sent_debug", "skipped", "skipped_sold", "not_sent_disabled", "sending")
 
+
+def is_final(msg_row: Any) -> bool:
+    """Письмо уже ушло/закрыто: финальный статус ИЛИ наш SMTP Message-ID записан
+    (статус мог смениться позже — например, на edited после старой регенерации)."""
+    return (_rget(msg_row, "status") in FINAL_STATUSES
+            or bool((_rget(msg_row, "sent_message_id") or "").strip()))
+
 # Пресеты, которые принимает api (/messages/{id}/regenerate, VALID_STRATEGIES)
 QUICK_STRATEGIES: dict[str, str] = {
     "fest": "Цена ОКОНЧАТЕЛЬНАЯ. Никаких уступок. Вежливо но твёрдо отказать в скидке. 1-2 предложения.",
@@ -753,7 +760,7 @@ def _regenerate_core(
     """Регенерация с полным контекстом. Если вызывающий не передал history/brief
     (api_ma зовёт regenerate_with_* только с row) — подгружаем сами."""
     status = _rget(msg_row, "status")
-    if status in FINAL_STATUSES:
+    if is_final(msg_row):
         # api зовёт regenerate_with_* напрямую — защищаем отправленные письма здесь
         raise RuntimeError(
             f"Письмо #{_rget(msg_row, 'id')} уже обработано ({status}) — черновик не перезаписываю. "

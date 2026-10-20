@@ -126,10 +126,16 @@ def language_verdict(text: str, client_lang: Optional[str]) -> str:
 
 
 def outgoing_language_ok(text: str, client_lang: Optional[str]) -> bool:
-    """Чистая (без LLM) санити-проверка исходящего: False только при уверенном
-    несовпадении языка или пустом тексте. Для автоотправки при 'unsure' используйте
+    """Чистая (без LLM) проверка ПИСЬМЕННОСТИ исходящего: кириллица — только клиентам
+    на кириллических языках (ru/uk/bg/…), латиница — латинским и т.д. Пустой текст → False.
+    Различение языков одной письменности (de/en, ru/uk) — `language_verdict` /
     `outgoing_language_ok_llm`."""
-    return language_verdict(text, client_lang) != "mismatch"
+    if not text or not text.strip():
+        return False
+    script = _script_of(text)
+    if script is None:
+        return True  # только цифры/знаки
+    return script == _LANG_SCRIPT.get((client_lang or "de").strip().lower(), "latin")
 
 
 def outgoing_language_ok_llm(text: str, client_lang: Optional[str]) -> bool:
