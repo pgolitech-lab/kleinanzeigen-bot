@@ -1159,6 +1159,126 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
     return _message_review_dict(msg_id)
 
 
+# ──────────────────────── ЧИПЫ ЦЕНЫ (варианты ответа) ────────────────────────
+# Несколько черновиков с разной ценовой позицией — параллельно (каждый — обычная регенерация
+# с полным контекстом треда), кэш на (msg_id, тон, версия треда). Ничего не пишут в БД;
+# выбранный вариант применяет POST /variants/{tone}/apply.
+_TONES = ("hold", "minus5", "floor", "decline")
+_VARIANT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="price-variants")
+_variant_cache: dict[tuple, dict[str, Any]] = {}
+_variant_cache_lock = threading.Lock()
+_VARIANT_CACHE_MAX = 200
+
+
+class VariantsBody(BaseModel):
+    tones: list[str] = Field(default_factory=lambda: list(_TONES), min_length=1, max_length=4)
+
+    @field_validator("tones")
+    @classmethod
+    def _check_tones(cls, v: list[str]) -> list[str]:
+        bad = [t for t in v if t not in _TONES]
+        if bad:
+            raise ValueError(f"неизвестные тоны {bad}; есть {list(_TONES)}")
+        return list(dict.fromkeys(v))
+
+
+def _round5(x: float) -> int:
+    return int(round(x / 5.0) * 5)
+
+
+def _variant_prices(row: Any) -> dict[str, "int | None"]:
+    """Цена для каждого тона: hold — цена объявления; minus5 — −5 %; floor — минимум автопилота,
+    иначе цена − max_discount_percent; decline — без цены."""
+    listed = _parse_listed_price_eur(row["ad_price"])
+    if not listed:
+        return {"hold": None, "minus5": None, "floor": None, "decline": None}
+    ap = db.get_thread_autopilot(row["gmail_thread_id"]) if row["gmail_thread_id"] else None
+    floor = ap["floor_price_eur"] if ap is not None and ap["floor_price_eur"] else \
+        listed * (1 - config.max_discount_percent() / 100)
+    return {"hold": _round5(listed), "minus5": _round5(listed * 0.95),
+            "floor": _round5(min(floor, listed)), "decline": None}
+
+
+def _variant_instruction(tone: str, price: "int | None") -> str:
+    return {
+        "hold": f"Держи цену {price} €: вежливо, но твёрдо откажи в скидке и коротко обоснуй ценность "
+                "(состояние, комплектность). Цену не снижай.",
+        "minus5": f"Предложи уступку до {price} € как жест доброй воли ради быстрой сделки. "
+                  f"Ниже {price} € не опускайся, это предел.",
+        "floor": f"Назови последнюю цену {price} € — ниже не продадим. Коротко и вежливо, без торга дальше.",
+        "decline": "Вежливо откажи: на предложенную покупателем цену не согласны, встречную цену не называй. "
+                   "Коротко, без грубости, оставь дверь открытой.",
+    }[tone]
+
+
+def _thread_version(row: Any) -> tuple:
+    """Версия треда для кэша: любое новое письмо/правка/отправка даёт другую версию."""
+    hist = db.thread_history(row["gmail_thread_id"]) if row["gmail_thread_id"] else []
+    return tuple((h["id"], h["status"], hash(h["de_answer"] or "")) for h in hist)
+
+
+@router.post("/messages/{msg_id}/variants")
+def ma_variants(msg_id: int, body: "VariantsBody | None" = None,
+                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Черновики под ценовые тоны (чипы «держу / −5 % / минимум / отказ»), параллельно. В БД не пишет."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
+    tones = (body or VariantsBody()).tones
+    prices = _variant_prices(row)
+    version = _thread_version(row)
+    out: dict[str, dict[str, Any]] = {}
+    futures = {}
+    for tone in tones:
+        key = (msg_id, tone, prices[tone], version)
+        with _variant_cache_lock:
+            hit = _variant_cache.get(key)
+        if hit is not None:
+            out[tone] = {**hit, "cached": True}
+        elif tone != "decline" and prices[tone] is None:
+            out[tone] = {"tone": tone, "price_eur": None, "error": "в объявлении нет цены", "cached": False}
+        else:
+            futures[tone] = (key, _VARIANT_POOL.submit(
+                claude.regenerate_with_instruction, row, _variant_instruction(tone, prices[tone])))
+    for tone, (key, fut) in futures.items():
+        try:
+            res = fut.result(timeout=180)
+        except Exception as e:
+            logger.exception("вариант %s для msg=%s не сгенерирован", tone, msg_id)
+            out[tone] = {"tone": tone, "price_eur": prices[tone], "error": str(e)[:300], "cached": False}
+            continue
+        item = {"tone": tone, "price_eur": prices[tone], "error": None,
+                "client_text": res.get("client_answer", ""), "ru_text": res.get("ru_answer", ""),
+                "ru_translation": res.get("ru_translation", ""), "result": res}
+        with _variant_cache_lock:
+            if len(_variant_cache) >= _VARIANT_CACHE_MAX:
+                _variant_cache.pop(next(iter(_variant_cache)))
+            _variant_cache[key] = item
+        out[tone] = {**item, "cached": False}
+    return {"msg_id": msg_id, "variants": [
+        {k: v for k, v in out[t].items() if k != "result"} for t in tones]}
+
+
+@router.post("/messages/{msg_id}/variants/{tone}/apply")
+def ma_variant_apply(msg_id: int, tone: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сделать выбранный вариант черновиком (как перегенерация: status edited, deal_brief, llm_draft_*)."""
+    if tone not in _TONES:
+        raise HTTPException(404, "unknown tone")
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
+    key = (msg_id, tone, _variant_prices(row)[tone], _thread_version(row))
+    with _variant_cache_lock:
+        item = _variant_cache.get(key)
+    if item is None:
+        raise HTTPException(409, "Вариант устарел (в треде что-то изменилось) — запросите варианты заново")
+    _claim_or_409(msg_id, actor_from_user(user))
+    scheduler._save_regen_result(msg_id, row, item["result"])
+    return _message_review_dict(msg_id)
+
+
 class EditTextBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
 
