@@ -413,6 +413,24 @@ def parse_search_html(html: str, kind: str, query_id: int) -> list[dict[str, Any
     return out
 
 
+# Платные TOP-объявления: флаг лежит не в <article>, а в JSON-пропсах острова
+# выдачи ("topAd":[0,true]), рядом с id объявления. Берём ближайший id перед флагом.
+_TOP_FLAG_RE = re.compile(r'"topAd":\[0,(true|false)\]')
+_PROPS_ID_RE = re.compile(r'"(?:id|adId)":\[0,"?(\d{8,12})')
+
+
+def parse_top_flags(html: str) -> dict[str, bool]:
+    """ad_id → является ли платным TOP-объявлением. Пусто, если вёрстка изменилась."""
+    import html as _html
+    txt = _html.unescape(html or "")
+    out: dict[str, bool] = {}
+    for m in _TOP_FLAG_RE.finditer(txt):
+        ids = _PROPS_ID_RE.findall(txt, max(0, m.start() - 4000), m.start())
+        if ids:
+            out.setdefault(ids[-1], m.group(1) == "true")
+    return out
+
+
 def looks_like_results_page(html: str) -> bool:
     """Это нормальная выдача (есть карточки или явное «ничего не найдено»)?"""
     return bool(html) and ("data-adid=" in html or bool(_EMPTY_RE.search(html)))
@@ -503,8 +521,14 @@ def scrape_query(
     query: Any,
     page_delay_sec: float = 1.5,
     browser: Optional[_BrowserFallback] = None,
+    stats: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Проскрапить один запрос постранично. Возвращает список dict-строк (с дедупом по ad_id)."""
+    """Проскрапить один запрос постранично. Возвращает список dict-строк (с дедупом по ad_id).
+
+    Каждая строка дополнительно несёт место в выдаче: page (страница), pos (сквозное
+    место с 1), is_top (1 — платное TOP, 0 — нет, None — не удалось понять). Колонок
+    scout_listings это не меняет. stats (если передан) получает {'pages': N}.
+    """
     kind = query["kind"]
     category = query["category"]
     keywords = query["keywords"]
@@ -526,12 +550,18 @@ def scrape_query(
         rows = parse_search_html(html, kind, qid)
         if not rows:
             break
+        if stats is not None:
+            stats["pages"] = pnum
+        top = parse_top_flags(html)
         new_on_page = 0
         for row in rows:
             aid = row["ad_id"]
             if aid in seen_ids:
                 continue
             seen_ids.add(aid)
+            row["page"] = pnum
+            row["pos"] = len(out) + 1
+            row["is_top"] = (1 if top[aid] else 0) if aid in top else None
             out.append(row)
             new_on_page += 1
         # если страница вернула < 20 карточек — последняя страница
@@ -578,13 +608,17 @@ def run_scout(
     try:
         with httpx.Client(headers=_HEADERS, timeout=30.0, follow_redirects=True) as client:
             for q in queries:
+                q_started = datetime.utcnow().isoformat()
+                q_stats: dict[str, Any] = {"pages": 0}
                 try:
                     rows = scrape_query(client, q, page_delay_sec=page_delay_sec,
-                                        browser=browser)
+                                        browser=browser, stats=q_stats)
                 except Exception as e:
                     logger.exception("scout: query %s failed", q["id"])
                     summary["errors"].append(f"q{q['id']} ({q['keywords']}): {e}")
+                    _record_market(q, [], 0, str(e), q_started)
                     continue
+                _record_market(q, rows, q_stats["pages"], None, q_started)
                 new_count = 0
                 for row in rows:
                     is_new = db.upsert_scout_listing(row)
@@ -671,6 +705,23 @@ def run_scout(
 
     summary["kinds"] = sorted(summary["kinds"])
     return summary
+
+
+def _record_market(query: Any, rows: list[dict[str, Any]], pages: int,
+                   error: Optional[str], started_at: str) -> None:
+    """Записать места в выдаче и изменения цен (модуль market) — только для запчастей.
+
+    Ошибка записи не должна ронять прогон scout: данные scout уже сохранены.
+    """
+    if query["kind"] != "part":
+        return
+    try:
+        from modules import db_market
+        db_market.record_scrape(source="scout", keywords=query["keywords"],
+                                category=query["category"], query_ref=query["id"],
+                                rows=rows, pages=pages, error=error, started_at=started_at)
+    except Exception:  # noqa: BLE001
+        logger.exception("scout: запись истории выдачи (market) не удалась, q=%s", query["id"])
 
 
 def verify_listings(batch_size: int = 25, max_items: int = 1000) -> dict[str, Any]:
