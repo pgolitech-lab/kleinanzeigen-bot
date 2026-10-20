@@ -65,3 +65,15 @@ def test_patch_allowed_by_cors(c):
         "Origin": "https://pgolitech-lab.github.io", "Access-Control-Request-Method": "PATCH",
         "Access-Control-Request-Headers": "X-Telegram-Init-Data, Content-Type"})
     assert r.status_code == 200
+
+
+def test_report_from_param_and_patch_title(c):
+    with patch("modules.inventory.report", return_value={"totals": {}}) as rep:
+        c.get("/api/ma/stock/report?from=2026-10-01&to=2026-10-20", headers=H())
+    assert rep.call_args.args == ("2026-10-01", "2026-10-20")
+    pid = c.post("/api/ma/stock/products", json={"title": "Alt"}, headers=H()).json()["id"]
+    assert c.patch(f"/api/ma/stock/products/{pid}", json={"title": None}, headers=H()).status_code == 400
+    assert c.patch(f"/api/ma/stock/products/{pid}", json={"title": "  "}, headers=H()).status_code == 400
+    from modules.inventory import match_key
+    p = c.patch(f"/api/ma/stock/products/{pid}", json={"title": "Neu Sitzbank"}, headers=H()).json()["product"]
+    assert p["title"] == "Neu Sitzbank" and p["match_key"] == match_key("Neu Sitzbank")

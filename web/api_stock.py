@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from modules import db_inventory as inv_db
@@ -39,7 +39,7 @@ def _call(fn, *args, **kwargs):
 # ── отчёты ──
 
 @router.get("/stock/report")
-def stock_report(from_: Optional[str] = None, to: Optional[str] = None,
+def stock_report(from_: Optional[str] = Query(None, alias="from"), to: Optional[str] = None,
                  user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     return _call(inventory.report, from_, to)
 
@@ -105,14 +105,20 @@ def stock_product_update(product_id: int, body: ProductBody,
     fields = body.model_dump(exclude_unset=True)  # переданный null = очистить поле
     if not fields:
         raise HTTPException(400, "нечего менять")
+    if "title" in fields:
+        if not (fields["title"] or "").strip():
+            raise HTTPException(400, "название товара не может быть пустым")
+        fields["title"] = fields["title"].strip()
+        from modules.inventory import match_key
+        fields["match_key"] = match_key(fields["title"])  # иначе автопривязка искала бы по старому названию
     _call(inv_db.update_product, product_id, **fields)
     return {"product": _row(inv_db.get_product(product_id))}
 
 
 class QtyBody(BaseModel):
     qty: int = Field(..., ge=0, le=100_000)
-    unit_cost_eur: Optional[float] = Field(None, ge=0, lt=1_000_000)
-    occurred_at: Optional[str] = None
+    unit_cost_eur: Optional[float] = Field(None, ge=0, lt=1_000_000)  # только приход
+    occurred_at: Optional[str] = None  # только приход
     note: Optional[str] = Field(None, max_length=500)
 
 
@@ -203,7 +209,7 @@ def stock_unlinked_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str
 
 class LinkSaleBody(BaseModel):
     product_id: int
-    price_eur: float = Field(..., ge=0, lt=1_000_000)
+    price_eur: float = Field(..., gt=0, lt=1_000_000)
     qty: int = Field(1, ge=1, le=1000)
 
 

@@ -915,7 +915,7 @@ def _alert_send_failed(msg_id: int, detail: str) -> None:
     telegram_bot.run_in_background(
         telegram_bot.notify,
         f"🟥 <b>Письмо не отправлено</b> (отложенная отправка): {telegram_bot._html(detail)[:300]}",
-        f"review_{msg_id}", "📋 Открыть", "send_failed")
+        f"review_{msg_id}", "📋 Открыть", "send_failed", True)
 
 
 def _fire_queued_send(msg_id: int) -> None:
@@ -1101,13 +1101,13 @@ def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[st
 
 
 class SoldBody(BaseModel):
-    price_eur: float = Field(..., ge=0, lt=1000000)
+    price_eur: float = Field(..., gt=0, lt=1000000)
     close_other_threads_for_ad: bool = False
 
 
 class ThreadSoldBody(BaseModel):
     # Цена обязательна (склад/прибыль); фронт предзаполняет из GET /threads/{id}/sale-price
-    price_eur: float = Field(..., ge=0, lt=1000000)
+    price_eur: float = Field(..., gt=0, lt=1000000)
     note: str = Field("", max_length=500)
     close_other_threads_for_ad: bool = False
 
@@ -1154,10 +1154,11 @@ def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
                 db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
     finally:
         telegram_bot._release_lock(msg_id, actor)
+    # Продажа отдельной строкой (тред уже отвечен) живёт под своим тредом manual-… — склад пишем под ним
+    # и с source='manual', как его увидит sync_sales (иначе джоб списал бы товар второй раз)
     stock = _record_stock_sale(
-        price=float(price), thread_id=thread_id, msg_row=latest_in,
-        # продажа отдельной строкой: тред не «продан» в messages — sync_sales не должен её снимать
-        source="operator" if sale_ref else "thread", actor=actor)
+        price=float(price), thread_id=sale_ref["thread_id"] if sale_ref else thread_id, msg_row=latest_in,
+        source="manual" if sale_ref else "thread", actor=actor)
     return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price),
             "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref,
             "stock": stock}
@@ -1189,16 +1190,18 @@ def ma_sold(msg_id: int, body: SoldBody,
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
-    result = db.mark_thread_sold(
-        msg_id,
-        sold_price_eur=body.price_eur,
-        close_other_threads_for_ad=body.close_other_threads_for_ad,
-    )
+    try:
+        result = db.mark_thread_sold(
+            msg_id,
+            sold_price_eur=body.price_eur,
+            close_other_threads_for_ad=body.close_other_threads_for_ad,
+        )
+    finally:
+        telegram_bot._release_lock(msg_id, actor)
     sold_row = db.get_message(msg_id)
     stock = _record_stock_sale(price=float(body.price_eur), thread_id=sold_row["gmail_thread_id"] or "",
                                msg_row=sold_row, source="thread", actor=actor) \
         if sold_row is not None and sold_row["gmail_thread_id"] else None
-    telegram_bot._release_lock(msg_id, actor)
     return {
         "ok": True,
         "status": "skipped_sold",
