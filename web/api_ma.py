@@ -837,6 +837,47 @@ class SoldBody(BaseModel):
     close_other_threads_for_ad: bool = False
 
 
+class ThreadSoldBody(BaseModel):
+    # Нет цены — берём договорённую из сводки сделки, иначе цену объявления
+    price_eur: "float | None" = Field(None, ge=0, lt=1000000)
+    note: str = Field("", max_length=500)
+    close_other_threads_for_ad: bool = False
+
+
+@router.post("/threads/{thread_id}/sold")
+def ma_thread_sold(thread_id: str, body: "ThreadSoldBody | None" = None,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """«Продано» на любом треде — с черновиком или без (QA S-01: раньше только через черновик)."""
+    b = body or ThreadSoldBody()
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    latest_in = next((r for r in reversed(history) if r["direction"] == "in"), None)
+    if latest_in is None:
+        raise HTTPException(404, "no incoming message in thread")
+    price = b.price_eur
+    source = "operator"
+    if price is None:
+        brief = _parse_deal_brief(latest_in["deal_brief_json"] if "deal_brief_json" in latest_in.keys() else None)
+        price = (brief or {}).get("negotiated_price_eur")
+        source = "deal_brief"
+        if not price:
+            price, source = _parse_listed_price_eur(latest_in["ad_price"]), "ad_price"
+    if not price:
+        raise HTTPException(400, "Укажите цену продажи — в переписке и объявлении её нет")
+    msg_id = latest_in["id"]
+    actor = actor_from_user(user)
+    _claim_or_409(msg_id, actor)
+    result = db.mark_thread_sold(msg_id, sold_price_eur=float(price),
+                                 close_other_threads_for_ad=b.close_other_threads_for_ad)
+    if b.note.strip():
+        prev = (latest_in["extra_notes"] if "extra_notes" in latest_in.keys() else None) or ""
+        db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
+    telegram_bot._release_lock(msg_id, actor)
+    return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price), "price_source": source,
+            "msg_id": msg_id, "closed_other_threads": result["closed_other_threads"]}
+
+
 @router.post("/messages/{msg_id}/sold")
 def ma_sold(msg_id: int, body: SoldBody,
             user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
@@ -1273,6 +1314,8 @@ def _period_window(period: str, *, custom_from: "str | None", custom_to: "str | 
     """ISO-границы для фильтра period. Возвращает (from_iso, to_iso) или (None, None) для all."""
     if period == "all":
         return (custom_from, custom_to)
+    if period == "today":
+        return berlin_day_bounds()  # те же границы, что «продано сегодня» в Обзоре
     now = _dt.utcnow()
     if period == "week":
         start = now - _td(days=now.weekday(), hours=now.hour, minutes=now.minute,
@@ -1317,7 +1360,7 @@ def ma_sales(
     user: dict = Depends(verify_init_data_dep),
 ) -> dict[str, Any]:
     """Все продажи (in-one-pot из всех аккаунтов) + сводка + breakdown по периоду."""
-    period = period if period in {"all", "week", "month", "year", "custom"} else "all"
+    period = period if period in {"all", "today", "week", "month", "year", "custom"} else "all"
     group_by = group_by if group_by in {"day", "week", "month", "year"} else "month"
     period_from, period_to = _period_window(period, custom_from=from_, custom_to=to_)
 
@@ -1441,6 +1484,41 @@ def ma_detection_apply(detection_id: int, body: DetectionApplyBody,
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True, **applied}
+
+
+class AcceptConfidentBody(BaseModel):
+    # 'high' — только высокая уверенность; 'medium' — high + medium
+    min_confidence: str = "high"
+
+    @field_validator("min_confidence")
+    @classmethod
+    def _check_conf(cls, v: str) -> str:
+        if v not in _CONFIDENCE_RANK or v == "low":
+            raise ValueError("min_confidence: 'high' или 'medium'")
+        return v
+
+
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+@router.post("/detected-sales/accept-confident")
+def ma_detections_accept_confident(body: "AcceptConfidentBody | None" = None,
+                                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Принять разом все найденные продажи с уверенностью не ниже порога (цена — найденная)."""
+    min_rank = _CONFIDENCE_RANK[(body or AcceptConfidentBody()).min_confidence]
+    applied: list[int] = []
+    failed: list[dict[str, Any]] = []
+    for r in db.list_pending_detections():
+        if _CONFIDENCE_RANK.get(r["confidence"], -1) < min_rank:
+            continue
+        try:
+            db.apply_detection_to_messages(r["id"])
+            applied.append(r["id"])
+        except ValueError as e:
+            failed.append({"id": r["id"], "error": str(e)})
+    logger.info("accept-confident: принято %d, не применено %d (оператор %s)",
+                len(applied), len(failed), actor_from_user(user))
+    return {"ok": True, "applied": applied, "failed": failed}
 
 
 @router.post("/detected-sales/{detection_id}/reject", status_code=204)
@@ -1571,6 +1649,28 @@ def ma_settings_post(body: SettingPostBody,
     return {"ok": True, "key": body.key, "value": body.value}
 
 
+def berlin_day_bounds(day_offset: int = 0) -> "tuple[str, str]":
+    """[начало, конец) календарного дня по Europe/Berlin как naive-UTC ISO (формат БД).
+    day_offset=-1 — вчера. Один источник «сегодня» для Обзора, Продаж и бота."""
+    import zoneinfo
+    from datetime import timedelta, timezone
+    tz = zoneinfo.ZoneInfo("Europe/Berlin")
+    start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_local = start_local + timedelta(days=day_offset)
+    # Арифметика aware-datetime с ZoneInfo — по «настенному» времени: +1 день = следующая
+    # полночь по Берлину и в дни перевода часов (сутки 23/25 ч)
+    end_local = start_local + timedelta(days=1)
+    to_utc = lambda d: d.astimezone(timezone.utc).replace(tzinfo=None).isoformat()  # noqa: E731
+    return to_utc(start_local), to_utc(end_local)
+
+
+def _sales_summary(period_from: "str | None", period_to: "str | None") -> dict[str, Any]:
+    """Продажи за период — через db.list_sales (тот же источник, что экран «Продажи»)."""
+    rows = db.list_sales(period_from=period_from, period_to=period_to, account_id=None, query=None)
+    prices = [float(r["sold_price_eur"]) for r in rows if r.get("sold_price_eur") is not None]
+    return {"count": len(rows), "total_eur": round(sum(prices), 2) if prices else 0.0}
+
+
 @router.get("/dashboard")
 def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сводный дашборд: pipeline-счётчики, сегодня, баланс API, продажи 7/30д."""
@@ -1593,22 +1693,20 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
         ap_active = conn.execute(
             "SELECT COUNT(*) AS c FROM thread_autopilot WHERE active=1"
         ).fetchone()["c"]
+        # «Сегодня» — по Берлину (оператор там), границы в UTC как в БД
+        t0, t1 = berlin_day_bounds()
         new_today = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE direction='in' "
-            "AND date(created_at)=date('now')"
+            "AND created_at >= ? AND created_at < ?", (t0, t1)
         ).fetchone()["c"]
         sent_today = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
-            "AND date(COALESCE(sent_at, created_at))=date('now')"
+            "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?", (t0, t1)
         ).fetchone()["c"]
         # Реплики продавца, написанные на сайте Kleinanzeigen (импорт) — не «отправил бот»
         sent_external_today = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE status='sent_external' "
-            "AND date(COALESCE(sent_at, created_at))=date('now')"
-        ).fetchone()["c"]
-        sold_today = conn.execute(
-            "SELECT COUNT(*) AS c FROM ad_briefs WHERE sold_at IS NOT NULL "
-            "AND date(sold_at)=date('now')"
+            "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?", (t0, t1)
         ).fetchone()["c"]
         burn_row = conn.execute(
             "SELECT COALESCE(SUM(cost_usd),0) AS s FROM messages "
@@ -1637,23 +1735,13 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
 
     # --- продажи 7д / 30д ---
     def _sales_window(days: int) -> dict[str, Any]:
-        frm = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        try:
-            srows = db.list_sales(period_from=frm, period_to=None, account_id=None, query=None)
-        except Exception:
-            srows = []
-        prices = []
-        for r in srows:
-            v = r.get("sold_price_eur") if hasattr(r, "get") else r["sold_price_eur"]
-            if v is not None:
-                prices.append(float(v))
-        return {"count": len(srows), "total_eur": round(sum(prices), 2) if prices else 0.0}
+        return _sales_summary((datetime.utcnow() - timedelta(days=days)).isoformat(), None)
 
     return {
         "pipeline": {"red": red, "green": green, "drafts": drafts,
                      "autopilot_active": ap_active},
         "today": {"new": new_today, "sent": sent_today, "sent_external": sent_external_today,
-                  "sold": sold_today},
+                  "sold": _sales_summary(t0, t1)["count"]},
         "api_balance": {"snapshot_usd": snapshot_usd, "remaining_usd": remaining,
                         "burn_per_day_usd": burn_per_day, "days_remaining": days_remaining},
         "sales_7d": _sales_window(7),
