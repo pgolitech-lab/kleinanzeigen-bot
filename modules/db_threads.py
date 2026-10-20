@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn
+from database import DB_PATH, get_conn, norm_name, transaction
 
 # --- CLOSED THREADS ---
 
@@ -154,23 +154,17 @@ def upsert_negotiation_state(gmail_thread_id: str, **fields: Any) -> None:
         return
     known = {k: v for k, v in fields.items() if k in _NEG_STATE_COLS}
     now = datetime.utcnow().isoformat()
+    # Один атомарный UPSERT вместо INSERT OR IGNORE + UPDATE на каждую колонку.
+    cols = list(known)
+    insert_cols = ", ".join(["gmail_thread_id", "updated_at", *cols])
+    placeholders = ", ".join("?" * (2 + len(cols)))
+    set_sql = ", ".join([*(f"{c} = excluded.{c}" for c in cols), "updated_at = excluded.updated_at"])
     with get_conn() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO negotiation_state (gmail_thread_id, updated_at) "
-            "VALUES (?, ?)",
-            (gmail_thread_id, now),
+            f"INSERT INTO negotiation_state ({insert_cols}) VALUES ({placeholders}) "
+            f"ON CONFLICT(gmail_thread_id) DO UPDATE SET {set_sql}",
+            (gmail_thread_id, now, *known.values()),
         )
-        for col, val in known.items():
-            conn.execute(
-                f"UPDATE negotiation_state SET {col} = ?, updated_at = ? "
-                "WHERE gmail_thread_id = ?",
-                (val, now, gmail_thread_id),
-            )
-        if not known:
-            conn.execute(
-                "UPDATE negotiation_state SET updated_at = ? WHERE gmail_thread_id = ?",
-                (now, gmail_thread_id),
-            )
 
 
 def record_our_offer(gmail_thread_id: str, offer_eur: float) -> None:
@@ -203,22 +197,23 @@ def set_thread_flags(
     """Upsert флаги треда. Передавай только те поля, что нужно изменить."""
     if not gmail_thread_id:
         return
+    fields: dict[str, Any] = {}
+    if is_pinned is not None:
+        fields["is_pinned"] = is_pinned
+    if operator_unread is not None:
+        fields["operator_unread"] = operator_unread
     now = datetime.utcnow().isoformat()
+    # Один атомарный UPSERT: новые строки получают DEFAULT 0 для непереданных флагов.
+    cols = list(fields)
+    insert_cols = ", ".join(["gmail_thread_id", "updated_at", *cols])
+    placeholders = ", ".join("?" * (2 + len(cols)))
+    set_sql = ", ".join([*(f"{c} = excluded.{c}" for c in cols), "updated_at = excluded.updated_at"])
     with get_conn() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO thread_flags (gmail_thread_id, updated_at) VALUES (?, ?)",
-            (gmail_thread_id, now),
+            f"INSERT INTO thread_flags ({insert_cols}) VALUES ({placeholders}) "
+            f"ON CONFLICT(gmail_thread_id) DO UPDATE SET {set_sql}",
+            (gmail_thread_id, now, *fields.values()),
         )
-        if is_pinned is not None:
-            conn.execute(
-                "UPDATE thread_flags SET is_pinned=?, updated_at=? WHERE gmail_thread_id=?",
-                (is_pinned, now, gmail_thread_id),
-            )
-        if operator_unread is not None:
-            conn.execute(
-                "UPDATE thread_flags SET operator_unread=?, updated_at=? WHERE gmail_thread_id=?",
-                (operator_unread, now, gmail_thread_id),
-            )
 
 
 # --- PROCESSED MESSAGES (orphan-recovery support) ---
@@ -283,7 +278,8 @@ def append_extra_note(message_id: int, note: str) -> None:
         return
     timestamp = datetime.utcnow().strftime("%H:%M")
     new_line = f"{timestamp} {note}"
-    with get_conn() as conn:
+    # Read-modify-write под блокировкой записи — параллельная заметка не потеряется.
+    with transaction() as conn:
         row = conn.execute(
             "SELECT extra_notes FROM messages WHERE id = ?", (message_id,),
         ).fetchone()
@@ -373,12 +369,14 @@ def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
                AND status IN ('sent', 'sent_debug')
                AND sent_at IS NOT NULL
         ),
+        -- MAX() OVER вместо коррелированного подзапроса по CTE (тот был O(N²)).
+        -- При равенстве времени остаются все «последние» события, как и раньше.
+        ranked AS (
+            SELECT e.*, MAX(e.at_time) OVER (PARTITION BY e.gmail_thread_id) AS max_at
+              FROM events e
+        ),
         last_event AS (
-            SELECT e1.* FROM events e1
-             WHERE e1.at_time = (
-                SELECT MAX(e2.at_time) FROM events e2
-                 WHERE e2.gmail_thread_id = e1.gmail_thread_id
-             )
+            SELECT id, gmail_thread_id, at_time, kind FROM ranked WHERE at_time = max_at
         )
         SELECT m.* FROM messages m
         JOIN last_event le ON m.id = le.id
@@ -480,25 +478,33 @@ def list_clients() -> list[sqlite3.Row]:
     """Список уникальных покупателей с агрегатами: сколько объявлений, сообщений, треды,
     последняя активность, последний статус, стоимость API.
     """
+    # Один проход оконными функциями вместо двух коррелированных подзапросов на
+    # каждого клиента. display_name / last_status — по последнему id среди ВСЕХ
+    # строк клиента (любое direction), агрегаты — только по входящим, как раньше.
     sql = """
+        WITH b AS (
+            SELECT buyer_name, direction, ad_id, gmail_thread_id, created_at, cost_usd,
+                   status, buyer_display_name,
+                   ROW_NUMBER() OVER (PARTITION BY buyer_name ORDER BY id DESC) AS rn,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY buyer_name
+                       ORDER BY (buyer_display_name IS NULL), id DESC
+                   ) AS rn_dn
+              FROM messages
+             WHERE buyer_name IS NOT NULL AND buyer_name != ''
+        )
         SELECT
-            m.buyer_name AS email,
-            (SELECT buyer_display_name FROM messages s
-             WHERE s.buyer_name = m.buyer_name
-               AND s.buyer_display_name IS NOT NULL
-             ORDER BY s.id DESC LIMIT 1) AS display_name,
-            COUNT(DISTINCT m.ad_id) AS ad_count,
-            COUNT(DISTINCT m.gmail_thread_id) AS thread_count,
-            COUNT(*) AS msg_count,
-            MAX(m.created_at) AS last_at,
-            (SELECT status FROM messages s
-             WHERE s.buyer_name = m.buyer_name
-             ORDER BY s.id DESC LIMIT 1) AS last_status,
-            COALESCE(SUM(m.cost_usd), 0) AS total_cost
-        FROM messages m
-        WHERE m.buyer_name IS NOT NULL AND m.buyer_name != ''
-          AND m.direction = 'in'
-        GROUP BY m.buyer_name
+            buyer_name AS email,
+            MAX(CASE WHEN rn_dn = 1 THEN buyer_display_name END) AS display_name,
+            COUNT(DISTINCT CASE WHEN direction = 'in' THEN ad_id END) AS ad_count,
+            COUNT(DISTINCT CASE WHEN direction = 'in' THEN gmail_thread_id END) AS thread_count,
+            SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) AS msg_count,
+            MAX(CASE WHEN direction = 'in' THEN created_at END) AS last_at,
+            MAX(CASE WHEN rn = 1 THEN status END) AS last_status,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN cost_usd END), 0) AS total_cost
+        FROM b
+        GROUP BY buyer_name
+        HAVING SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) > 0
         ORDER BY last_at DESC
     """
     with get_conn() as conn:
@@ -509,40 +515,65 @@ def find_related_inquiries(
     buyer_email: Optional[str],
     exclude_thread_id: Optional[str] = None,
     limit: int = 10,
+    *,
+    display_name: Optional[str] = None,
+    account_id: Optional[int] = None,
 ) -> list[sqlite3.Row]:
-    """Найти ДРУГИЕ треды того же клиента — по email (buyer_name).
+    """Найти ДРУГИЕ треды того же клиента.
 
-    Раньше матчили по buyer_display_name, из-за чего однофамильцы
-    («Hans», «Peter») склеивались в одного человека (Bug 8). Email
-    relay-адреса — надёжный идентификатор конкретного покупателя.
+    Уровень 1 (точно, maybe_same=0): тот же email (buyer_name). Раньше матчили по
+    buyer_display_name, из-за чего однофамильцы склеивались (Bug 8).
+    Уровень 2 (возможно, maybe_same=1): relay-email Kleinanzeigen живёт на паре
+    «покупатель + объявление», поэтому тот же человек по другому объявлению
+    приходит с НОВЫМ email. Ловим его по нормализованному buyer_display_name
+    (norm_name) в ТОМ ЖЕ аккаунте. Это догадка — UI должен показывать её как
+    «возможно тот же клиент».
 
-    Возвращает по одной row на gmail_thread_id (последний incoming в треде),
-    отсортировано DESC по времени последнего события.
+    display_name / account_id берутся из аргументов, а если не заданы — из
+    последнего входящего треда exclude_thread_id.
+
+    Возвращает по одной row на gmail_thread_id (последний по id incoming в треде),
+    сначала точные, внутри — DESC по времени последнего события.
     """
     if not buyer_email or not buyer_email.strip():
         return []
-    sql = """
-    WITH last_in AS (
-        SELECT m.* FROM messages m
-        WHERE m.direction = 'in'
-          AND m.buyer_name = ?
-          AND m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
-          AND m.id = (
-              SELECT MAX(m2.id) FROM messages m2
-              WHERE m2.gmail_thread_id = m.gmail_thread_id
-                AND m2.direction = 'in'
-          )
-    )
-    SELECT * FROM last_in
-    WHERE 1=1
-    """
-    params: list[Any] = [buyer_email.strip()]
-    if exclude_thread_id:
-        sql += " AND gmail_thread_id != ?"
-        params.append(exclude_thread_id)
-    sql += " ORDER BY COALESCE(sent_at, created_at) DESC LIMIT ?"
-    params.append(limit)
+    email = buyer_email.strip()
     with get_conn() as conn:
+        if exclude_thread_id and (display_name is None or account_id is None):
+            cur = conn.execute(
+                "SELECT buyer_display_name, account_id FROM messages "
+                "WHERE gmail_thread_id = ? AND direction = 'in' "
+                "ORDER BY id DESC LIMIT 1",
+                (exclude_thread_id,),
+            ).fetchone()
+            if cur:
+                if display_name is None:
+                    display_name = cur["buyer_display_name"]
+                if account_id is None:
+                    account_id = cur["account_id"]
+        name_key = norm_name(display_name) if account_id is not None else None
+        sql = """
+        WITH last_ids AS (
+            SELECT id, ROW_NUMBER() OVER (
+                       PARTITION BY gmail_thread_id ORDER BY id DESC) AS rn
+              FROM messages
+             WHERE direction = 'in'
+               AND gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+        )
+        SELECT m.*,
+               CASE WHEN m.buyer_name = ? THEN 0 ELSE 1 END AS maybe_same
+          FROM messages m
+          JOIN last_ids r ON r.id = m.id AND r.rn = 1
+         WHERE (m.buyer_name = ?
+                OR (? IS NOT NULL AND m.account_id = ?
+                    AND norm_name(m.buyer_display_name) = ?))
+        """
+        params: list[Any] = [email, email, name_key, account_id, name_key]
+        if exclude_thread_id:
+            sql += " AND m.gmail_thread_id != ?"
+            params.append(exclude_thread_id)
+        sql += " ORDER BY maybe_same ASC, COALESCE(m.sent_at, m.created_at) DESC LIMIT ?"
+        params.append(limit)
         return conn.execute(sql, params).fetchall()
 
 
@@ -550,35 +581,49 @@ def list_threads_for_client(buyer_email: str) -> list[sqlite3.Row]:
     """Все треды конкретного покупателя (по buyer_name = email)."""
     if not buyer_email:
         return []
+    # msg_count/last_at — по строкам ЭТОГО клиента; last_status и поля объявления —
+    # по последней (по id) непустой строке всего треда, как было с подзапросами.
     sql = """
+        WITH mine AS (
+            SELECT gmail_thread_id,
+                   COUNT(*) AS msg_count,
+                   MAX(created_at) AS last_at
+              FROM messages
+             WHERE buyer_name = ?
+               AND gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+             GROUP BY gmail_thread_id
+        ),
+        t AS (
+            SELECT m.gmail_thread_id, m.status, m.ad_title, m.ad_id, m.ad_price,
+                   m.deal_brief_json,
+                   ROW_NUMBER() OVER w AS rn,
+                   ROW_NUMBER() OVER (PARTITION BY m.gmail_thread_id
+                       ORDER BY (m.ad_title IS NULL OR m.ad_title = ''), m.id DESC) AS rn_title,
+                   ROW_NUMBER() OVER (PARTITION BY m.gmail_thread_id
+                       ORDER BY (m.ad_id IS NULL OR m.ad_id = ''), m.id DESC) AS rn_ad,
+                   ROW_NUMBER() OVER (PARTITION BY m.gmail_thread_id
+                       ORDER BY (m.ad_price IS NULL OR m.ad_price = ''), m.id DESC) AS rn_price,
+                   ROW_NUMBER() OVER (PARTITION BY m.gmail_thread_id
+                       ORDER BY (m.deal_brief_json IS NULL OR m.deal_brief_json = ''), m.id DESC)
+                       AS rn_brief
+              FROM messages m
+              JOIN mine ON mine.gmail_thread_id = m.gmail_thread_id
+            WINDOW w AS (PARTITION BY m.gmail_thread_id ORDER BY m.id DESC)
+        )
         SELECT
-            m.gmail_thread_id AS thread_id,
-            COUNT(*) AS msg_count,
-            MAX(m.created_at) AS last_at,
-            (SELECT status FROM messages s
-             WHERE s.gmail_thread_id = m.gmail_thread_id
-             ORDER BY s.id DESC LIMIT 1) AS last_status,
-            (SELECT ad_title FROM messages s
-             WHERE s.gmail_thread_id = m.gmail_thread_id
-               AND ad_title IS NOT NULL AND ad_title != ''
-             ORDER BY s.id DESC LIMIT 1) AS ad_title,
-            (SELECT ad_id FROM messages s
-             WHERE s.gmail_thread_id = m.gmail_thread_id
-               AND ad_id IS NOT NULL AND ad_id != ''
-             ORDER BY s.id DESC LIMIT 1) AS ad_id,
-            (SELECT ad_price FROM messages s
-             WHERE s.gmail_thread_id = m.gmail_thread_id
-               AND ad_price IS NOT NULL AND ad_price != ''
-             ORDER BY s.id DESC LIMIT 1) AS ad_price,
-            (SELECT deal_brief_json FROM messages s
-             WHERE s.gmail_thread_id = m.gmail_thread_id
-               AND s.deal_brief_json IS NOT NULL AND s.deal_brief_json != ''
-             ORDER BY s.id DESC LIMIT 1) AS deal_brief_json
-        FROM messages m
-        WHERE m.buyer_name = ?
-          AND m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
-        GROUP BY m.gmail_thread_id
-        ORDER BY last_at DESC
+            mine.gmail_thread_id AS thread_id,
+            mine.msg_count,
+            mine.last_at,
+            MAX(CASE WHEN t.rn = 1 THEN t.status END) AS last_status,
+            MAX(CASE WHEN t.rn_title = 1 AND t.ad_title != '' THEN t.ad_title END) AS ad_title,
+            MAX(CASE WHEN t.rn_ad = 1 AND t.ad_id != '' THEN t.ad_id END) AS ad_id,
+            MAX(CASE WHEN t.rn_price = 1 AND t.ad_price != '' THEN t.ad_price END) AS ad_price,
+            MAX(CASE WHEN t.rn_brief = 1 AND t.deal_brief_json != ''
+                     THEN t.deal_brief_json END) AS deal_brief_json
+        FROM mine
+        JOIN t ON t.gmail_thread_id = mine.gmail_thread_id
+        GROUP BY mine.gmail_thread_id
+        ORDER BY mine.last_at DESC
     """
     with get_conn() as conn:
         return conn.execute(sql, (buyer_email,)).fetchall()
@@ -618,14 +663,17 @@ def pipeline_threads() -> list[sqlite3.Row]:
           FROM wait_threads
          WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
     ),
+    -- ROW_NUMBER() вместо коррелированного MAX по CTE. При равном времени
+    -- (на проде не встречается) детерминированно выигрывает 'out'.
     last_event AS (
-        SELECT e1.gmail_thread_id, e1.at_time AS last_event_at, e1.kind AS last_event_kind
-          FROM events e1
-         WHERE e1.at_time = (
-            SELECT MAX(e2.at_time) FROM events e2
-             WHERE e2.gmail_thread_id = e1.gmail_thread_id
-         )
-        GROUP BY e1.gmail_thread_id
+        SELECT gmail_thread_id, at_time AS last_event_at, kind AS last_event_kind
+          FROM (
+            SELECT e.*, ROW_NUMBER() OVER (
+                       PARTITION BY e.gmail_thread_id
+                       ORDER BY e.at_time DESC, e.kind DESC) AS rn
+              FROM events e
+          )
+         WHERE rn = 1
     ),
     counts AS (
         SELECT gmail_thread_id,
@@ -642,16 +690,18 @@ def pipeline_threads() -> list[sqlite3.Row]:
         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
         GROUP BY gmail_thread_id
     ),
+    -- Последний входящий треда: ROW_NUMBER по (created_at, id) — по индексу
+    -- (gmail_thread_id, direction, created_at). id — tiebreaker при равном времени.
+    last_in_ids AS (
+        SELECT id, ROW_NUMBER() OVER (
+                   PARTITION BY gmail_thread_id
+                   ORDER BY created_at DESC, id DESC) AS rn
+          FROM messages
+         WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+           AND direction = 'in'
+    ),
     last_in AS (
-        SELECT m.* FROM messages m
-        WHERE m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
-          AND m.direction = 'in'
-          AND m.created_at = (
-              SELECT MAX(m2.created_at) FROM messages m2
-              WHERE m2.gmail_thread_id = m.gmail_thread_id
-                AND m2.direction = 'in'
-          )
-        GROUP BY m.gmail_thread_id  -- в случае tie по created_at оставит одну
+        SELECT m.* FROM messages m JOIN last_in_ids r ON r.id = m.id AND r.rn = 1
     ),
     flags AS (
         SELECT gmail_thread_id,
@@ -669,11 +719,17 @@ def pipeline_threads() -> list[sqlite3.Row]:
            CASE WHEN COALESCE(c.real_sent_count, 0) > 0 THEN 1 ELSE 0 END  AS has_real_reply,
            CASE WHEN COALESCE(c.pending_drafts_count, 0) > 0 THEN 1 ELSE 0 END AS has_pending_draft,
            COALESCE(f.is_pinned, 0)       AS is_pinned,
-           COALESCE(f.operator_unread, 0) AS operator_unread
+           COALESCE(f.operator_unread, 0) AS operator_unread,
+           -- Автопилот прямо в строке (раньше API делал get_thread_autopilot на тред).
+           COALESCE(ta.active, 0)   AS autopilot_active,
+           ta.messages_sent         AS autopilot_messages_sent,
+           ta.floor_price_eur       AS autopilot_floor_price_eur,
+           ta.notify_mode           AS autopilot_notify_mode
     FROM last_in li
     LEFT JOIN counts c ON c.gmail_thread_id = li.gmail_thread_id
     LEFT JOIN last_event le ON le.gmail_thread_id = li.gmail_thread_id
     LEFT JOIN flags f ON f.gmail_thread_id = li.gmail_thread_id
+    LEFT JOIN thread_autopilot ta ON ta.gmail_thread_id = li.gmail_thread_id
     WHERE (COALESCE(c.any_sent_count, 0) > 0
            OR COALESCE(c.pending_drafts_count, 0) > 0
            OR li.status IN ('pending', 'new', 'edited', 'approved'))

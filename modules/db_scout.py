@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn
+from database import DB_PATH, get_conn, transaction
 
 # --- MARKET SCOUT: QUERIES ---
 
@@ -80,42 +80,60 @@ def scout_query_exists(kind: str, keywords: str, category: str) -> bool:
 
 # --- MARKET SCOUT: LISTINGS ---
 
+_SCOUT_COLS = ["kind", "title", "url", "price_eur", "price_raw", "negotiable",
+               "plz", "city", "bundesland", "year", "ez_raw", "mileage_km",
+               "fuel", "gearbox", "model_family", "part_type", "condition",
+               "description", "posted_raw", "shipping", "query_id"]
+
+# Один оператор: INSERT … ON CONFLICT. Отклонённые оператором (rejected=1) не
+# реактивируем — active для них не трогаем. RETURNING отличает вставку от
+# обновления: у новой строки first_seen_at == last_seen_at (обе = now).
+_UPSERT_SCOUT_SQL = (
+    f"INSERT INTO scout_listings (ad_id, {', '.join(_SCOUT_COLS)}, "
+    f"first_seen_at, last_seen_at, active) "
+    f"VALUES ({', '.join('?' * (len(_SCOUT_COLS) + 1))}, ?, ?, 1) "
+    f"ON CONFLICT(ad_id) DO UPDATE SET "
+    + ", ".join(f"{c} = excluded.{c}" for c in _SCOUT_COLS)
+    + ", last_seen_at = excluded.last_seen_at, "
+    "active = CASE WHEN COALESCE(scout_listings.rejected, 0) = 1 "
+    "THEN scout_listings.active ELSE 1 END "
+    "RETURNING first_seen_at = last_seen_at AS is_new"
+)
+
+
+def _upsert_scout_row(conn: sqlite3.Connection, listing: dict[str, Any], now: str) -> bool:
+    ad_id = str(listing.get("ad_id") or "").strip()
+    if not ad_id:
+        return False
+    vals = [listing.get(c) for c in _SCOUT_COLS]
+    row = conn.execute(_UPSERT_SCOUT_SQL, (ad_id, *vals, now, now)).fetchone()
+    return bool(row and row["is_new"])
+
+
 def upsert_scout_listing(listing: dict[str, Any]) -> bool:
     """UPSERT объявления по ad_id. Возвращает True если строка новая (insert).
 
     `listing` — dict с ключами-колонками scout_listings (без first/last_seen).
     first_seen_at ставится при первом появлении, last_seen_at обновляется всегда.
     """
-    ad_id = str(listing.get("ad_id") or "").strip()
-    if not ad_id:
-        return False
-    now = datetime.utcnow().isoformat()
-    cols = ["kind", "title", "url", "price_eur", "price_raw", "negotiable",
-            "plz", "city", "bundesland", "year", "ez_raw", "mileage_km",
-            "fuel", "gearbox", "model_family", "part_type", "condition",
-            "description", "posted_raw", "shipping", "query_id"]
-    vals = [listing.get(c) for c in cols]
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT rejected FROM scout_listings WHERE ad_id = ?", (ad_id,)
-        ).fetchone()
-        if existing:
-            # Отклонённые оператором не реактивируем (active остаётся 0).
-            is_rejected = bool(existing["rejected"]) if "rejected" in existing.keys() else False
-            active_set = "" if is_rejected else ", active = 1"
-            set_sql = ", ".join(f"{c} = ?" for c in cols)
-            conn.execute(
-                f"UPDATE scout_listings SET {set_sql}, last_seen_at = ?{active_set} WHERE ad_id = ?",
-                (*vals, now, ad_id),
-            )
-            return False
-        all_cols = ["ad_id"] + cols + ["first_seen_at", "last_seen_at", "active"]
-        placeholders = ", ".join("?" * len(all_cols))
-        conn.execute(
-            f"INSERT INTO scout_listings ({', '.join(all_cols)}) VALUES ({placeholders})",
-            (ad_id, *vals, now, now, 1),
-        )
-        return True
+        return _upsert_scout_row(conn, listing, datetime.utcnow().isoformat())
+
+
+def upsert_scout_listings(listings: list[dict[str, Any]]) -> list[bool]:
+    """Пачка UPSERT-ов в одной транзакции. Возвращает is_new для каждой строки
+    (в том же порядке). Строки без ad_id → False."""
+    now = datetime.utcnow().isoformat()
+    out: list[bool] = []
+    seen: set[str] = set()
+    with transaction() as conn:
+        for l in listings:
+            is_new = _upsert_scout_row(conn, l, now)
+            # Повтор того же ad_id в пачке: с общим now он снова выглядел бы новым.
+            ad_id = str(l.get("ad_id") or "").strip()
+            out.append(is_new and ad_id not in seen)
+            seen.add(ad_id)
+    return out
 
 
 # Эффективный вид объявления: результат Haiku-проверки имеет приоритет над
@@ -265,16 +283,19 @@ def scout_daily_stats(date_str: str) -> dict[str, dict[str, int]]:
     сигнал без похода на страницу объявления. Возвращает {"new": {kind: cnt}, "removed": {kind: cnt}}
     по ЭФФЕКТИВНОМУ виду (car/part/other).
     """
+    # Диапазон [день, следующий день) вместо substr(...) = день — индексируемо.
+    day_from = datetime.strptime(date_str, "%Y-%m-%d").date()
+    lo, hi = day_from.isoformat(), (day_from + timedelta(days=1)).isoformat()
     with get_conn() as conn:
         new_rows = conn.execute(
             f"SELECT {_EFF_KIND} AS k, COUNT(*) AS c FROM scout_listings "
-            f"WHERE substr(first_seen_at, 1, 10) = ? GROUP BY k",
-            (date_str,),
+            f"WHERE first_seen_at >= ? AND first_seen_at < ? GROUP BY k",
+            (lo, hi),
         ).fetchall()
         removed_rows = conn.execute(
             f"SELECT {_EFF_KIND} AS k, COUNT(*) AS c FROM scout_listings "
-            f"WHERE substr(deactivated_at, 1, 10) = ? GROUP BY k",
-            (date_str,),
+            f"WHERE deactivated_at >= ? AND deactivated_at < ? GROUP BY k",
+            (lo, hi),
         ).fetchall()
     return {
         "new": {r["k"]: r["c"] for r in new_rows},
@@ -357,7 +378,8 @@ def apply_scout_correction(
     if correct_kind not in ("remove", "car", "part", "other"):
         return {"ok": False, "error": "bad correct_kind"}
 
-    with get_conn() as conn:
+    # Лог правки и сама правка — атомарно.
+    with transaction() as conn:
         row = conn.execute(
             "SELECT ad_id, title, description, COALESCE(verified_kind, kind) AS eff_kind "
             "FROM scout_listings WHERE ad_id = ?", (ad_id,),

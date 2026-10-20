@@ -22,6 +22,8 @@ DEFAULT_SYSTEM_PROMPT = """Ты опытный продавец автозапч
 DEFAULTS: dict[str, str] = {
     "anthropic_api_key": "",
     "claude_model": "claude-sonnet-4-6",
+    # «Быстрая» модель: классификатор, auto-ack, перевод, lang-check.
+    "claude_fast_model": "claude-haiku-4-5",
     "telegram_bot_token": "",
     "telegram_chat_id": "242994225",
     # Comma-separated список chat_id которым разрешено пользоваться ботом.
@@ -140,6 +142,11 @@ def claude_model() -> str:
     return get("claude_model") or DEFAULTS["claude_model"]
 
 
+def claude_fast_model() -> str:
+    """Быстрая/дешёвая модель для служебных вызовов (Haiku)."""
+    return get("claude_fast_model") or DEFAULTS["claude_fast_model"]
+
+
 def telegram_bot_token() -> str:
     return get("telegram_bot_token") or ""
 
@@ -235,7 +242,8 @@ def system_prompt() -> str:
 def send_mode() -> str:
     """Режим отправки: production | redirect | disabled.
     Любое неизвестное значение трактуется как disabled (fail-safe)."""
-    val = (get("send_mode") or "disabled").strip().lower()
+    # Мимо кэша: оператор выключил отправку — это должно действовать сразу.
+    val = (db.get_setting_fresh("send_mode", DEFAULTS["send_mode"]) or "disabled").strip().lower()
     return val if val in ("production", "redirect", "disabled") else "disabled"
 
 

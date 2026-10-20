@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn, get_thread_autopilot, stop_thread_autopilot
+from database import DB_PATH, get_conn, get_thread_autopilot, stop_thread_autopilot, transaction
 from modules.db_threads import close_thread
 
 
@@ -18,22 +18,15 @@ def mark_ad_sold(ad_id: str, sold: bool = True) -> None:
     if not ad_id:
         return
     now = datetime.utcnow().isoformat() if sold else None
+    ts = datetime.utcnow().isoformat()
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT 1 FROM ad_briefs WHERE ad_id = ?", (ad_id,)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE ad_briefs SET sold_at = ?, updated_at = ? WHERE ad_id = ?",
-                (now, datetime.utcnow().isoformat(), ad_id),
-            )
-        else:
-            ts = datetime.utcnow().isoformat()
-            conn.execute(
-                "INSERT INTO ad_briefs (ad_id, brief_md, sold_at, created_at, updated_at) "
-                "VALUES (?, '', ?, ?, ?)",
-                (ad_id, now, ts, ts),
-            )
+        conn.execute(
+            "INSERT INTO ad_briefs (ad_id, brief_md, sold_at, created_at, updated_at) "
+            "VALUES (?, '', ?, ?, ?) "
+            "ON CONFLICT(ad_id) DO UPDATE SET sold_at = excluded.sold_at, "
+            "updated_at = excluded.updated_at",
+            (ad_id, now, ts, ts),
+        )
 
 
 def is_ad_sold(ad_id: str) -> bool:
@@ -181,8 +174,10 @@ def apply_detection_to_messages(
     """Применить detection к messages: помечает latest in-row треда как skipped_sold,
     записывает sold_price_eur (с возможностью override) + sold_at (detected или now),
     закрывает тред в closed_threads. Возвращает {thread_id, msg_id, price}.
+
+    Всё — одна транзакция: либо тред целиком помечен проданным и закрыт, либо ничего.
     """
-    with get_conn() as conn:
+    with transaction() as conn:
         det = conn.execute(
             "SELECT * FROM detected_sales WHERE id = ?", (detection_id,)
         ).fetchone()
@@ -226,9 +221,8 @@ def apply_detection_to_messages(
             "UPDATE detected_sales SET applied_at=? WHERE id=?",
             (datetime.utcnow().isoformat(), detection_id),
         )
-
-    # close_thread в своей транзакции
-    close_thread(thread_id, closed_by="detected-sale")
+        # close_thread присоединяется к этой же транзакции (то же соединение потока).
+        close_thread(thread_id, closed_by="detected-sale")
     return {"thread_id": thread_id, "msg_id": msg_id, "price": float(price)}
 
 
@@ -251,7 +245,7 @@ def add_manual_sale(
     import uuid
     now_iso = datetime.utcnow().isoformat()
     synthetic_thread = f"manual-{uuid.uuid4().hex[:16]}"
-    with get_conn() as conn:
+    with transaction() as conn:
         cur = conn.execute(
             "INSERT INTO messages (account_id, direction, status, gmail_thread_id, "
             "ad_title, ad_price, buyer_display_name, sold_price_eur, sold_at, "
@@ -261,8 +255,7 @@ def add_manual_sale(
              float(sold_price_eur), sold_at, notes, now_iso),
         )
         msg_id = cur.lastrowid
-
-    close_thread(synthetic_thread, closed_by="manual-sale")
+        close_thread(synthetic_thread, closed_by="manual-sale")
     return {"msg_id": msg_id, "thread_id": synthetic_thread}
 
 
@@ -290,8 +283,11 @@ def mark_thread_sold(
       - mark_ad_sold НЕ зовётся — товар может быть продан повторно следующему клиенту.
 
     Возвращает {"thread_id": ..., "ad_id": ..., "closed_other_threads": [thread_ids]}.
+
+    Всё — одна транзакция (BEGIN IMMEDIATE): при сбое посередине не остаётся
+    «продано, но тред открыт / автопилот работает».
     """
-    with get_conn() as conn:
+    with transaction() as conn:
         src = conn.execute(
             "SELECT id, gmail_thread_id, ad_id FROM messages WHERE id = ?", (msg_id,)
         ).fetchone()
@@ -328,17 +324,12 @@ def mark_thread_sold(
                     (other_thread,),
                 )
 
-    # Остановить автопилоты + закрыть треды ВНЕ транзакции (свои conn).
-    if thread_id:
-        ap = get_thread_autopilot(thread_id)
-        if ap and ap["active"]:
-            stop_thread_autopilot(thread_id, "sold")
-        close_thread(thread_id, closed_by="sold")
-    for other_thread in closed_other:
-        ap = get_thread_autopilot(other_thread)
-        if ap and ap["active"]:
-            stop_thread_autopilot(other_thread, "sold")
-        close_thread(other_thread, closed_by="sold")
+        # Остановить автопилоты + закрыть треды — в той же транзакции.
+        for t in ([thread_id] if thread_id else []) + closed_other:
+            ap = get_thread_autopilot(t)
+            if ap and ap["active"]:
+                stop_thread_autopilot(t, "sold")
+            close_thread(t, closed_by="sold")
 
     return {
         "thread_id": thread_id,
@@ -350,16 +341,29 @@ def mark_thread_sold(
 # --- LESSONS ---
 
 def add_lesson(**fields: Any) -> int:
-    """Сохранить пару (плохой_черновик, оператора_исправление). fields = столбцы lessons."""
+    """Сохранить пару (плохой_черновик, оператора_исправление). fields = столбцы lessons.
+
+    Если заданы source_type и source_ref — идемпотентно: повторный вызов с тем же
+    источником обновляет существующий урок (created_at сохраняется) и возвращает
+    его id, а не плодит дубль. Без источника — обычная вставка, как раньше.
+    """
     fields = {**fields, "created_at": datetime.utcnow().isoformat()}
+    if fields.get("source_ref") is not None:
+        fields["source_ref"] = str(fields["source_ref"])
     cols = ", ".join(fields.keys())
     placeholders = ", ".join("?" * len(fields))
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO lessons ({cols}) VALUES ({placeholders})",
-            tuple(fields.values()),
+    sql = f"INSERT INTO lessons ({cols}) VALUES ({placeholders})"
+    if fields.get("source_type") and fields.get("source_ref"):
+        upd = [c for c in fields if c not in ("created_at", "source_type", "source_ref")]
+        set_sql = ", ".join(f"{c} = excluded.{c}" for c in upd) or "source_ref = excluded.source_ref"
+        sql += (
+            " ON CONFLICT(source_type, source_ref) "
+            "WHERE source_type IS NOT NULL AND source_ref IS NOT NULL "
+            f"DO UPDATE SET {set_sql}"
         )
-        return cur.lastrowid
+    with get_conn() as conn:
+        row = conn.execute(sql + " RETURNING id", tuple(fields.values())).fetchone()
+        return row["id"]
 
 
 def find_relevant_lessons(
