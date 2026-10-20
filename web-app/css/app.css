@@ -1382,3 +1382,6 @@ em.good { color: var(--good); }
 @container (max-width: 460px) {
   .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.sold-hint { font-size: .8rem; color: var(--sub); margin-top: 6px; }
+.sold-hint:empty { display: none; }
+.sold-form .form-control { min-height: 46px; }
