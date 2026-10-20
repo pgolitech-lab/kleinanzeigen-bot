@@ -730,7 +730,7 @@ def translate_with_back(
 # ─────────────────────────── Регенерация черновика ───────────────────────────
 
 # Письма в этих статусах уже ушли/закрыты — их черновик не перегенерируем
-FINAL_STATUSES = ("sent", "sent_debug", "skipped", "skipped_sold", "not_sent_disabled", "sending")
+FINAL_STATUSES = ("sent", "sent_debug", "skipped", "skipped_sold", "not_sent_disabled", "sending", "send_queued")
 
 
 def is_final(msg_row: Any) -> bool:

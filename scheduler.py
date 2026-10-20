@@ -434,6 +434,20 @@ def build_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
+    # Итог дня в боте — 20:00 по Берлину (идея «ленивого продажника»)
+    _evening = getattr(telegram_bot, "send_evening_summary", None)
+    if _evening is not None:
+        sched.add_job(
+            _evening,
+            trigger="cron",
+            hour=20, minute=0,
+            timezone="Europe/Berlin",
+            id="evening_summary",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
     # Мониторинг ошибок процесса — alert в Telegram если были ERROR/Traceback
     sched.add_job(
         monitor_errors_job,
