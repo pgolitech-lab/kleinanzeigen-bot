@@ -341,16 +341,29 @@ def mark_thread_sold(
 # --- LESSONS ---
 
 def add_lesson(**fields: Any) -> int:
-    """Сохранить пару (плохой_черновик, оператора_исправление). fields = столбцы lessons."""
+    """Сохранить пару (плохой_черновик, оператора_исправление). fields = столбцы lessons.
+
+    Если заданы source_type и source_ref — идемпотентно: повторный вызов с тем же
+    источником обновляет существующий урок (created_at сохраняется) и возвращает
+    его id, а не плодит дубль. Без источника — обычная вставка, как раньше.
+    """
     fields = {**fields, "created_at": datetime.utcnow().isoformat()}
+    if fields.get("source_ref") is not None:
+        fields["source_ref"] = str(fields["source_ref"])
     cols = ", ".join(fields.keys())
     placeholders = ", ".join("?" * len(fields))
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO lessons ({cols}) VALUES ({placeholders})",
-            tuple(fields.values()),
+    sql = f"INSERT INTO lessons ({cols}) VALUES ({placeholders})"
+    if fields.get("source_type") and fields.get("source_ref"):
+        upd = [c for c in fields if c not in ("created_at", "source_type", "source_ref")]
+        set_sql = ", ".join(f"{c} = excluded.{c}" for c in upd) or "source_ref = excluded.source_ref"
+        sql += (
+            " ON CONFLICT(source_type, source_ref) "
+            "WHERE source_type IS NOT NULL AND source_ref IS NOT NULL "
+            f"DO UPDATE SET {set_sql}"
         )
-        return cur.lastrowid
+    with get_conn() as conn:
+        row = conn.execute(sql + " RETURNING id", tuple(fields.values())).fetchone()
+        return row["id"]
 
 
 def find_relevant_lessons(

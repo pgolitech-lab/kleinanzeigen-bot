@@ -215,6 +215,16 @@ def init_db() -> None:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lessons_ad ON lessons(ad_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lessons_account ON lessons(account_id)")
+        # Источник урока — для идемпотентности повторных прогонов разбора истории:
+        # source_type ('operator_edit' | 'history_review' | …) + source_ref (msg_id /
+        # gmail_thread_id строкой). Старые уроки — NULL, под уникальность не попадают.
+        _add_column_if_missing(conn, "lessons", "source_type", "TEXT")
+        _add_column_if_missing(conn, "lessons", "source_ref", "TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_lessons_source "
+            "ON lessons(source_type, source_ref) "
+            "WHERE source_type IS NOT NULL AND source_ref IS NOT NULL"
+        )
 
         # Индексы для частых запросов
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_account ON messages(account_id)")

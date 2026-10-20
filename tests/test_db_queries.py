@@ -536,3 +536,24 @@ def test_upsert_scout_listings_batch(tmp_db):
     assert res == [True, False, False, False, True]
     with tmp_db.get_conn() as conn:
         assert conn.execute("SELECT COUNT(*) FROM scout_listings").fetchone()[0] == 3
+
+
+# --- Уроки ------------------------------------------------------------------------
+
+def test_add_lesson_idempotent_by_source(tmp_db):
+    a = tmp_db.add_lesson(ad_id="ad1", good_answer_ru="v1",
+                          source_type="history_review", source_ref=42)
+    b = tmp_db.add_lesson(ad_id="ad1", good_answer_ru="v2",
+                          source_type="history_review", source_ref="42")
+    assert a == b
+    rows = tmp_db.list_lessons_for_ad("ad1")
+    assert len(rows) == 1 and rows[0]["good_answer_ru"] == "v2"
+    # другой тип источника с тем же ref — отдельный урок
+    c = tmp_db.add_lesson(ad_id="ad1", source_type="operator_edit", source_ref="42")
+    assert c != a
+
+
+def test_add_lesson_without_source_still_appends(tmp_db):
+    tmp_db.add_lesson(ad_id="ad2", good_answer_ru="x")
+    tmp_db.add_lesson(ad_id="ad2", good_answer_ru="x")
+    assert len(tmp_db.list_lessons_for_ad("ad2")) == 2
