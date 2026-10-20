@@ -881,7 +881,7 @@ def test_inventory_not_touched_before_seed(inc, tmp_db, monkeypatch):
     inc._process_incoming(ACC, _email(body=AD10))
     assert called == [] and len(inc._calls["send"]) == 1
     with tmp_db.get_conn() as conn:
-        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='inv_products'").fetchone() is None
+        assert conn.execute("SELECT COUNT(*) FROM inv_products").fetchone()[0] == 0  # таблицу создаёт init_db, до seed она пуста
 
 
 def test_inventory_sync_job_skips_before_seed(tmp_db, monkeypatch):
