@@ -65,12 +65,18 @@ export function start(mount) {
           showBack(navigateBack);
         }
         setTitle(r.title);
-        try {
-          r.screen.render(mount, r.params(m));
-        } catch (e) {
-          console.error("[router] render failed:", e);
-          setError(mount, e.message ?? String(e));
-        }
+        // Каждому переходу — свежий контейнер. Запоздавший ответ прошлого
+        // экрана (опрос, медленный fetch, LLM) пишет в отцепленный от DOM div и
+        // не перерисовывает чужой экран; экраны проверяют mount.isConnected,
+        // чтобы остановить таймеры и не захватывать локи впустую.
+        const screenMount = document.createElement("div");
+        mount.replaceChildren(screenMount);
+        Promise.resolve()
+          .then(() => r.screen.render(screenMount, r.params(m)))
+          .catch(e => {
+            console.error("[router] render failed:", e);
+            if (screenMount.isConnected) setError(screenMount, e.message ?? String(e));
+          });
         return;
       }
     }

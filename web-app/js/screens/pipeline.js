@@ -247,11 +247,22 @@ function renderWith(mount, data) {
   }
 }
 
+let _paintSeq = 0;
+
 async function paint(mount) {
   if (!_cachedData) {
+    const seq = ++_paintSeq;
+    let data;
     try {
-      _cachedData = await api("/api/ma/pipeline");
-    } catch (e) { setError(mount, e.message ?? String(e)); return; }
+      data = await api("/api/ma/pipeline");
+    } catch (e) {
+      if (mount.isConnected && seq === _paintSeq) setError(mount, e.message ?? String(e));
+      return;
+    }
+    // Ушли с экрана, пока шёл запрос, или уже ушёл более свежий запрос
+    // (таймер + ручное ↻) — устаревший ответ не рисуем и не кэшируем.
+    if (!mount.isConnected || seq !== _paintSeq) return;
+    _cachedData = data;
   }
   renderWith(mount, _cachedData);
 }
@@ -263,17 +274,21 @@ export async function render(mount, params) {
   _cachedData = null;
   setLoading(mount, "Загружаю входящие…");
   await paint(mount);
+  // Пока грузились, оператор ушёл на другой экран — таймеры не заводим
+  // (раньше hashchange-обработчик ещё не был повешен, и опрос продолжал
+  // перерисовывать #app поверх треда).
+  if (!mount.isConnected) return;
 
-  _timer = setInterval(async () => {
+  const refresh = async () => {
+    if (!mount.isConnected) { teardown(); return; }
     // не дёргаем список пока оператор выбирает карточки
     if (document.visibilityState === "visible" && !sel.active) {
       _cachedData = null;
       await paint(mount);
     }
-  }, REFRESH_MS);
-  _visHandler = async () => {
-    if (document.visibilityState === "visible" && !sel.active) { _cachedData = null; await paint(mount); }
   };
+  _timer = setInterval(refresh, REFRESH_MS);
+  _visHandler = refresh;
   document.addEventListener("visibilitychange", _visHandler);
   _hashHandler = () => {
     if (!location.hash.startsWith("#/pipeline") && location.hash !== "#/" && location.hash !== "") teardown();

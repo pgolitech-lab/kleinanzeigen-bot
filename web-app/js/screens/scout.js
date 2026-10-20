@@ -563,20 +563,33 @@ async function renderQueriesTab(container) {
   container.replaceChildren(root);
 }
 
+// Один активный опрос статуса; останавливается, когда statusEl ушёл из DOM
+// (сменили вкладку/экран). Раньше цепочка setTimeout жила вечно и каждое
+// «▶ Запустить» добавляло ещё одну.
+let _pollTimer = null;
 function pollStatus(statusEl) {
+  clearTimeout(_pollTimer);
+  _pollTimer = null;
+  if (!statusEl.isConnected) return;
+  const again = ms => { _pollTimer = setTimeout(() => pollStatus(statusEl), ms); };
   api("/api/ma/scout/status").then(s => {
+    if (!statusEl.isConnected) return;
     if (s.running) {
       statusEl.textContent = `⏳ идёт прогон… (машин ${s.counts.cars}, з/ч ${s.counts.parts})`;
-      setTimeout(() => pollStatus(statusEl), 5000);
+      again(5000);
     } else {
       // прогон завершён — сбросить кэши и перерисовать
       S.cars = null; S.parts = null;
       const sum = s.summary || {};
       statusEl.textContent = `✅ готово: машин ${s.counts.cars}, з/ч ${s.counts.parts}` +
         (sum.errors && sum.errors.length ? ` (ошибок ${sum.errors.length})` : "");
-      api("/api/ma/scout/overview").then(ov => { S.overview = ov; });
+      api("/api/ma/scout/overview").then(ov => { S.overview = ov; })
+        .catch(e => console.warn("[scout] overview refresh failed:", e));
     }
-  }).catch(() => setTimeout(() => pollStatus(statusEl), 8000));
+  }).catch(e => {
+    console.warn("[scout] status poll failed:", e);
+    if (statusEl.isConnected) again(8000);
+  });
 }
 
 // --- основной render ---
@@ -658,6 +671,6 @@ export async function render(mount, params) {
   S.city = { car: null, part: null };
   try {
     S.overview = await api("/api/ma/scout/overview");
-  } catch (e) { setError(mount, e.message ?? String(e)); return; }
-  renderShell(mount);
+  } catch (e) { if (mount.isConnected) setError(mount, e.message ?? String(e)); return; }
+  if (mount.isConnected) renderShell(mount);
 }
