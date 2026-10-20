@@ -575,6 +575,7 @@ async function kitSheet(productId, current, onDone) {
   });
   box.querySelector(".save-btn").addEventListener("click", async ev => {
     if (comps.some(c => !Number.isInteger(c.qty) || c.qty < 1)) { err.textContent = "Штук в комплекте — целое число от 1"; err.hidden = false; return; }
+    if (!comps.length && current.length && !(await confirmSheet("Убрать состав? Товар перестанет быть комплектом.", "Убрать"))) return;
     ev.currentTarget.disabled = true;
     try {
       await api(`/api/ma/stock/products/${productId}/kit`, { method: "PUT", body: { components: comps } });

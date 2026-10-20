@@ -16,9 +16,11 @@ function applyScheme() {
   } catch (e) { /* адрес не разобрать — оставляем тему клиента */ }
   document.documentElement.dataset.theme = scheme;
   try {
-    tg?.setHeaderColor?.("bg_color");
-    tg?.setBackgroundColor?.("bg_color");
-    tg?.setBottomBarColor?.("bg_color");
+    // тёмная: свой мягкий цвет вместо bg Telegram (может быть #000)
+    const c = scheme === "dark" ? "#1c2128" : "bg_color";
+    tg?.setHeaderColor?.(c);
+    tg?.setBackgroundColor?.(c);
+    tg?.setBottomBarColor?.(c);
   } catch (e) { /* старый клиент Telegram — без раскраски шапки */ }
 }
 
@@ -29,12 +31,39 @@ function isField(el) {
     el.isContentEditable);
 }
 
+// Экранная клавиатура: Telegram/браузер не всегда сжимают окно (iOS, Fold).
+// visualViewport даёт настоящую видимую высоту: поднимаем шторки (--kb) и ужимаем оболочку (--app-h).
+function syncViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement;
+  const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  if (kb > 80) {
+    root.style.setProperty("--kb", `${kb}px`);          // шторки поднимаем над клавиатурой
+    root.style.setProperty("--app-h", `${Math.round(vv.height)}px`);
+    root.style.setProperty("--kb-open", "1");
+    if (window.scrollY || vv.offsetTop) window.scrollTo(0, 0);
+  } else {
+    root.style.removeProperty("--kb");
+    root.style.removeProperty("--app-h");
+    root.style.removeProperty("--kb-open");
+  }
+}
+
 export function initTheme() {
   applyScheme();
+  window.visualViewport?.addEventListener("resize", syncViewport);
+  window.visualViewport?.addEventListener("scroll", syncViewport);
   tg?.onEvent?.("themeChanged", applyScheme);
   try { tg?.disableVerticalSwipes?.(); } catch (e) { /* Bot API < 7.7 */ }
   document.addEventListener("focusin", e => {
-    if (isField(e.target)) document.body.classList.add("kb");
+    if (!isField(e.target)) return;
+    document.body.classList.add("kb");
+    // после того как клавиатура выехала — показать поле над ней
+    const t = e.target;
+    [250, 600].forEach(ms => setTimeout(() => {
+      if (document.activeElement === t) t.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, ms));
   });
   document.addEventListener("focusout", e => {
     if (!isField(e.target)) return;

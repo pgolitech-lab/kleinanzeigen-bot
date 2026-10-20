@@ -11,7 +11,7 @@ const text = (node, sel, t) => { node.querySelector(sel).textContent = t ?? ""; 
 
 function adLine(ad, tag) {
   const a = el(`<a class="mk-ad" target="_blank" rel="noopener"><b class="mk-t"></b><small class="mk-m"></small></a>`);
-  if (ad.url) a.href = ad.url;
+  if (/^https:\/\//i.test(ad.url ?? "")) a.href = ad.url;
   text(a, ".mk-t", `${tag ? tag + " " : ""}${ad.title ?? ad.ad_id}`);
   text(a, ".mk-m", [ad.price_eur != null ? money(ad.price_eur) : "", ad.account, ad.city, ad.inquiries ? `писем: ${ad.inquiries}` : ""].filter(Boolean).join(" · "));
   return a;

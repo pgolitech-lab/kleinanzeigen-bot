@@ -99,6 +99,7 @@ async function quickInfoSheet(a) {
   } catch (e) {
     err.textContent = `Не удалось загрузить: ${e.message ?? e}`;
     err.hidden = false;
+    box.querySelector(".save-btn").disabled = true;  // иначе пустые поля затрут сохранённое
   }
   box.querySelector(".save-btn").addEventListener("click", async ev => {
     ev.currentTarget.disabled = true;
