@@ -902,11 +902,19 @@ def effective_floor(msg_row: Any) -> Optional[float]:
 
 
 def current_price(msg_row: Any) -> Optional[float]:
-    """Наша текущая цена: последняя озвученная в треде (deal_brief), иначе цена объявления."""
+    """Наша текущая цена: последняя ОТПРАВЛЕННАЯ клиенту в треде (deal_brief строк, ответ
+    которых ушёл, не позже текущего письма), иначе цена объявления. Неотправленные
+    черновики (в т.ч. самого письма) не считаются — клиент этих цен не видел."""
     import json as _json
     from modules import ad_brief
     tid = _rget(msg_row, "gmail_thread_id")
+    cur_id = _rget(msg_row, "id")
+    cur_at = _rget(msg_row, "created_at") or ""
     for r in reversed(db.thread_history(tid) if tid else []):
+        if r["id"] == cur_id or (cur_at and (_rget(r, "created_at") or "") > cur_at):
+            continue
+        if not (_rget(r, "status") in SENT_STATUSES or _rget(r, "sent_at")):
+            continue
         bj = _rget(r, "deal_brief_json")
         if not bj:
             continue
@@ -928,6 +936,11 @@ def _round_price(p: float) -> float:
 # ─────────────────────────── Варианты ответа под тон ───────────────────────────
 
 VARIANT_TONES = ("hold", "minus5", "floor", "decline")
+
+
+class SuggestError(ValueError):
+    """Подсказку построить нельзя по данным (письмо обработано, нет цены/факта, тоны
+    неприменимы) — api отдаёт 409/422 с этим текстом, а не 500."""
 
 _VARIANTS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -977,19 +990,32 @@ def generate_variants(
     """
     from modules.guardrails import floor_violation, language_verdict, text_violates_floor
     if is_final(msg_row):
-        raise RuntimeError(f"Письмо #{_rget(msg_row, 'id')} уже обработано — варианты не нужны")
-    tones = [t for t in (tones or list(VARIANT_TONES)) if t in VARIANT_TONES]
-    if not tones:
-        raise ValueError(f"нет известных тонов; допустимы: {', '.join(VARIANT_TONES)}")
+        raise SuggestError(f"Письмо #{_rget(msg_row, 'id')} уже обработано — варианты не нужны")
+    requested = list(dict.fromkeys(tones or VARIANT_TONES))  # без повторов, порядок сохраняем
+    unknown = [t for t in requested if t not in VARIANT_TONES]
+    if unknown:
+        raise SuggestError(f"неизвестные тоны: {', '.join(unknown)}; допустимы: {', '.join(VARIANT_TONES)}")
+    tones = requested
     floor = floor_eur if floor_eur is not None else effective_floor(msg_row)
     base = base_price_eur if base_price_eur is not None else current_price(msg_row)
+    dropped: list[dict[str, str]] = []
+    notes: list[str] = []
+    if base is not None and floor and base < floor:
+        # Уже названная цена ниже нынешнего минимума: «держим» минимум, а не поднимаем «уступкой»
+        notes.append(f"текущая цена {_fmt_eur(base)} € ниже минимума {_fmt_eur(floor)} € — держим минимум")
+        base = floor
     prices: dict[str, Optional[float]] = {"hold": base, "decline": None, "floor": floor}
     if base is not None:
         m5 = _round_price(base * 0.95)
         prices["minus5"] = max(m5, floor) if floor else m5
     else:
         prices["minus5"] = None
-    dropped: list[dict[str, str]] = []
+    if "minus5" in tones and prices["minus5"] is not None and prices["minus5"] >= (base or 0):
+        tones.remove("minus5")
+        dropped.append({"tone": "minus5", "reason": "уступка 5 % упирается в минимум или шаг округления"})
+    if "floor" in tones and floor is not None and base is not None and floor >= base:
+        tones.remove("floor")
+        dropped.append({"tone": "floor", "reason": "минимум совпадает с текущей ценой — это вариант «держим»"})
     if "floor" in tones and floor is None:
         tones.remove("floor")
         dropped.append({"tone": "floor", "reason": "минимум цены по объявлению не задан"})
@@ -997,7 +1023,7 @@ def generate_variants(
         tones.remove("minus5")
         dropped.append({"tone": "minus5", "reason": "текущая цена неизвестна"})
     if not tones:
-        raise RuntimeError("ни один тон не применим: " + "; ".join(d["reason"] for d in dropped))
+        raise SuggestError("ни один тон не применим: " + "; ".join(d["reason"] for d in dropped))
 
     tone_text = {
         "hold": f"hold — держим цену {_fmt_eur(prices['hold'])} € твёрдо, вежливо обосновываем.",
@@ -1031,7 +1057,8 @@ def generate_variants(
         user="\n".join(p for p in parts if p is not None), schema=_VARIANTS_SCHEMA,
         max_tokens=600 + 500 * len(tones), nonempty=("client_lang",),
     )
-    lang = (data["client_lang"] or client_lang or "de").strip().lower()
+    # Язык — из БД (что модель «назвала» свой ответ немецким, ещё не делает его языком клиента)
+    lang = (client_lang or data["client_lang"] or "de").strip().lower()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for v in data.get("variants") or []:
@@ -1040,19 +1067,24 @@ def generate_variants(
             continue
         seen.add(tone)
         text = (v.get("client_answer") or "").strip()
+        ru = (v.get("ru_answer") or "").strip()
         price = v.get("price_eur")
+        want = prices.get(tone)
         reason = None
-        if not text or not (v.get("ru_answer") or "").strip():
+        if not text or not ru:
             reason = "пустой текст"
-        elif floor and (floor_violation(price, floor) or text_violates_floor(text, floor)):
+        elif floor and (floor_violation(price, floor) or text_violates_floor(text, floor)
+                        or text_violates_floor(ru, floor)):
             reason = f"цена ниже минимума {_fmt_eur(floor)} €"
+        elif want is not None and (price is None or abs(float(price) - want) > 0.5):
+            reason = f"модель назвала {_fmt_eur(price)} € вместо {_fmt_eur(want)} €"
         elif language_verdict(text, lang) == "mismatch":
             reason = f"текст не на языке клиента ({lang})"
         if reason:
             logger.warning("варианты msg=%s: тон %s отброшен — %s", _rget(msg_row, "id"), tone, reason)
             dropped.append({"tone": tone, "reason": reason})
             continue
-        out.append({"tone": tone, "price_eur": price, "ru_answer": v["ru_answer"].strip(),
+        out.append({"tone": tone, "price_eur": want, "ru_answer": ru,
                     "client_answer": text, "ru_translation": (v.get("ru_translation") or "").strip()})
     for t in tones:
         if t not in seen:
@@ -1060,7 +1092,7 @@ def generate_variants(
     if not out:
         raise LLMResponseError("варианты ответа: ни один вариант не прошёл проверку — "
                                + "; ".join(f"{d['tone']}: {d['reason']}" for d in dropped))
-    return {"variants": out, "dropped": dropped, "base_price_eur": base, "floor_eur": floor,
+    return {"variants": out, "dropped": dropped, "notes": notes, "base_price_eur": base, "floor_eur": floor,
             "client_lang": lang, "tokens_in": meta["tokens_in"], "tokens_out": meta["tokens_out"],
             "cost_usd": meta["cost_usd"]}
 
@@ -1102,18 +1134,20 @@ def generate_quick_reply(
     Возвращает {client_answer, ru_translation, client_lang, kind, tokens_in, tokens_out, cost_usd}.
     """
     if kind not in QUICK_REPLY_KINDS:
-        raise ValueError(f"неизвестный kind={kind!r}; допустимы: {', '.join(QUICK_REPLY_KINDS)}")
+        raise SuggestError(f"неизвестный kind={kind!r}; допустимы: {', '.join(QUICK_REPLY_KINDS)}")
+    if is_final(msg_row):
+        raise SuggestError(f"Письмо #{_rget(msg_row, 'id')} уже обработано — для нового сообщения «Написать»")
     settings = {k: v for k, v in (account_settings or {}).items() if v not in (None, "")}
     if kind == "last_price":
         price = current_price(msg_row)
         if price is None:
-            raise ValueError("текущая цена по треду неизвестна — «последняя цена» невозможна")
+            raise SuggestError("текущая цена по треду неизвестна — «последняя цена» невозможна")
         floor = effective_floor(msg_row)
         if floor and price < floor:
-            raise ValueError(f"текущая цена {_fmt_eur(price)} € ниже минимума {_fmt_eur(floor)} €")
+            raise SuggestError(f"текущая цена {_fmt_eur(price)} € ниже минимума {_fmt_eur(floor)} €")
         settings["price"] = _fmt_eur(price)
     elif kind in ("delivery", "pickup", "payment") and not settings.get(kind):
-        raise ValueError(f"в настройках аккаунта не задано «{kind}» — не выдумываю условия")
+        raise SuggestError(f"в настройках аккаунта не задано «{kind}» — не выдумываю условия")
     task = QUICK_REPLY_KINDS[kind].format(**{k: settings.get(k, "") for k in ("price", "delivery", "pickup", "payment")})
     lang = (_rget(msg_row, "client_lang") or "de").lower()
     lang_name, _ = lang_display(lang)
@@ -1128,10 +1162,15 @@ def generate_quick_reply(
               f"ru_translation — буквальный перевод client_answer на русский.\n" + GERMAN_CLOSING_RULE),
         schema=_QUICK_REPLY_SCHEMA, max_tokens=400, nonempty=("client_answer", "ru_translation"),
     )
-    from modules.guardrails import language_verdict
+    from modules.guardrails import language_verdict, prices_in_text, text_violates_floor
     text = data["client_answer"].strip()
     if language_verdict(text, lang) == "mismatch":
         raise LLMResponseError(f"быстрый ответ {kind}: текст не на языке покупателя ({lang})")
+    floor = effective_floor(msg_row)
+    if floor and text_violates_floor(text, floor):
+        raise LLMResponseError(f"быстрый ответ {kind}: названа цена ниже минимума {_fmt_eur(floor)} €")
+    if kind == "last_price" and any(abs(p - float(settings["price"])) > 0.5 for p in prices_in_text(text)):
+        raise LLMResponseError(f"быстрый ответ: модель назвала не ту цену (нужно {settings['price']} €)")
     return {"client_answer": text, "ru_translation": data["ru_translation"].strip(), "client_lang": lang,
             "kind": kind, "tokens_in": meta["tokens_in"], "tokens_out": meta["tokens_out"],
             "cost_usd": meta["cost_usd"]}

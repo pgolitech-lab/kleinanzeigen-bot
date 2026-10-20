@@ -32,13 +32,16 @@ def floor_violation(
 
 # Цена в тексте клиенту: «80 €», «80,- €», «1.200 EUR», «€ 80», «80 Euro», а также
 # без валюты: «80,-», «für 80», «VB 80», «Preis 80» (та же логика, что в incoming).
-_NUM = r"(\d{1,3}(?:[.\s]\d{3})+|\d+)"
+_NUM = r"(\d{1,3}(?:[.,\s]\d{3})+|\d+)"
 _PRICE_RE = re.compile(
-    r"(?:€|EUR)\s*" + _NUM
-    + r"|" + _NUM + r"(?:[,.](?:\d{1,2}|-))?\s*(?:€|EUR\b|Euro\b)"
+    r"(?:€|EUR|\$|CHF)\s*" + _NUM
+    # диапазон «800-900 €» / «800 bis 900 Euro» — нижняя граница тоже цена
+    + r"|" + _NUM + r"\s*(?:[-–]|bis|und|to|до)\s*\d[\d.\s]*(?:€|EUR\b|Euros?\b|евро)"
+    + r"|" + _NUM + r"(?:[,.](?:\d{1,2}|-))?\s*(?:€|EUR\b|Euros?\b|евро|zł|CHF\b)"
+    + r"|\bза\s+" + _NUM + r"\b"
     + r"|" + _NUM + r",-"
     + r"|\b(?:für|fuer|for|VB|Preis|price|Festpreis)\b\s*:?\s*" + _NUM
-    + r"\b(?![.,]?\d|\s*(?:km|cm|mm|kg|Jahre|Stück|%))",
+    + r"\b(?![.,]?\d|\s*(?:km|cm|mm|kg|Jahre|Stück|%|Wochen?|Tage?|Monate?|Stunden?|Uhr|Min))",
     re.IGNORECASE,
 )
 
@@ -48,7 +51,7 @@ def prices_in_text(text: str) -> list[float]:
     out: list[float] = []
     for m in _PRICE_RE.finditer(text or ""):
         raw = next((g for g in m.groups() if g), "")
-        digits = re.sub(r"[.\s]", "", raw)
+        digits = re.sub(r"[.,\s]", "", raw)
         if digits.isdigit():
             out.append(float(digits))
     return out

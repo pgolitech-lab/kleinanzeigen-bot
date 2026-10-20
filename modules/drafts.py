@@ -162,7 +162,7 @@ def variants(msg_id: int, tones: "list[str] | None" = None) -> dict[str, Any]:
 
     Цены считает код, пол не нарушается (варианты ниже пола отбрасываются в `dropped`).
     Возвращает claude.generate_variants(...). Ошибки: LookupError (нет письма),
-    RuntimeError/ValueError (письмо уже обработано, тоны неприменимы),
+    claude.SuggestError (ValueError: письмо уже обработано, тоны неприменимы),
     llm.LLMError/LLMLimitError/LLMResponseError — текст пригоден для оператора.
     """
     msg = db.get_message(msg_id)
@@ -174,7 +174,7 @@ def variants(msg_id: int, tones: "list[str] | None" = None) -> dict[str, Any]:
 def quick_reply(msg_id: int, kind: str, account_settings: "dict[str, Any] | None" = None) -> dict[str, Any]:
     """Типовой короткий ответ (available / last_price / delivery / pickup / payment) на языке
     покупателя + RU-зеркало (Haiku). account_settings — факты продавца: delivery / pickup / payment.
-    Возвращает claude.generate_quick_reply(...); ValueError — не хватает факта/цены."""
+    Возвращает claude.generate_quick_reply(...); claude.SuggestError — не хватает факта/цены."""
     msg = db.get_message(msg_id)
     if msg is None:
         raise LookupError(f"письмо #{msg_id} не найдено")
@@ -185,19 +185,29 @@ def followup_ping(thread_id: str) -> dict[str, Any]:
     """Напоминание клиенту, который молчит после нашего ответа.
 
     Возвращает claude.generate_followup_ping(...) + days_silent, anchor_msg_id.
-    ValueError — если последним писал клиент (напоминать некому — нужно ответить).
+    claude.SuggestError (ValueError) — последним писал клиент или тред закрыт.
     """
     from datetime import datetime
     anchor, rows = _latest_incoming(thread_id)
     if anchor is None:
         raise LookupError(f"в треде {thread_id} нет входящих писем")
-    events = db.thread_events(thread_id)
-    if not events or events[-1]["kind"] != "out":
-        raise ValueError("последним писал клиент — нужен ответ, а не напоминание")
+    if claude.is_final(anchor) and anchor["status"] in ("skipped", "skipped_sold"):
+        raise claude.SuggestError("тред закрыт оператором — напоминание не нужно")
+    # События — только РЕАЛЬНО отправленное нами (черновик pending клиент не видел)
+    events: list[tuple[str, str]] = []
+    for r in rows:
+        if r["direction"] == "in" and r["de_client"]:
+            events.append((r["created_at"] or "", "in"))
+        if r["de_answer"] and (r["status"] in claude.SENT_STATUSES or r["sent_at"]):
+            events.append((r["sent_at"] or r["created_at"] or "", "out"))
+    events.sort()
+    if not events or events[-1][1] != "out":
+        raise claude.SuggestError("последним писал клиент — нужен ответ, а не напоминание")
     try:
-        last = datetime.fromisoformat((events[-1]["ts"] or "")[:19])
+        last = datetime.fromisoformat(events[-1][0][:19])
         days = max(0.0, (datetime.utcnow() - last).total_seconds() / 86400)
     except ValueError:
+        logger.warning("followup_ping %s: не разобрал дату %r — считаю 1 день", thread_id, events[-1][0])
         days = 1.0
     lang = anchor["client_lang"] or next((r["client_lang"] for r in reversed(rows) if r["client_lang"]), None) or "de"
     res = claude.generate_followup_ping(anchor, days_silent=days, client_lang=lang)

@@ -126,14 +126,19 @@ def generate_brief(
 
 
 def _parse_eur(text: Any) -> Optional[float]:
-    """«1.350 €» / «1350» / 1350.0 → 1350.0; иначе None."""
+    """«1.350 €» / «1,350 €» / «1350» / 1350.0 → 1350.0; «2 Stück à 400 €» → 400; иначе None."""
     if isinstance(text, (int, float)):
         return float(text) if text > 0 else None
     import re
-    m = re.search(r"\d{1,3}(?:[.\s]\d{3})+|\d+", str(text or ""))
+    from modules.guardrails import prices_in_text
+    raw = str(text or "")
+    found = prices_in_text(raw)  # число рядом с валютой надёжнее первого попавшегося
+    if found:
+        return found[0] if found[0] > 0 else None
+    m = re.search(r"(?<![\d-])(\d{1,3}(?:[.,\s]\d{3})+|\d+)(?![.,]\d{1,2}\b)", raw)
     if not m:
         return None
-    val = float(re.sub(r"[.\s]", "", m.group(0)))
+    val = float(re.sub(r"[.,\s]", "", m.group(1)))
     return val if val > 0 else None
 
 

@@ -117,3 +117,75 @@ def test_followup_ping_only_when_we_wrote_last(env):
     _msg(env, de_client="Hallo?", created_at="2026-10-02T10:00")
     with pytest.raises(ValueError, match="последним писал клиент"):
         drafts.followup_ping("t")
+
+
+def _v(tone, price, text, ru="ок"):
+    return {"tone": tone, "price_eur": price, "ru_answer": ru, "client_answer": text, "ru_translation": "x"}
+
+
+def test_followup_not_offered_when_our_reply_is_only_a_draft(env):
+    _msg(env, de_answer="Entwurf, nicht gesendet", status="pending")
+    with pytest.raises(claude.SuggestError, match="последним писал клиент"):
+        drafts.followup_ping("t")
+    assert _Fake.calls == []
+
+
+def test_current_price_ignores_unsent_drafts(env):
+    _msg(env, de_answer="1000 €", status="sent", sent_at="2026-10-01T11:00",
+         deal_brief_json=json.dumps({"negotiated_price_eur": 1000}))
+    cur = _msg(env, de_client="950?", created_at="2026-10-02T10:00", status="pending",
+               deal_brief_json=json.dumps({"negotiated_price_eur": 950}))
+    assert claude.current_price(env.get_message(cur)) == 1000
+
+
+def test_variants_base_below_floor_holds_floor_and_skips_uplifting_tones(env):
+    _brief(env, 900)
+    mid = _msg(env, ad_price="850 €")
+    env.update_message(mid, ad_price="850 €")
+    with patch.object(claude, "current_price", return_value=850.0):
+        _Fake.response = _resp({"client_lang": "de", "variants": [_v("hold", 900, "Preis bleibt 900 €. MfG")]})
+        res = drafts.variants(mid)
+    assert res["base_price_eur"] == 900 and res["notes"]
+    assert {d["tone"] for d in res["dropped"]} >= {"minus5", "floor"}
+    assert [v["tone"] for v in res["variants"]] == ["hold"]
+
+
+def test_variants_drop_wrong_price_and_wrong_language_by_db_lang(env):
+    _brief(env, 800)
+    mid = _msg(env, client_lang="ru", de_client="Скинете до 900?")
+    _Fake.response = _resp({"client_lang": "de", "variants": [
+        _v("hold", 1000, "Цена остаётся 1000 €, можно забрать в субботу.", "1000"),
+        _v("minus5", 970, "Могу отдать за 970 €, это лучшее предложение.", "970"),
+        _v("decline", None, "Der Preis ist fest, danke für Ihr Verständnis. MfG")]})
+    res = drafts.variants(mid, ["hold", "minus5", "decline"])
+    reasons = {d["tone"]: d["reason"] for d in res["dropped"]}
+    assert [v["tone"] for v in res["variants"]] == ["hold"] and res["variants"][0]["price_eur"] == 1000
+    assert "970" in reasons["minus5"] and "не на языке" in reasons["decline"]
+
+
+def test_variants_errors_are_suggest_errors(env):
+    mid = _msg(env)
+    with pytest.raises(claude.SuggestError, match="bogus"):
+        drafts.variants(mid, ["hold", "bogus"])
+    sent = _msg(env, status="sent", de_answer="x")
+    with pytest.raises(claude.SuggestError):
+        drafts.variants(sent)
+    _Fake.response = _resp({"client_lang": "de", "variants": []})
+    with pytest.raises(claude_utils.LLMResponseError):
+        drafts.variants(mid, ["decline"])
+
+
+def test_quick_reply_last_price_checks_model_number(env):
+    mid = _msg(env)
+    _Fake.response = _resp({"client_answer": "Mein letzter Preis ist 900 €. MfG", "ru_translation": "x"})
+    with pytest.raises(claude_utils.LLMResponseError, match="не ту цену"):
+        drafts.quick_reply(mid, "last_price")
+    _Fake.response = _resp({"client_answer": "Mein letzter Preis ist 1.000 €. MfG", "ru_translation": "x"})
+    assert drafts.quick_reply(mid, "last_price")["kind"] == "last_price"
+
+
+def test_floor_from_autopilot_raises_ad_min(env):
+    _brief(env, 800)
+    mid = _msg(env)
+    with patch.object(env, "get_thread_autopilot", return_value={"floor_price_eur": 950}):
+        assert claude.effective_floor(env.get_message(mid)) == 950
