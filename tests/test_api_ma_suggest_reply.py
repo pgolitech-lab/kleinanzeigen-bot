@@ -34,7 +34,7 @@ def client():
                       client_lang="de", de_client="Hello", ru_client="Привет",
                       ru_answer="", de_answer="", ru_translation="",
                       deal_brief_json=None, extra_notes=None, is_auto_ack=0,
-                      account_id=1, status="sent")
+                      account_id=1, status="pending", sent_at=None, sent_message_id=None)
         mdb.thread_history.return_value = [in_row]
         mdb.thread_events.return_value = []
         mdb.find_related_inquiries.return_value = []
@@ -54,7 +54,6 @@ def test_suggest_reply_success(client):
     body = res.json()
     assert body["header"]["thread_id"] == "abc"
     msched.regenerate_draft.assert_called_once_with(42, "regen")
-    mtb.broadcast_after_external_action.assert_called_once_with(42)
 
 
 def test_suggest_reply_404_no_incoming(client):
@@ -91,3 +90,67 @@ def test_suggest_reply_requires_auth(client):
     c, mdb, mtb, msched = client
     res = c.post("/api/ma/threads/abc/suggest-reply")
     assert res.status_code == 422
+
+
+def test_suggest_reply_never_touches_sent_row(client):
+    """Аудит №45: на треде без черновика «Предложить» затирал отправленный ответ (sent → edited)."""
+    c, mdb, mtb, msched = client
+    sent = _row(id=42, direction="in", gmail_thread_id="abc", status="sent",
+                sent_at="2026-10-19T10:00:00", sent_message_id="<x@y>")
+    mdb.thread_history.return_value = [sent]
+    res = c.post("/api/ma/threads/abc/suggest-reply",
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 409
+    msched.regenerate_draft.assert_not_called()
+    mdb.update_message.assert_not_called()
+
+
+def test_suggest_reply_skips_edited_after_send(client):
+    """Уже испорченная строка (edited, но с sent_at) тоже не перегенерируется."""
+    c, mdb, mtb, msched = client
+    broken = _row(id=42, direction="in", gmail_thread_id="abc", status="edited",
+                  sent_at="2026-10-19T10:00:00", sent_message_id=None)
+    mdb.thread_history.return_value = [broken]
+    res = c.post("/api/ma/threads/abc/suggest-reply",
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 409
+    msched.regenerate_draft.assert_not_called()
+
+
+def test_draft_endpoints_refuse_sent_row(client):
+    """regenerate/price/instruction/edit-*/translate-draft тоже не трогают отправленное."""
+    c, mdb, mtb, msched = client
+    mdb.get_message.return_value = _row(id=42, status="sent", sent_at="x", sent_message_id="<m>",
+                                        gmail_thread_id="abc", client_lang="de", de_answer="Hallo")
+    h = {"X-Telegram-Init-Data": make_init_data(TEST_USER)}
+    for path, body in [("regenerate", {"strategy": "regen"}), ("price", {"eur": 100}),
+                       ("instruction", {"text": "x"}), ("edit-ru", {"text": "x"}),
+                       ("edit-de", {"text": "x"}), ("translate-draft", {"text": "x"})]:
+        r = c.post(f"/api/ma/messages/42/{path}", json=body, headers=h)
+        assert r.status_code == 409, path
+    mdb.update_message.assert_not_called()
+
+
+def test_send_refuses_already_sent_row(client):
+    """Строка, испорченная до фикса (edited + sent_at), повторно клиенту не уходит."""
+    c, mdb, mtb, msched = client
+    mdb.get_message.return_value = _row(id=42, status="edited", sent_at="2026-10-19T10:00:00",
+                                        sent_message_id="<m>", gmail_thread_id="abc",
+                                        client_lang="de", de_answer="Hallo")
+    r = c.post("/api/ma/messages/42/send", json={"mode": "as_is"},
+               headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert r.status_code == 409
+    msched.send_one.assert_not_called()
+
+
+def test_suggest_allowed_after_skip(client):
+    """Оператор пропустил, потом передумал — черновик можно сделать."""
+    c, mdb, mtb, msched = client
+    skipped = _row(id=42, direction="in", gmail_thread_id="abc", status="skipped",
+                   sent_at=None, sent_message_id=None, ad_title="X", ad_price="1", ad_url=None,
+                   buyer_display_name="B", buyer_name="b@x.com", account_id=1)
+    mdb.thread_history.return_value = [skipped]
+    r = c.post("/api/ma/threads/abc/suggest-reply",
+               headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert r.status_code == 200
+    msched.regenerate_draft.assert_called_once_with(42, "regen")

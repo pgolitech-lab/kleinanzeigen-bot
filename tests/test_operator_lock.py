@@ -74,3 +74,31 @@ def test_remaining_min_decreases_over_time():
 
 def test_remaining_min_zero_when_no_lock():
     assert operator_lock.remaining_min(123) == 0
+
+
+def test_try_acquire_only_one_winner_across_threads():
+    """Два оператора жмут одновременно — лок получает ровно один."""
+    import threading
+    operator_lock.forget(777)
+    barrier = threading.Barrier(16)
+    results = []
+
+    def grab(i):
+        barrier.wait()
+        results.append(operator_lock.try_acquire(777, f"@op{i}"))
+
+    ts = [threading.Thread(target=grab, args=(i,)) for i in range(16)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert results.count(None) == 1
+    operator_lock.forget(777)
+
+
+def test_try_acquire_refreshes_own_lock():
+    operator_lock.forget(778)
+    assert operator_lock.try_acquire(778, "@a") is None
+    assert operator_lock.try_acquire(778, "@a") is None
+    assert operator_lock.try_acquire(778, "@b") == "@a"
+    operator_lock.forget(778)

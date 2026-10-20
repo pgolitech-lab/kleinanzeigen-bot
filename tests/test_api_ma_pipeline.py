@@ -46,7 +46,13 @@ def client():
         mdb.list_accounts.return_value = []
         mdb.get_thread_autopilot.return_value = None
         mdb.get_message.return_value = None
+        # Активные автопилоты — один запрос SELECT ... FROM thread_autopilot (по умолчанию нет)
+        conn = MagicMock()
+        conn.execute.return_value.fetchall.return_value = []
+        mdb.get_conn.return_value.__enter__.return_value = conn
         from web.app import app
+        from web.api_ma import invalidate_pipeline_cache
+        invalidate_pipeline_cache()  # кэш pipeline_threads живёт между тестами
         yield TestClient(app), mdb
 
 
@@ -101,16 +107,67 @@ def test_pipeline_serialises_required_fields(client):
 
 
 def test_pipeline_autopilot_flag_true_when_row_active(client):
+    """Без колонки autopilot_active — один запрос активных автопилотов на весь pipeline."""
     c, mdb = client
-    mdb.pipeline_threads.return_value = [_row(gmail_thread_id="ap_thread")]
-    autopilot_row = MagicMock()
-    autopilot_row.__getitem__.side_effect = {"active": 1}.__getitem__
-    autopilot_row.keys.return_value = ["active"]
-    mdb.get_thread_autopilot.return_value = autopilot_row
+    mdb.pipeline_threads.return_value = [_row(id=1, gmail_thread_id="ap_thread"),
+                                         _row(id=2, gmail_thread_id="other")]
+    conn = mdb.get_conn.return_value.__enter__.return_value
+    conn.execute.return_value.fetchall.return_value = [{"gmail_thread_id": "ap_thread"}]
     init = make_init_data(TEST_USER)
     res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
+    flags = {i["thread_id"]: i["is_autopilot"] for i in res.json()["red"]}
+    assert flags == {"ap_thread": True, "other": False}
+    assert conn.execute.call_count == 1  # не N+1
+    mdb.get_thread_autopilot.assert_not_called()
+
+
+def test_pipeline_autopilot_from_join_column(client):
+    """Если db отдаёт autopilot_active (LEFT JOIN) — отдельного запроса нет."""
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [_row(gmail_thread_id="ap", autopilot_active=1)]
+    init = make_init_data(TEST_USER)
+    res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
     assert res.json()["red"][0]["is_autopilot"] is True
+    mdb.get_conn.assert_not_called()
+
+
+def test_pipeline_truncates_ru_client(client):
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [_row(ru_client="слово  \n " * 200)]
+    init = make_init_data(TEST_USER)
+    preview = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init}).json()["red"][0]["ru_client"]
+    assert len(preview) <= 201 and preview.endswith("…") and "\n" not in preview
+
+
+def test_pipeline_etag_304(client):
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [_row()]
+    h = {"X-Telegram-Init-Data": make_init_data(TEST_USER)}
+    r1 = c.get("/api/ma/pipeline", headers=h)
+    etag = r1.headers["etag"]
+    r2 = c.get("/api/ma/pipeline", headers={**h, "If-None-Match": etag})
+    assert r2.status_code == 304 and r2.content == b""
+    # данные изменились (POST сбросил кэш) → новый ETag и 200
+    mdb.pipeline_threads.return_value = [_row(ad_title="другое")]
+    from web.api_ma import invalidate_pipeline_cache
+    invalidate_pipeline_cache()
+    r3 = c.get("/api/ma/pipeline", headers={**h, "If-None-Match": etag})
+    assert r3.status_code == 200 and r3.headers["etag"] != etag
+
+
+def test_dashboard_and_pipeline_share_one_query(client):
+    c, mdb = client
+    mdb.pipeline_threads.return_value = [_row()]
+    h = {"X-Telegram-Init-Data": make_init_data(TEST_USER)}
+    conn = mdb.get_conn.return_value.__enter__.return_value
+    conn.execute.return_value.fetchone.return_value = {"c": 0, "s": 0}
+    mdb.list_sales.return_value = []
+    with patch("web.api_ma.config") as mcfg:
+        mcfg.get.return_value = ""
+        assert c.get("/api/ma/pipeline", headers=h).status_code == 200
+        assert c.get("/api/ma/dashboard", headers=h).status_code == 200
+    assert mdb.pipeline_threads.call_count == 1
 
 
 def test_pipeline_requires_auth(client):

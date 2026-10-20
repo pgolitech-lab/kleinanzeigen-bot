@@ -144,3 +144,11 @@ def test_preview_endpoint_requires_auth(client):
     res = c.post("/api/ma/threads/abc/autopilot/preview",
                  json={"floor_eur": 1200, "notify_mode": "silent"})
     assert res.status_code == 422
+
+
+def test_deal_brief_from_prefers_nested():
+    from web.api_ma import _deal_brief_from
+    nested = {"summary_ru": "торгуется", "negotiated_price_eur": 900}
+    assert _deal_brief_from({"deal_brief": nested, "deal_summary_ru": "старое"}) == nested
+    flat = _deal_brief_from({"deal_summary_ru": "плоско", "negotiated_price_eur": 800})
+    assert flat["summary_ru"] == "плоско" and flat["negotiated_price_eur"] == 800

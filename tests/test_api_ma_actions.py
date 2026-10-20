@@ -57,10 +57,8 @@ def client():
         mdb.get_message.return_value = _full_msg_row()
         mdb.find_related_inquiries.return_value = []
         mdb.get_thread_autopilot.return_value = None
-        mtb._check_lock.return_value = None
-        mtb._acquire_lock.return_value = None
+        mtb._claim_lock.return_value = None
         mtb._release_lock.return_value = None
-        mtb.broadcast_after_external_action.return_value = None
         mol.state.return_value = ("@pgtest#999", 1700000000.0)
         mol.remaining_min.return_value = 5
         # db.get_conn() — контекст-менеджер; по умолчанию устаревших черновиков нет
@@ -81,7 +79,6 @@ def test_send_success(client):
     body = res.json()
     assert body["ok"] is True
     msched.send_one.assert_called_once_with(123)
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
     mtb._release_lock.assert_called_once_with(123)
 
 
@@ -156,6 +153,18 @@ def test_send_translate_mode_empty_translation_aborts(client):
     msched.send_one.assert_not_called()
 
 
+def test_send_translate_result_in_wrong_language_aborts(client):
+    """Перевод вернул кириллицу немецкому клиенту → 409, в БД и клиенту ничего не уходит."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "Здравствуйте, ещё доступно"}
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "translate", "text": "Здравствуйте, ещё доступно"},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 409
+    mdb.update_message.assert_not_called()
+    msched.send_one.assert_not_called()
+
+
 def test_send_rejects_unknown_mode(client):
     c, mdb, mtb, msched, mclaude = client
     init = make_init_data(TEST_USER)
@@ -168,7 +177,7 @@ def test_send_rejects_unknown_mode(client):
 
 def test_send_409_when_locked_by_other(client):
     c, mdb, mtb, msched, mclaude = client
-    mtb._check_lock.return_value = "@other#222"
+    mtb._claim_lock.return_value = "@other#222"
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/send",
                  headers={"X-Telegram-Init-Data": init})
@@ -209,9 +218,6 @@ def test_send_closes_stale_older_drafts(client):
     assert "UPDATE messages SET status='skipped'" in update_sql
     assert "id < ?" in update_sql
     assert update_args == ("abc", 123)
-    # мини-карточки закрытых черновиков обновляются
-    broadcast_ids = [c_.args[0] for c_ in mtb.broadcast_after_external_action.call_args_list]
-    assert 2122 in broadcast_ids and 2138 in broadcast_ids
 
 
 def test_send_without_stale_drafts_closes_nothing(client):
@@ -311,7 +317,7 @@ def test_translate_draft_empty_translation_500(client):
 
 def test_translate_draft_409_when_locked(client):
     c, mdb, mtb, msched, mclaude = client
-    mtb._check_lock.return_value = "@other#222"
+    mtb._claim_lock.return_value = "@other#222"
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/translate-draft",
                  json={"text": "Привет"},
@@ -402,7 +408,6 @@ def test_skip_success(client):
     assert body["ok"] is True
     assert body["status"] == "skipped"
     mdb.update_message.assert_called_once_with(123, status="skipped")
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
     mtb._release_lock.assert_called_once_with(123)
 
 
@@ -461,30 +466,28 @@ def test_action_endpoints_require_auth(client):
     assert res.status_code == 422
 
 def test_regenerate_valid_strategy(client):
+    """Регенерация идёт через scheduler.regenerate_draft (контекст: история, бриф, уроки)."""
     c, mdb, mtb, msched, mclaude = client
-    mclaude.regenerate_with_strategy.return_value = {
-        "ru_answer": "новый RU",
-        "client_answer": "neue DE",
-        "ru_translation": "новый back",
-        "deal_summary_ru": "обновлено",
-        "expected_next": "ждём",
-        "negotiated_price_eur": 1400,
-        "client_assessment": "серьёзный",
-    }
+    msched.regenerate_draft.return_value = {"kind": "regenerated", "result": {}}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/regenerate",
                  json={"strategy": "harsh"},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    body = res.json()
     # Возвращается полный review payload (как GET /messages/{id})
-    assert body["msg_id"] == 123
-    mclaude.regenerate_with_strategy.assert_called_once()
-    args, kwargs = mclaude.regenerate_with_strategy.call_args
-    assert args[1] == "harsh"
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
+    assert res.json()["msg_id"] == 123
+    msched.regenerate_draft.assert_called_once_with(123, "harsh")
+    mclaude.regenerate_with_strategy.assert_not_called()  # голый вызов без контекста — нет
     # Lock остаётся (intermediate)
     mtb._release_lock.assert_not_called()
+
+
+def test_regenerate_error_returns_500(client):
+    c, mdb, mtb, msched, mclaude = client
+    msched.regenerate_draft.return_value = {"kind": "error", "message": "LLM упал"}
+    res = c.post("/api/ma/messages/123/regenerate", json={"strategy": "harsh"},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 500 and "LLM упал" in res.text
 
 
 def test_regenerate_invalid_strategy_422(client):
@@ -499,7 +502,7 @@ def test_regenerate_invalid_strategy_422(client):
 
 def test_regenerate_409_when_locked(client):
     c, mdb, mtb, msched, mclaude = client
-    mtb._check_lock.return_value = "@other#222"
+    mtb._claim_lock.return_value = "@other#222"
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/regenerate",
                  json={"strategy": "harsh"},
@@ -524,8 +527,9 @@ def test_regenerate_all_5_valid_strategies(client):
 
 def test_edit_ru_success(client):
     c, mdb, mtb, msched, mclaude = client
-    # translate_only вызывается дважды: forward (ru→de) и back (de→ru)
-    mclaude.translate_only.side_effect = ["Neue DE Text", "Новый back"]
+    # перевод + обратный перевод — один вызов translate_with_back
+    mclaude.translate_with_back.return_value = {
+        "translation": "Neue DE Text", "back_translation": "Новый back", "target_lang": "de"}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/edit-ru",
                  json={"text": "Новый RU текст"},
@@ -533,13 +537,24 @@ def test_edit_ru_success(client):
     assert res.status_code == 200
     body = res.json()
     assert body["msg_id"] == 123
-    assert mclaude.translate_only.call_count == 2
+    mclaude.translate_with_back.assert_called_once()
+    mclaude.translate_only.assert_not_called()
     args, kwargs = mdb.update_message.call_args
     assert kwargs["ru_answer"] == "Новый RU текст"
     assert kwargs["de_answer"] == "Neue DE Text"
     assert kwargs["ru_translation"] == "Новый back"
     assert kwargs["status"] == "edited"
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
+
+
+def test_edit_ru_falls_back_to_two_calls_without_translate_with_back(client):
+    c, mdb, mtb, msched, mclaude = client
+    del mclaude.translate_with_back  # сборка без opt/llm
+    mclaude.translate_only.side_effect = ["Neue DE Text", "Новый back"]
+    res = c.post("/api/ma/messages/123/edit-ru", json={"text": "Новый RU текст"},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 200
+    assert mclaude.translate_only.call_count == 2
+    assert mdb.update_message.call_args.kwargs["de_answer"] == "Neue DE Text"
 
 
 def test_edit_de_success(client):
@@ -579,21 +594,13 @@ def test_edit_ru_too_long_422(client):
 
 def test_price_success(client):
     c, mdb, mtb, msched, mclaude = client
-    mclaude.regenerate_with_price.return_value = {
-        "ru_answer": "согласен на 1400",
-        "client_answer": "akzeptiere 1400",
-        "ru_translation": "принимаю 1400",
-        "deal_summary_ru": "", "expected_next": "",
-        "negotiated_price_eur": 1400, "client_assessment": "",
-    }
+    msched.regenerate_draft_with_price.return_value = {"kind": "regenerated", "result": {}}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/price",
                  json={"eur": 1400},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    args, kwargs = mclaude.regenerate_with_price.call_args
-    assert args[1] == 1400
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
+    msched.regenerate_draft_with_price.assert_called_once_with(123, 1400)
 
 
 def test_price_invalid_negative_422(client):
@@ -616,18 +623,13 @@ def test_price_invalid_too_high_422(client):
 
 def test_instruction_success(client):
     c, mdb, mtb, msched, mclaude = client
-    mclaude.regenerate_with_instruction.return_value = {
-        "ru_answer": "x", "client_answer": "y", "ru_translation": "z",
-        "deal_summary_ru": "", "expected_next": "",
-        "negotiated_price_eur": None, "client_assessment": "",
-    }
+    msched.regenerate_draft_with_instruction.return_value = {"kind": "regenerated", "result": {}}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/instruction",
                  json={"text": "Скажи что доставим завтра"},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    args, kwargs = mclaude.regenerate_with_instruction.call_args
-    assert args[1] == "Скажи что доставим завтра"
+    msched.regenerate_draft_with_instruction.assert_called_once_with(123, "Скажи что доставим завтра")
 
 
 def test_instruction_empty_422(client):

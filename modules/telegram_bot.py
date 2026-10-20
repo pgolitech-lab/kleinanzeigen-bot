@@ -1,20 +1,30 @@
-"""Telegram-бот: уведомления оператору + интерактивная сводка задач (sync, urllib stdlib).
+"""Telegram-бот: исходящие уведомления оператору + маленький callback-поллер (sync, urllib stdlib).
 
-Архитектура (2026-06-23): Вся основная работа оператора — в Mini App / веб-морде.
-Бот шлёт уведомления-ссылки в MA и обрабатывает команду /tasks (сводка висячих задач
-с кнопками «открыть» → MA и «🗑 закрыть тред»).
+Архитектура (2026-06-23): вся работа оператора — в Mini App. Бот:
+  • шлёт уведомления-ссылки в MA (`notify`, `send_for_review`, автопилот, напоминания);
+  • держит daemon-поток `start_callback_poller` (long-poll getUpdates, запускается из main.py):
+    команда /tasks → сводка висячих задач; кнопки «👁 Прочитал» (read_N), «🗑» (close_THREAD),
+    «🔄 Обновить» (tasks); любые старые кнопки до 2026-06-23 → алерт «кнопка устарела».
 
-Lock/thread-busy обёртки оставлены здесь (их зовут scheduler/api_ma) — они про
+Lock/thread-busy обёртки оставлены здесь (их зовут outgoing/incoming/api_ma) — это
 in-memory concurrency поверх modules/operator_lock, к Telegram отношения не имеют.
+Всё сетевое, что может зваться из HTTP-запроса MA, уходит в фон через `run_in_background`.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
+import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 import config
 import database as db
@@ -24,13 +34,73 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
 
+# Фоновый пул: Telegram-уведомления и drain отложенных карточек не держат HTTP-ответ MA.
+# Задачи в памяти: при рестарте теряются (drain страхует джоб drain_deferred раз в 5 мин).
+_BG = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tg-bg")
+_BG_QUEUE_WARN = 20
+_bg_pending = 0
+_bg_pending_lock = threading.Lock()
+
+
+def run_in_background(fn, *args, **kwargs) -> None:
+    """Выполнить fn в фоне; исключение — в лог (а не в никуда)."""
+    global _bg_pending
+    with _bg_pending_lock:
+        _bg_pending += 1
+        pending = _bg_pending
+    if pending >= _BG_QUEUE_WARN:
+        logger.error("фоновая очередь Telegram: %d задач ждут — Telegram/сеть тормозит?", pending)
+
+    def _job() -> None:
+        global _bg_pending
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            logger.exception("фоновая задача %s упала", getattr(fn, "__name__", fn))
+        finally:
+            with _bg_pending_lock:
+                _bg_pending -= 1
+    _BG.submit(_job)
+
+
 # Mini App URL для deep-link / web_app кнопок. Pages serves SPA из main:/web-app/.
 MA_BASE_URL = "https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/"
 
 
+# Текущий адрес cloudflared quick-tunnel (пишет scripts/update_tunnel_url.sh, ротируется при
+# рестарте туннеля). Передаётся в MA параметром api= — без коммита адреса в git.
+TUNNEL_URL_FILE = Path(os.environ.get(
+    "KAB_TUNNEL_URL_FILE", "/home/pg/.local/state/kleinanzeigen-bot/tunnel_url"))
+_TUNNEL_RE = re.compile(r"^https://[a-z0-9-]+\.trycloudflare\.com$")
+
+
+_tunnel_last_problem: list[Optional[str]] = [None]  # чтобы не писать один и тот же WARNING на каждую кнопку
+
+
+def tunnel_url() -> Optional[str]:
+    """Адрес API для MA из TUNNEL_URL_FILE (читается на каждый вызов). None — нет/битый файл."""
+    problem = None
+    try:
+        url = TUNNEL_URL_FILE.read_text(encoding="utf-8").strip()
+        if not _TUNNEL_RE.fullmatch(url):
+            problem = f"в {TUNNEL_URL_FILE} не адрес trycloudflare: {url[:100]!r}"
+    except OSError as e:
+        problem = f"не прочитать {TUNNEL_URL_FILE}: {e}"
+    if problem != _tunnel_last_problem[0]:
+        if problem:
+            logger.warning("tunnel_url: %s — кнопки MA пойдут без api=", problem)
+        _tunnel_last_problem[0] = problem
+    return None if problem else url
+
+
 def _ma_deep_link(start_param: str) -> str:
-    """URL для web_app кнопки. start_param: 'review_<id>' / 'thread_<id>' / 'dashboard'."""
-    return f"{MA_BASE_URL}?tgWebAppStartParam={start_param}"
+    """URL для web_app кнопки. start_param: 'review_<id>' / 'thread_<id>' / 'dashboard'.
+    Все web_app-кнопки бота идут через эту функцию — добавляем актуальный api=<туннель>."""
+    url = f"{MA_BASE_URL}?tgWebAppStartParam={start_param}"
+    api = tunnel_url()
+    if api:
+        url += "&api=" + quote(api, safe="")
+    return url
 
 
 def _safe(row: Any, key: str, default: Any = None) -> Any:
@@ -198,17 +268,21 @@ def notify(text: str, start_param: Optional[str] = None,
     return _http_post("sendMessage", payload)
 
 
-def set_menu_button() -> None:
-    """Нативная Menu Button у поля ввода → открывает MA-дашборд. Ставится 1 раз при старте."""
+def set_menu_button() -> int:
+    """Нативная Menu Button у поля ввода → MA-дашборд. Ставится при старте и скриптом ops
+    при смене туннеля. Возвращает число чатов, где setChatMenuButton прошёл."""
     dm_ids = config.telegram_operator_dm_ids() or [config.telegram_chat_id()]
     btn = {"type": "web_app", "text": "📋 MA",
            "web_app": {"url": _ma_deep_link("dashboard")}}
+    ok = 0
     for chat in dm_ids:
         try:
             _http_post_single("setChatMenuButton",
                               {"chat_id": int(chat), "menu_button": btn})
+            ok += 1
         except Exception:
             logger.exception("set_menu_button fail chat=%s", chat)
+    return ok
 
 
 def clear_reply_keyboards() -> None:
@@ -303,7 +377,7 @@ def send_reminder_offer(out_message_id: int, days_silent: int) -> Optional[int]:
 # ---- Autopilot notifications (зовутся из scheduler._autopilot_dispatch / api_ma) ----
 
 _AUTOPILOT_STOP_REASONS = {
-    "limit": ("🛑", "исчерпан лимит 20 сообщений"),
+    "limit": ("🛑", "исчерпан лимит сообщений"),
     "ready_to_buy": ("🎯", "клиент готов покупать, иди закрывай сделку"),
     "wants_contact": ("📞", "просит контакты/реквизиты, передаёт человеку"),
     "threat": ("⚠️", "клиент угрожает, бот предупредил"),
@@ -311,10 +385,17 @@ _AUTOPILOT_STOP_REASONS = {
     "stopped_by_sonnet": ("🤖", "Sonnet решил что нужно остановиться"),
 }
 
+# Задержка ОДНОГО ответа guard'ом (автопилот продолжает работать, ответ ждёт оператора)
+_AUTOPILOT_HOLD_REASONS = {
+    "guard_language": ("🈯", "ответ задержан: не на языке клиента"),
+    "guard_floor": ("💶", "ответ задержан: цена ниже минимума"),
+}
+
 
 def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
-    """Пинг при остановке автопилота. reason='manual' — silent."""
-    info = _AUTOPILOT_STOP_REASONS.get(reason, ("🛑", reason))
+    """Пинг при остановке автопилота (reason='manual' — silent) или задержке ответа guard'ом."""
+    hold = reason in _AUTOPILOT_HOLD_REASONS
+    info = _AUTOPILOT_HOLD_REASONS.get(reason) or _AUTOPILOT_STOP_REASONS.get(reason, ("🛑", reason))
     if info[0] is None:
         return
     msg = db.get_message(msg_id)
@@ -322,9 +403,11 @@ def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
         return
     ap = db.get_thread_autopilot(_safe(msg, "gmail_thread_id") or "")
     sent_count = ap["messages_sent"] if ap else 0
-    text = (f"🛑 <b>АВТОПИЛОТ ОСТАНОВЛЕН</b> · #{msg_id}\n"
+    head = ("⏸ <b>АВТОПИЛОТ: ОТВЕТ ЖДЁТ ПРОВЕРКИ</b>" if hold
+            else "🛑 <b>АВТОПИЛОТ ОСТАНОВЛЕН</b>")
+    text = (f"{head} · #{msg_id}\n"
             f"Причина: {info[0]} {info[1]}\n"
-            f"Отправлено: <code>{sent_count}/20</code>")
+            f"Отправлено: <code>{sent_count}/{config.autopilot_message_cap()}</code>")
     notify(text, f"thread_{_safe(msg, 'gmail_thread_id') or ''}", label="📋 Открыть тред")
 
 
@@ -334,7 +417,7 @@ def send_autopilot_progress(msg_id: int, count: int) -> None:
     if not msg:
         return
     excerpt = _html((_safe(msg, "de_answer") or "").replace("\n", " ").strip()[:80])
-    notify(f"🤖 <code>#{msg_id}</code> · автопилот {count}/20: <i>{excerpt}</i>",
+    notify(f"🤖 <code>#{msg_id}</code> · автопилот {count}/{config.autopilot_message_cap()}: <i>{excerpt}</i>",
            f"thread_{_safe(msg, 'gmail_thread_id') or ''}", label="📋 Открыть тред")
 
 
@@ -358,44 +441,49 @@ def send_autopilot_start_notification(msg_id: int, floor: float, actor: str) -> 
 _THREAD_BUSY: dict[str, dict[str, Any]] = {}
 # thread_id -> msg_id of the operator currently holding the lock (for expiry detection)
 _THREAD_OP_MSG: dict[str, int] = {}
+# Оба словаря трогают и потоки uvicorn (MA), и APScheduler (SMTP/incoming) — только под этим локом
+_BUSY_LOCK = threading.RLock()
 
 
 def thread_is_busy(thread_id: Optional[str]) -> bool:
     if not thread_id:
         return False
-    entry = _THREAD_BUSY.get(thread_id)
-    if not entry or not entry.get("kinds"):
-        return False
-    # Auto-expire stale "operator" kind when the actual lock has expired
-    if "operator" in entry["kinds"]:
-        mid = _THREAD_OP_MSG.get(thread_id)
-        if mid is not None and operator_lock.state(mid) is None:
-            entry["kinds"].discard("operator")
-            _THREAD_OP_MSG.pop(thread_id, None)
-            if not entry["kinds"]:
-                _THREAD_BUSY.pop(thread_id, None)
-                return False
-    return bool(entry and entry.get("kinds"))
+    with _BUSY_LOCK:
+        entry = _THREAD_BUSY.get(thread_id)
+        if not entry or not entry.get("kinds"):
+            return False
+        # Auto-expire stale "operator" kind when the actual lock has expired
+        if "operator" in entry["kinds"]:
+            mid = _THREAD_OP_MSG.get(thread_id)
+            if mid is not None and operator_lock.state(mid) is None:
+                entry["kinds"].discard("operator")
+                _THREAD_OP_MSG.pop(thread_id, None)
+                if not entry["kinds"]:
+                    _THREAD_BUSY.pop(thread_id, None)
+                    return False
+        return bool(entry["kinds"])
 
 
 def mark_thread_busy(thread_id: Optional[str], kind: str, by: str = "?") -> None:
     if not thread_id:
         return
-    entry = _THREAD_BUSY.setdefault(
-        thread_id, {"kinds": set(), "by": by, "since": datetime.utcnow().isoformat()})
-    entry["kinds"].add(kind)
-    entry["by"] = by
+    with _BUSY_LOCK:
+        entry = _THREAD_BUSY.setdefault(
+            thread_id, {"kinds": set(), "by": by, "since": datetime.utcnow().isoformat()})
+        entry["kinds"].add(kind)
+        entry["by"] = by
 
 
 def clear_thread_busy(thread_id: Optional[str], kind: str) -> None:
     if not thread_id:
         return
-    entry = _THREAD_BUSY.get(thread_id)
-    if not entry:
-        return
-    entry["kinds"].discard(kind)
-    if not entry["kinds"]:
-        _THREAD_BUSY.pop(thread_id, None)
+    with _BUSY_LOCK:
+        entry = _THREAD_BUSY.get(thread_id)
+        if not entry:
+            return
+        entry["kinds"].discard(kind)
+        if not entry["kinds"]:
+            _THREAD_BUSY.pop(thread_id, None)
 
 
 def _msg_thread_id(msg_id: int) -> Optional[str]:
@@ -405,22 +493,17 @@ def _msg_thread_id(msg_id: int) -> Optional[str]:
     return msg["gmail_thread_id"] or None
 
 
-def _check_lock(msg_id: int, actor: str) -> Optional[str]:
-    """Имя владельца если лок занят ДРУГИМ. None если свободно/мой."""
-    st = operator_lock.state(msg_id)
-    if st is None:
-        clear_thread_busy(_msg_thread_id(msg_id), "operator")
-        return None
-    owner, _ = st
-    return None if owner == actor else owner
-
-
-def _acquire_lock(msg_id: int, actor: str) -> None:
-    operator_lock.remember(msg_id, actor)
+def _claim_lock(msg_id: int, actor: str) -> Optional[str]:
+    """Атомарно взять лок карточки. None — взят (или уже наш), иначе имя чужого владельца."""
+    foreign = operator_lock.try_acquire(msg_id, actor)
+    if foreign is not None:
+        return foreign
     tid = _msg_thread_id(msg_id)
     mark_thread_busy(tid, "operator", actor)
     if tid:
-        _THREAD_OP_MSG[tid] = msg_id
+        with _BUSY_LOCK:
+            _THREAD_OP_MSG[tid] = msg_id
+    return None
 
 
 def _release_lock(msg_id: int) -> None:
@@ -428,37 +511,75 @@ def _release_lock(msg_id: int) -> None:
     thread_id = _msg_thread_id(msg_id)
     clear_thread_busy(thread_id, "operator")
     if thread_id:
-        _THREAD_OP_MSG.pop(thread_id, None)
-    if thread_id:
-        try:
-            import scheduler as _sched
-            _sched.drain_deferred_thread(thread_id)
-        except Exception:
-            logger.exception("drain_deferred_thread fail")
+        with _BUSY_LOCK:
+            _THREAD_OP_MSG.pop(thread_id, None)
+        # drain поднимает отложенные карточки и шлёт send_for_review (Telegram, до 30 с
+        # на каждый DM) — в фоне, чтобы не держать ответ MA
+        run_in_background(_drain_deferred, thread_id)
 
 
-def _lock_remaining_min(msg_id: int) -> int:
-    return operator_lock.remaining_min(msg_id)
+def _drain_deferred(thread_id: str) -> None:
+    import scheduler as _sched
+    _sched.drain_deferred_thread(thread_id)
 
 
 # ============================================================
-# No-op заглушки (бот больше не рисует/синхронизирует карточки).
-# Оставлены чтобы не трогать десятки call-site'ов в scheduler/api_ma.
+# Мониторинг входа CLI в подписку Claude (все LLM-вызовы идут через неё)
 # ============================================================
 
-def refresh_pipeline_for_active_chats() -> None:
-    """No-op: интерактивного pipeline в боте больше нет (вся работа в MA)."""
-    return None
+LLM_LOGIN_REMIND_SEC = 6 * 3600  # пока вход не восстановлен — напоминать не чаще раза в 6 ч
+LLM_CHECK_FAILS_ALERT = 3  # «не смогли проверить» (таймаут CLI) подряд — тогда тоже алерт
+_llm_login_state: dict[str, Any] = {"ok": True, "alerted_at": 0.0, "check_fails": 0, "checked_at": None}
 
 
-def broadcast_after_external_action(msg_id: int) -> None:
-    """No-op: карточек для синхронизации в боте больше нет."""
-    return None
+def llm_login_status() -> dict[str, Any]:
+    """Последний результат check_llm_login_job (для /health; сам CLI тут не дёргаем — до 30 с)."""
+    st = _llm_login_state
+    return {"llm_login_ok": st["ok"] if st["checked_at"] else None,
+            "llm_checked_at": st["checked_at"]}
 
 
-def broadcast_thread_state(gmail_thread_id: str) -> None:
-    """No-op: мини-карточек треда в боте больше нет."""
-    return None
+def _notify_sent(text: str) -> bool:
+    """notify() с признаком «дошло»: fanout глотает ошибки по DM и возвращает {}."""
+    try:
+        return bool(notify(text))
+    except Exception:
+        logger.exception("notify не дошёл")
+        return False
+
+
+def check_llm_login_job() -> str:
+    """Job (регистрирует scheduler, раз в 10–30 мин): CLI вышел из подписки claude.ai —
+    уведомить оператора (с дедупом). Без входа черновики, переводы и автопилот не работают.
+
+    llm.status() возвращает False и при «не залогинен», и при сбое самой проверки
+    («Ошибка проверки: …», напр. таймаут CLI) — второе алертим только после
+    LLM_CHECK_FAILS_ALERT раз подряд, чтобы один таймаут не будил оператора.
+    """
+    from modules import llm
+    ok, msg = llm.status()
+    st = _llm_login_state
+    now = time.time()
+    st["checked_at"] = datetime.utcnow().isoformat(timespec="seconds")
+    if ok:
+        if not st["ok"] and _notify_sent("🟩 <b>Подписка Claude снова подключена</b> — генерация ответов работает."):
+            logger.info("LLM: вход в подписку восстановлен")
+        st.update(ok=True, alerted_at=0.0, check_fails=0)
+        return msg
+    if msg.startswith("Ошибка проверки"):
+        st["check_fails"] += 1
+        logger.warning("LLM: проверка входа не удалась (%d подряд): %s", st["check_fails"], msg)
+        if st["check_fails"] < LLM_CHECK_FAILS_ALERT:
+            return msg
+    else:
+        st["check_fails"] = 0
+    if st["ok"] or not st["alerted_at"] or now - st["alerted_at"] >= LLM_LOGIN_REMIND_SEC:
+        logger.error("LLM: нет входа в подписку Claude: %s", msg)
+        if _notify_sent("🟥 <b>Нет входа в подписку Claude</b> — черновики и переводы не генерируются.\n"
+                        f"{_html(msg)}\nНа сервере под пользователем сервиса: <code>claude auth login</code>"):
+            st["alerted_at"] = now
+    st["ok"] = False
+    return msg
 
 
 # ============================================================
@@ -536,9 +657,6 @@ def start_callback_poller() -> None:
     - callback close_THREAD_ID → закрыть тред + обновить сводку
     - прочие callback → «кнопка устарела» (legacy до 2026-06-23)
     """
-    import threading
-    import time
-
     def _run() -> None:
         offset = 0
         while True:
