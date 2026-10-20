@@ -134,6 +134,34 @@ def test_find_orphans_and_unmark(fake_imap):
     assert fake_imap.instances[-1].calls == [("STORE", "9,12", "-FLAGS", "(\\Seen)")]
 
 
+def test_find_orphans_known_read_after_fetch(fake_imap):
+    """known как callable читается после IMAP FETCH — без гонки с очередью."""
+    order: list[str] = []
+    real_uid = FakeIMAP.uid
+
+    def uid_spy(self, cmd, *args):
+        order.append(cmd)
+        return real_uid(self, cmd, *args)
+
+    FakeIMAP.uid = uid_spy
+    try:
+        orphans = gmail.find_orphan_seen_uids(
+            "me@gmail.com", "pw",
+            known_message_ids=lambda: order.append("known") or {"<a@x>", "<b@x>"})
+    finally:
+        FakeIMAP.uid = real_uid
+    assert orphans == ["12"] and order == ["SEARCH", "FETCH", "known"]
+
+
+def test_uid_fetch_not_ok_raises(fake_imap, monkeypatch):
+    """UID FETCH не OK — ошибка опроса, а не тихий пустой результат."""
+    real_uid = FakeIMAP.uid
+    monkeypatch.setattr(FakeIMAP, "uid", lambda self, cmd, *a: ("NO", [b"x"]) if cmd == "FETCH"
+                        else real_uid(self, cmd, *a))
+    with pytest.raises(gmail.imaplib.IMAP4.error):
+        gmail.fetch_new("me@gmail.com", "pw")
+
+
 def test_smtp_has_timeout(monkeypatch):
     seen: dict[str, Any] = {}
 
@@ -190,7 +218,14 @@ def inc(tmp_db, monkeypatch):
     monkeypatch.setattr(incoming.claude, "detect_and_translate_to_ru",
                         lambda body: {"translation_ru": "привет", "lang": "de", "cost_usd": 0.0})
     monkeypatch.setattr(incoming.claude, "history_for", lambda tid: [])
-    monkeypatch.setattr(incoming.telegram_bot, "send_for_review", lambda mid: calls["review"].append(mid))
+    def fake_review(mid):
+        # как настоящий: при доставке пишет telegram_message_id и возвращает его
+        calls["review"].append(mid)
+        tmp_db.update_message(mid, telegram_message_id=1000 + mid)
+        return 1000 + mid
+
+    monkeypatch.setattr(incoming.telegram_bot, "send_for_review", fake_review)
+    incoming._fake_review = fake_review
     monkeypatch.setattr(incoming.telegram_bot, "send_autopilot_stop_notification",
                         lambda mid, reason: calls["stop"].append(reason))
     monkeypatch.setattr(incoming.telegram_bot, "send_autopilot_progress", lambda *a: None)
@@ -252,18 +287,37 @@ def test_new_thread_parses_ad_followup_reuses_db(inc, tmp_db):
 
 
 def test_review_failure_raises_and_retry_resumes_card(inc, tmp_db, monkeypatch):
-    """Карточка не ушла → исключение (очередь повторит); повтор не глотается
-    дедупом, а доводит сохранённую строку до оператора."""
-    monkeypatch.setattr(inc.telegram_bot, "send_for_review",
-                        lambda mid: (_ for _ in ()).throw(RuntimeError("tg down")))
+    """Карточка не ушла (send_for_review вернул None — так он сообщает о сбое
+    fanout) → исключение (очередь повторит); повтор доводит строку до оператора."""
+    monkeypatch.setattr(inc.telegram_bot, "send_for_review", lambda mid: None)
     with pytest.raises(RuntimeError):
         inc._process_incoming(ACC, _email())
     row = tmp_db.find_by_gmail_message_id("<m1@x>")
     assert row["status"] == "new"
-    monkeypatch.setattr(inc.telegram_bot, "send_for_review", lambda mid: inc._calls["review"].append(mid))
+    monkeypatch.setattr(inc.telegram_bot, "send_for_review", inc._fake_review)
     inc._process_incoming(ACC, _email())
     assert inc._calls["review"] == [row["id"]]
     assert inc._calls["parse_ad"] == ["https://www.kleinanzeigen.de/s-anzeige/sitzbank/123456789-223-1"]
+
+
+def test_delivered_card_not_duplicated_on_repeat(inc, tmp_db):
+    """status='new' с доставленной карточкой (оператор ещё не открыл) — повторное
+    попадание письма (сбой \\Seen, рестарт) не шлёт дубль, а уходит в skipped_dedup."""
+    inc._process_incoming(ACC, _email())
+    inc._process_incoming(ACC, _email())
+    assert len(inc._calls["review"]) == 1
+    with tmp_db.get_conn() as conn:
+        r = conn.execute("SELECT reason FROM processed_messages WHERE gmail_message_id='<m1@x>'").fetchone()
+    assert r["reason"] == "skipped_dedup"
+
+
+def test_undelivered_card_deferred_when_thread_busy(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc.telegram_bot, "send_for_review", lambda mid: None)
+    with pytest.raises(RuntimeError):
+        inc._process_incoming(ACC, _email())
+    monkeypatch.setattr(inc.telegram_bot, "thread_is_busy", lambda tid: True)
+    inc._process_incoming(ACC, _email())
+    assert tmp_db.find_by_gmail_message_id("<m1@x>")["status"] == "deferred"
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +373,58 @@ def test_autopilot_guards_block_send(inc, tmp_db, reply, reason):
     assert inc._calls["send"] == []
     assert inc._calls["stop"] == [reason] and inc._calls["review"] == [mid]
     assert tmp_db.get_thread_autopilot("T1")["active"] == 0
+
+
+def test_autopilot_floor_checks_price_in_text(inc, tmp_db):
+    """Бриф говорит 120, а в тексте клиенту 80 € — guard_floor по тексту."""
+    tmp_db.set_setting("autopilot_shadow_mode", "0")
+    mid, ap = _ap_msg(tmp_db, floor=100)
+    inc._autopilot_dispatch(mid, ap, _reply(de_answer="Für 80 € gebe ich es ab. Viele Grüße"))
+    assert inc._calls["send"] == [] and inc._calls["stop"] == ["guard_floor"]
+
+
+def test_prices_in_text():
+    assert inc_prices("Für 80 € oder 1.200 EUR, € 95, 70,- Euro") == [80.0, 1200.0, 95.0, 70.0]
+
+
+def inc_prices(t):
+    from modules import incoming
+    return incoming._prices_in_text(t)
+
+
+def test_autopilot_language_vs_thread_lang(inc, tmp_db):
+    """Модель заявила 'en', а клиент треда пишет по-немецки — стоп, не шлём."""
+    tmp_db.set_setting("autopilot_shadow_mode", "0")
+    tmp_db.add_message(account_id=1, direction="in", gmail_thread_id="T1", de_client="Hallo",
+                       client_lang="de", status="sent")
+    mid, ap = _ap_msg(tmp_db)
+    inc._autopilot_dispatch(mid, ap, _reply(client_lang="en", de_answer="Yes, still there."))
+    assert inc._calls["send"] == [] and inc._calls["stop"] == ["guard_language"]
+
+
+def test_autopilot_ukrainian_client_cyrillic_ok(inc, tmp_db):
+    tmp_db.set_setting("autopilot_shadow_mode", "0")
+    mid, ap = _ap_msg(tmp_db)
+    inc._autopilot_dispatch(mid, ap, _reply(client_lang="uk", de_answer="Так, ще є."))
+    assert inc._calls["send"] == [mid]
+
+
+def test_autopilot_threat_smtp_failure_goes_to_review(inc, tmp_db, monkeypatch):
+    tmp_db.set_setting("autopilot_shadow_mode", "0")
+    mid, ap = _ap_msg(tmp_db)
+    monkeypatch.setattr(inc, "_send_reply", lambda row: {"kind": "error", "message": "smtp"})
+    inc._autopilot_dispatch(mid, ap, _reply(should_stop=True, stop_reason="threat",
+                                            deal_brief={}))
+    assert inc._calls["review"] == [mid] and inc._calls["stop"] == ["threat"]
+    assert tmp_db.get_thread_autopilot("T1")["active"] == 0
+
+
+def test_autopilot_review_undelivered_raises(inc, tmp_db, monkeypatch):
+    """Shadow-черновик, а карточка не дошла — исключение, а не тихий return."""
+    mid, ap = _ap_msg(tmp_db)
+    monkeypatch.setattr(inc.telegram_bot, "send_for_review", lambda m: None)
+    with pytest.raises(RuntimeError):
+        inc._autopilot_dispatch(mid, ap, _reply())
 
 
 def test_autopilot_smtp_failure_goes_to_review(inc, tmp_db, monkeypatch):
@@ -387,6 +493,17 @@ def test_failed_uid_held_until_backoff_expires(mq, monkeypatch):
 def test_broken_message_gives_up_with_alert(mq):
     assert mq._handle(ACC, {"uid": "7", "gmail_message_id": "", "_broken": True}) is True
     assert len(mq._alerts) == 1
+
+
+def test_flush_seen_failure_escalates_to_error(mq, monkeypatch, caplog):
+    monkeypatch.setattr(mq, "_SEEN_FAILS", {})
+    monkeypatch.setattr(mq.gmail, "_imap_retry", lambda f, *a, **kw: (_ for _ in ()).throw(OSError("imap")))
+    import logging
+    with caplog.at_level(logging.WARNING, logger=mq.logger.name):
+        for _ in range(mq.SEEN_FAIL_ALERT):
+            mq._flush_seen({1: (ACC, ["5"])})
+    levels = [r.levelname for r in caplog.records if "mark_seen fail" in r.getMessage()]
+    assert levels[-1] == "ERROR" and levels[0] == "WARNING"
 
 
 def test_flush_seen_batches_and_releases(mq, monkeypatch):

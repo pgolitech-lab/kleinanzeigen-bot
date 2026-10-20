@@ -152,9 +152,10 @@ def poll_all_accounts() -> str:
 
     Возвращает короткое summary для отображения в /api/status.
     """
+    # Поток очереди поднимаем и на паузе: уже забранные письма должны дообработаться.
+    mail_queue.start()
     if config.polling_paused():
         return "⏸ Polling на паузе (через /pause)"
-    mail_queue.start()
     mail_queue.release_due_retries()
     _check_queue_stuck()
     started = time.monotonic()
@@ -201,20 +202,23 @@ def orphan_recovery_job() -> str:
 
     Раньше шёл в каждом 15-секундном проходе (×5 аккаунтов) — отдельные IMAP-сессии
     и половина таймаутов. Теперь раз в ORPHAN_SCAN_MINUTES + при старте.
-    Набор известных Message-ID читается из БД один раз на проход.
+    Набор известных Message-ID читается из БД после IMAP FETCH каждого ящика.
     """
     if config.polling_paused():
         return "⏸ Polling на паузе"
     accounts = db.list_accounts(only_active=True)
     from_filter = config.gmail_from_filter() or None
-    known = db.known_message_ids_since(since_days=3)
+    # Известные Message-ID читаем ПОСЛЕ IMAP FETCH (callable): очередь ставит \Seen
+    # только после коммита строки в БД, значит всё, что в IMAP уже SEEN, к моменту
+    # чтения видно в БД. Набор, прочитанный до цикла, давал гонку: письмо,
+    # обработанное за эти секунды, считалось сиротой и шло на повтор.
     total = failed = 0
     for acc in accounts:
         try:
             orphans = gmail._imap_retry(
                 gmail.find_orphan_seen_uids,
                 acc["gmail_email"], acc["gmail_app_password"],
-                known_message_ids=known,
+                known_message_ids=lambda: db.known_message_ids_since(since_days=7),
                 from_filter=from_filter,
                 since_days=2,
             )

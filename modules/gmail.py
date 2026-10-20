@@ -213,8 +213,12 @@ def _uid_fetch(imap: imaplib.IMAP4, uids: list[str], what: str) -> dict[str, tup
     out: dict[str, tuple[bytes, bytes]] = {}
     for chunk in _chunks(uids):
         typ, data = imap.uid("FETCH", _uid_set(chunk), what)
-        if typ != "OK" or not data:
-            _log.warning("IMAP UID FETCH %s не OK: %r", _uid_set(chunk), typ)
+        if typ != "OK":
+            # Не «писем нет», а сбой — как в _uid_search/_uid_store: всплывает
+            # ошибкой опроса (fails_in_row), а не тихим пустым результатом.
+            raise imaplib.IMAP4.error(f"UID FETCH {_uid_set(chunk)} не OK: {data!r}")
+        if not data:
+            _log.warning("IMAP UID FETCH %s: пустой ответ", _uid_set(chunk))
             continue
         # UID обычно в заголовке tuple, но сервер вправе прислать его ПОСЛЕ
         # литерала — отдельным элементом вида b' UID 5)'. Учитываем оба случая.
@@ -358,7 +362,7 @@ def mark_seen(
 def find_orphan_seen_uids(
     gmail_email: str,
     gmail_password: str,
-    known_message_ids: set[str],
+    known_message_ids: "set[str] | Callable[[], set[str]]",
     from_filter: Optional[str] = None,
     since_days: int = 2,
     mailbox: str = "INBOX",
@@ -372,6 +376,8 @@ def find_orphan_seen_uids(
     мог снять Seen → следующий poll снова увидит их как UNSEEN и обработает.
 
     Дёшево: один пакетный UID FETCH только заголовка Message-ID.
+    known_message_ids может быть callable — тогда вызывается ПОСЛЕ FETCH (без гонки
+    с очередью, которая успела обработать и пометить письмо за время поиска).
     """
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(days=since_days)).strftime("%d-%b-%Y")
@@ -383,6 +389,7 @@ def find_orphan_seen_uids(
             return []
         fetched = _uid_fetch(imap, uids, "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
 
+    known = known_message_ids() if callable(known_message_ids) else known_message_ids
     orphans: list[str] = []
     for uid in uids:
         got = fetched.get(uid)
@@ -393,7 +400,7 @@ def find_orphan_seen_uids(
             if line.lower().startswith(b"message-id:"):
                 msg_id = line.split(b":", 1)[1].strip().decode(errors="ignore")
                 break
-        if msg_id and msg_id not in known_message_ids:
+        if msg_id and msg_id not in known:
             orphans.append(uid)
     return orphans
 

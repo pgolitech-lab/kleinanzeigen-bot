@@ -48,7 +48,12 @@ def drain_deferred_thread(thread_id: str) -> int:
     for r in rows:
         try:
             db.update_message(r["id"], status="pending")
-            telegram_bot.send_for_review(r["id"])
+            if not telegram_bot.send_for_review(r["id"]):
+                # Ни одна копия не дошла — возвращаем в deferred, поднимем следующим drain.
+                db.update_message(r["id"], status="deferred")
+                logger.error("drain_deferred: карточка msg=%s не доставлена — оставлена deferred",
+                             r["id"])
+                continue
             raised += 1
         except Exception:
             logger.exception("drain_deferred: send_for_review fail msg=%s", r["id"])

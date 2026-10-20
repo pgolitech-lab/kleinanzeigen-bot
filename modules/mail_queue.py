@@ -34,6 +34,8 @@ MAX_ATTEMPTS = len(RETRY_DELAYS_SEC) + 1
 # Сколько обработанных UID копить до принудительного сброса \Seen (сбрасываем
 # и раньше — как только очередь опустела).
 SEEN_FLUSH_BATCH = 20
+# После стольких сбоев UID STORE \\Seen подряд по ящику — ERROR вместо WARNING.
+SEEN_FAIL_ALERT = 3
 
 _Q: "queue.Queue[tuple[dict[str, Any], dict[str, Any]]]" = queue.Queue()
 _LOCK = threading.Lock()
@@ -41,11 +43,13 @@ _LOCK = threading.Lock()
 # Пока UID здесь, fetch_new его не качает, а enqueue не ставит второй раз.
 _INFLIGHT: dict[int, set[str]] = {}
 _ATTEMPTS: dict[tuple[int, str], int] = {}
+# Сбои mark_seen подряд по аккаунту.
+_SEEN_FAILS: dict[int, int] = {}
 # (account_id, uid) → monotonic-время, после которого письмо можно забрать снова.
 _RETRY_AT: dict[tuple[int, str], float] = {}
 _worker: Optional[threading.Thread] = None
 _stats: dict[str, Any] = {
-    "processed": 0, "failed": 0, "gave_up": 0, "last_processed_at": None,
+    "processed": 0, "failed": 0, "gave_up": 0, "seen_fail": 0, "last_processed_at": None,
     "current_uid": None, "current_started_at": None,
 }
 
@@ -114,10 +118,16 @@ def _flush_seen(pending: dict[int, tuple[dict[str, Any], list[str]]]) -> None:
     for acc_id, (acc, uids) in list(pending.items()):
         try:
             gmail._imap_retry(gmail.mark_seen, acc["gmail_email"], acc["gmail_app_password"], uids)
+            _SEEN_FAILS.pop(acc_id, None)
         except Exception as e:
-            # Не страшно: письмо останется UNSEEN, следующий опрос заберёт его
-            # снова, а дедуп по Message-ID в _process_incoming сразу его пропустит.
-            logger.warning("mark_seen fail account=%s uids=%s: %s", acc_id, uids, e)
+            # Письмо останется UNSEEN, следующий опрос заберёт его снова, а дедуп
+            # по Message-ID в _process_incoming сразу его пропустит. Но если STORE
+            # падает стабильно — каждый проход гоняет одни и те же письма: ERROR.
+            n = _SEEN_FAILS.get(acc_id, 0) + 1
+            _SEEN_FAILS[acc_id] = n
+            _stats["seen_fail"] += 1
+            log = logger.error if n >= SEEN_FAIL_ALERT else logger.warning
+            log("mark_seen fail account=%s (%d подряд) uids=%s: %s", acc_id, n, uids, e)
         finally:
             _release(acc_id, uids)
     pending.clear()
@@ -136,7 +146,8 @@ def _alert_gave_up(acc: dict[str, Any], em: dict[str, Any], why: str) -> None:
     try:
         telegram_bot.notify(text)
     except Exception:
-        logger.exception("Алерт о необработанном письме не ушёл")
+        # ERROR в журнал → monitor_errors_job продублирует в Telegram позже.
+        logger.exception("Алерт о необработанном письме не ушёл: %s", why)
 
 
 def _give_up(acc: dict[str, Any], em: dict[str, Any], why: str) -> None:
@@ -227,17 +238,27 @@ def start() -> None:
     if _worker and _worker.is_alive():
         return
     if _worker is not None:
-        logger.error("mail_queue: worker был мёртв — перезапуск, сброс in-flight UID")
+        dropped = 0
         with _LOCK:
+            inflight = sum(len(v) for v in _INFLIGHT.values())
             _INFLIGHT.clear()
             _RETRY_AT.clear()
-            # Очередь тоже сбрасываем: письма в ней заново придут опросом.
+            # Очередь тоже сбрасываем: письма в ней заново придут опросом
+            # (\Seen на них не ставился). _ATTEMPTS не трогаем — потолок попыток сохраняется.
             while True:
                 try:
                     _Q.get_nowait()
                     _Q.task_done()
+                    dropped += 1
                 except queue.Empty:
                     break
+        logger.error("mail_queue: worker был мёртв — перезапуск; сброшено из очереди %d, "
+                     "in-flight %d (заберутся опросом заново)", dropped, inflight)
+        try:
+            telegram_bot.notify("⚠️ <b>Поток обработки почты падал</b> — перезапущен. "
+                                f"Писем будет перечитано: {inflight}.")
+        except Exception:
+            logger.exception("Алерт о перезапуске mail_queue не ушёл")
     _worker = threading.Thread(target=_run, name="mail-queue", daemon=True)
     _worker.start()
     logger.info("mail_queue: worker запущен")

@@ -186,19 +186,76 @@ def _send_auto_ack(
     return ack_id
 
 
-def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any) -> Optional[str]:
+def _deliver_review(message_id: int) -> None:
+    """Карточка оператору с проверкой доставки.
+
+    `telegram_bot.send_for_review` глотает ошибки fanout и возвращает None, если
+    не дошла ни одна копия, — превращаем это в исключение, чтобы очередь
+    оставила письмо UNSEEN и повторила, а не пометила «обработано» молча."""
+    if not telegram_bot.send_for_review(message_id):
+        raise RuntimeError(f"карточка msg={message_id} не доставлена ни одному оператору")
+
+
+# Языки на кириллице: для них guardrails.outgoing_language_ok проверяем как для 'ru'
+# (сама функция знает только ru — иначе украинский ответ украинцу = «провал»).
+_CYRILLIC_LANGS = {"ru", "uk", "bg", "sr", "mk", "be"}
+
+# Цена в тексте клиенту: «80 €», «80,- €», «1.200 EUR», «€ 80», «80 Euro».
+_PRICE_RE = re.compile(
+    r"(?:€|EUR)\s*(\d{1,3}(?:[.\s]\d{3})+|\d+)"
+    r"|(\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[,.](?:\d{1,2}|-))?\s*(?:€|EUR\b|Euro\b)",
+    re.IGNORECASE,
+)
+
+
+def _prices_in_text(text: str) -> list[float]:
+    out: list[float] = []
+    for m in _PRICE_RE.finditer(text or ""):
+        raw = m.group(1) or m.group(2) or ""
+        digits = re.sub(r"[.\s]", "", raw)
+        if digits.isdigit():
+            out.append(float(digits))
+    return out
+
+
+def _thread_client_lang(thread_id: str, exclude_id: int) -> Optional[str]:
+    """Язык клиента по прежним входящим треда (самый частый) — независимо от
+    того, что заявила модель в текущем ответе."""
+    counts: dict[str, int] = {}
+    for r in db.thread_history(thread_id) or []:
+        if r["id"] == exclude_id or r["direction"] != "in":
+            continue
+        lang = (_row_get(r, "client_lang") or "").strip().lower()[:2]
+        if lang:
+            counts[lang] = counts.get(lang, 0) + 1
+    return max(counts, key=counts.get) if counts else None
+
+
+def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any,
+                            msg_id: Optional[int] = None) -> Optional[str]:
     """Детерминированные проверки авто-ответа ДО отправки («код владеет числами»).
 
     Возвращает причину остановки или None, если ответ можно слать:
-      guard_language — текст не на языке клиента (напр. ушёл бы русский черновик);
-      guard_floor    — цена сделки в брифе ниже операторского floor.
+      guard_language — текст не на языке клиента (напр. ушёл бы русский черновик)
+                       или модель заявила язык, отличный от языка треда;
+      guard_floor    — цена в брифе ИЛИ любая цена в тексте клиенту ниже floor.
     """
-    if not guardrails.outgoing_language_ok(reply.get("de_answer") or "", reply.get("client_lang")):
+    text = reply.get("de_answer") or ""
+    model_lang = (reply.get("client_lang") or "").strip().lower()[:2]
+    thread_lang = _thread_client_lang(autopilot_row["gmail_thread_id"], msg_id or -1)
+    if thread_lang and model_lang and thread_lang != model_lang:
         return "guard_language"
-    price = (reply.get("deal_brief") or {}).get("negotiated_price_eur")
+    lang = thread_lang or model_lang
+    if not guardrails.outgoing_language_ok(text, "ru" if lang in _CYRILLIC_LANGS else lang):
+        return "guard_language"
     floor = autopilot_row["floor_price_eur"]
-    if isinstance(price, (int, float)) and floor and guardrails.floor_violation(price, floor):
-        return "guard_floor"
+    if floor:
+        price = (reply.get("deal_brief") or {}).get("negotiated_price_eur")
+        if isinstance(price, (int, float)) and guardrails.floor_violation(price, floor):
+            return "guard_floor"
+        # Модель может написать в тексте одну цену, а в брифе другую — проверяем текст.
+        if any(guardrails.floor_violation(p, floor) for p in _prices_in_text(text)):
+            return "guard_floor"
     return None
 
 
@@ -207,15 +264,20 @@ def _autopilot_to_review(msg_id: int, thread_id: str, stop_reason: Optional[str]
     выключить автопилот треда и прислать уведомление об остановке."""
     if stop_reason:
         db.stop_thread_autopilot(thread_id, stop_reason)
+    card_err: Optional[Exception] = None
     try:
-        telegram_bot.send_for_review(msg_id)
-    except Exception:
+        _deliver_review(msg_id)
+    except Exception as e:
         logger.exception("send_for_review (autopilot) fail msg=%s", msg_id)
+        card_err = e
     if stop_reason:
         try:
             telegram_bot.send_autopilot_stop_notification(msg_id, stop_reason)
         except Exception:
             logger.exception("autopilot stop notification fail msg=%s", msg_id)
+    if card_err:
+        # Очередь повторит письмо → ветка «довести до карточки» в _process_incoming.
+        raise card_err
 
 
 def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) -> None:
@@ -243,7 +305,7 @@ def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) 
         _autopilot_to_review(msg_id, thread_id, stop_reason)
         return
 
-    guard = _autopilot_guard_reason(reply, autopilot_row)
+    guard = _autopilot_guard_reason(reply, autopilot_row, msg_id)
     if stop_reason == "threat" and guard == "guard_floor":
         guard = None  # в предупреждении об угрозе цены нет — floor неприменим
     if guard:
@@ -265,8 +327,13 @@ def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) 
     sent_ok = result.get("kind") in ("sent", "skipped")
 
     if stop_reason == "threat":
-        if sent_ok:
-            db.increment_autopilot_messages(thread_id)
+        if not sent_ok:
+            # Предупреждение не ушло — черновик оператору, а не только «стоп».
+            logger.warning("autopilot threat: SMTP fail msg=%s — карточка оператору: %s",
+                           msg_id, result.get("message"))
+            _autopilot_to_review(msg_id, thread_id, "threat")
+            return
+        db.increment_autopilot_messages(thread_id)
         db.stop_thread_autopilot(thread_id, "threat")
         try:
             telegram_bot.send_autopilot_stop_notification(msg_id, "threat")
@@ -433,14 +500,22 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # Дедуп по Message-ID (только в обычном режиме)
     existing = db.find_by_gmail_message_id(msg_id) if (not force and msg_id) else None
     if existing:
-        if existing["direction"] == "in" and existing["status"] == "new":
-            # Строка сохранена, но прошлая обработка упала до карточки оператору
-            # (исключение / рестарт посреди обработки). Не глотаем дедупом —
-            # доводим: карточка уйдёт с тем, что успели сохранить. Ошибка здесь
-            # пробрасывается → очередь повторит письмо.
+        if (existing["direction"] == "in" and existing["status"] == "new"
+                and not _row_get(existing, "telegram_message_id")):
+            # Строка сохранена, но карточка оператору не дошла (исключение /
+            # рестарт посреди обработки / Telegram недоступен). Признак доставки —
+            # telegram_message_id: send_for_review пишет его только при успехе.
+            # Просто status='new' НЕ признак: так висит и доставленная карточка,
+            # которую оператор ещё не открыл (иначе — дубли карточек на каждом
+            # повторном попадании письма). Ошибка пробрасывается → очередь повторит.
+            if telegram_bot.thread_is_busy(existing["gmail_thread_id"]):
+                db.update_message(existing["id"], status="deferred")
+                logger.info("Письмо %s (msg=%s): тред занят — карточка отложена",
+                            msg_id, existing["id"])
+                return
             logger.warning("Письмо %s уже в БД (msg=%s), но не дошло до оператора — "
                            "довожу до карточки", msg_id, existing["id"])
-            telegram_bot.send_for_review(existing["id"])
+            _deliver_review(existing["id"])
             return
         _skip_email(account, email, "skipped_dedup")
         return
@@ -850,10 +925,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             # Письмо клиента не должно потеряться: без ответа модели отдаём его
             # оператору обычной карточкой (автопилот остаётся активным).
             logger.exception("Autopilot Claude упал для msg=%s: %s", inserted_id, e)
-            try:
-                telegram_bot.send_for_review(inserted_id)
-            except Exception:
-                logger.exception("send_for_review после сбоя автопилота fail msg=%s", inserted_id)
+            # Сбой доставки карточки пробрасываем — очередь повторит письмо.
+            _deliver_review(inserted_id)
             return
 
         deal_brief_json = json.dumps(reply["deal_brief"], ensure_ascii=False) if reply.get("deal_brief") else None
@@ -873,10 +946,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             _autopilot_dispatch(inserted_id, autopilot, reply)
         except Exception:
             logger.exception("autopilot dispatch упал для msg=%s", inserted_id)
-            try:
-                telegram_bot.send_for_review(inserted_id)
-            except Exception:
-                logger.exception("send_for_review после сбоя dispatch fail msg=%s", inserted_id)
+            # Карточка оператору; не дошла — пробрасываем, очередь повторит письмо.
+            _deliver_review(inserted_id)
         try:
             telegram_bot.refresh_pipeline_for_active_chats()
         except Exception:
@@ -910,10 +981,10 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         return
 
     try:
-        telegram_bot.send_for_review(inserted_id)
+        _deliver_review(inserted_id)
     except Exception as e:
         # Пробрасываем: очередь оставит письмо UNSEEN и повторит, а повтор
-        # (строка status='new') пойдёт веткой «довести до карточки» выше.
+        # (status='new' без telegram_message_id) пойдёт веткой «довести до карточки» выше.
         logger.exception("Не удалось послать оператору msg=%s: %s", inserted_id, e)
         raise
 
