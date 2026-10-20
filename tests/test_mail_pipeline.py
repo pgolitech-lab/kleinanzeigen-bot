@@ -611,3 +611,75 @@ def test_reset_stuck_sending(tmp_db):
     assert outgoing.reset_stuck_sending() == 1
     assert tmp_db.get_message(a)["status"] == "error_send_failed"
     assert tmp_db.get_message(b)["status"] == "sent"
+
+
+# ---------------------------------------------------------------------------
+# Возраст письма: «запоздало» и слишком старое
+# ---------------------------------------------------------------------------
+
+def _date_days_ago(days: float) -> str:
+    from email.utils import format_datetime
+    from datetime import timezone, timedelta as td
+    return format_datetime(datetime.now(timezone.utc) - td(days=days))
+
+
+def test_too_old_email_notifies_and_skips(inc, tmp_db):
+    inc._process_incoming(ACC, _email(date=_date_days_ago(9)))
+    assert inc._calls["review"] == [] and inc._calls["classify"] == []
+    assert len(inc._calls["notify"]) == 1 and "Старое письмо" in inc._calls["notify"][0]
+    with tmp_db.get_conn() as conn:
+        r = conn.execute("SELECT reason FROM processed_messages WHERE gmail_message_id='<m1@x>'").fetchone()
+    assert r["reason"] == "skipped_max_age"
+
+
+def test_late_email_no_autopilot_card_and_notice(inc, tmp_db, monkeypatch):
+    """Письмо 3-дневной давности в треде с автопилотом: не отвечаем, карточка + «запоздало»."""
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("автопилот не должен")))
+    inc._process_incoming(ACC, _email(date=_date_days_ago(3)))
+    row = tmp_db.find_by_gmail_message_id("<m1@x>")
+    assert inc._calls["send"] == [] and inc._calls["review"] == [row["id"]]
+    assert any("Запоздалое" in t for t in inc._calls["notify"])
+
+
+def test_late_email_no_auto_ack(inc, tmp_db, monkeypatch):
+    acked: list = []
+    monkeypatch.setattr(inc, "_send_auto_ack", lambda *a, **kw: acked.append(1))
+    inc._process_incoming({**ACC, "auto_ack_enabled": 1}, _email(date=_date_days_ago(2)))
+    assert acked == []
+    inc._process_incoming({**ACC, "auto_ack_enabled": 1},
+                          _email(gmail_message_id="<m9@x>", gmail_thread_id="T9", uid="11",
+                                 date=_date_days_ago(0.1)))
+    assert acked == [1]
+
+
+# ---------------------------------------------------------------------------
+# Мониторинг ошибок
+# ---------------------------------------------------------------------------
+
+def test_monitor_errors_collects_dedups_realerts(monkeypatch):
+    import logging
+    import scheduler
+    sent: list[str] = []
+    monkeypatch.setattr(scheduler.telegram_bot, "notify", lambda text, *a, **kw: sent.append(text))
+    monkeypatch.setattr(scheduler, "_REPORTED_ERROR_HASHES", {})
+    scheduler._ERRORS.clear()
+    scheduler.install_error_collector()
+    log = logging.getLogger("modules.test_x")
+    log.info("просто info")  # не ловится
+    log.error("send fail msg=%s", 12)
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        log.exception("упало msg=%s", 34)
+    log.error("send fail msg=%s", 56)  # тот же тип, что 12
+    assert "posted 2" in scheduler.monitor_errors_job()
+    assert len(sent) == 1 and "×2" in sent[0] and "ValueError" in sent[0]
+    log.error("send fail msg=%s", 78)
+    assert "already reported" in scheduler.monitor_errors_job()
+    for h in scheduler._REPORTED_ERROR_HASHES:
+        scheduler._REPORTED_ERROR_HASHES[h] -= scheduler.ERROR_REALERT_SEC + 1
+    log.error("send fail msg=%s", 90)
+    assert "posted 1" in scheduler.monitor_errors_job()
+    assert scheduler.monitor_errors_job() == "ok, no issues"
