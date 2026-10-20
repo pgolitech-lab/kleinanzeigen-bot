@@ -1,0 +1,17 @@
+[Unit]
+Description=Pass cloudflared quick-tunnel URL to the bot (?api= in Mini App links, menu button)
+After=cloudflared.service network-online.target
+Requires=cloudflared.service
+PartOf=cloudflared.service
+
+[Service]
+Type=oneshot
+User=pg
+Environment=HOME=/home/pg
+# Ждёт регистрации туннеля до 90 с + лок до 120 с + вызов Telegram до 120 с.
+# Если упал — bot_health.sh повторит синк сам (сверяет живой URL с menu_synced_url).
+TimeoutStartSec=360
+ExecStart=/home/pg/kleinanzeigen-bot/scripts/update_tunnel_url.sh
+
+[Install]
+WantedBy=cloudflared.service

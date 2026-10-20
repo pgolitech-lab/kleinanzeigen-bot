@@ -44,3 +44,14 @@ backups/
 *.db-wal
 *.db-shm
 *.bak
+
+# Секреты — репозиторий ПУБЛИЧНЫЙ (GitHub Pages)
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+service-account*.json
+
+# Скриншоты Mini App из qa / ux-lazy — на них имена и переписка покупателей
+docs/optimization/ui/*.png

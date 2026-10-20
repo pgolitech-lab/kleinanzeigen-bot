@@ -1,0 +1,11 @@
+[Unit]
+Description=Watchdog: restart cloudflared if quick-tunnel URL is dead
+After=network-online.target cloudflared.service
+
+[Service]
+Type=oneshot
+# root: нужен systemctl restart cloudflared. Счётчик неудачных тиков — в /var/lib.
+StateDirectory=kab-tunnel-watchdog
+Environment=TUNNEL_WD_STATE=/var/lib/kab-tunnel-watchdog
+TimeoutStartSec=180
+ExecStart=/home/pg/kleinanzeigen-bot/scripts/tunnel_watchdog.sh
