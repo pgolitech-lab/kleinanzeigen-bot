@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js";
+import { el, esc, berlinTime, setLoading, setError, eur } from "../utils.js";
 
 const PERIODS = [
   {key: "all",   label: "Все время"},
@@ -117,11 +117,6 @@ function buildAddSaleForm(accounts, onSubmitOk, onCancel) {
   return form;
 }
 
-
-function eur(n) {
-  if (n == null) return "—";
-  return n.toLocaleString("de-DE", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + "€";
-}
 
 function summaryCard(summary) {
   const card = el(`
@@ -383,9 +378,9 @@ function render(mount, data) {
   });
 }
 
+// Точка входа роутера (внутренний render(mount, data) — отрисовка таблицы)
 export async function renderScreen(mount, params) {
   await load(mount);
 }
-
-// router expects `render`
 export { renderScreen as render };
+
