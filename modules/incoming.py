@@ -543,6 +543,53 @@ def _known_thread_ad(thread_id: str, exclude_id: Optional[int] = None) -> Option
     }
 
 
+# Письмо старше стольких дней — «запоздало»: без автопилота и auto-ack.
+LATE_AFTER_DAYS = 1.0
+
+
+def _email_age_days(email: dict[str, Any]) -> Optional[float]:
+    """Возраст письма в днях по Date-header (None — даты нет или не разобралась)."""
+    from email.utils import parsedate_to_datetime
+    from datetime import timezone
+    date_str = (email.get("date") or "").strip()
+    if not date_str:
+        return None
+    try:
+        msg_dt = parsedate_to_datetime(date_str)
+    except (TypeError, ValueError, IndexError):
+        logger.debug("parsedate failed: %r", date_str)
+        return None
+    if msg_dt is None:
+        return None
+    if msg_dt.tzinfo is None:
+        # Некоторые отправители шлют наивные даты — считаем UTC.
+        msg_dt = msg_dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - msg_dt).total_seconds() / 86400
+
+
+def _notify_too_old(account: Any, email: dict[str, Any], age_days: float, max_age: int) -> None:
+    h = telegram_bot._html
+    text = (f"📭 <b>Старое письмо не обработано</b> ({age_days:.0f} дн., лимит {max_age})\n"
+            f"Ящик: {h(account['gmail_email'])}\n"
+            f"От: {h(email.get('from_name') or email.get('from_email') or '?')}\n"
+            f"Тема: {h((email.get('subject') or '')[:120])}\n"
+            f"Если нужно — ответьте в Kleinanzeigen вручную.")
+    try:
+        telegram_bot.notify(text)
+    except Exception:
+        logger.exception("Уведомление о старом письме не ушло")
+
+
+def _notify_late(message_id: int, thread_id: str, age_days: float, autopilot_on: bool) -> None:
+    text = (f"⏰ <b>Запоздалое письмо</b> · #{message_id} — пришло {age_days:.1f} дн. назад.\n"
+            + ("Автопилот треда на него не отвечал" if autopilot_on else "Auto-ack на него не слался")
+            + " — ответьте вручную.")
+    try:
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+    except Exception:
+        logger.exception("Уведомление о запоздалом письме не ушло msg=%s", message_id)
+
+
 def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) -> None:
     """Обработать одно входящее письмо: создать запись, спарсить, сгенерить ответ, послать оператору.
 
@@ -643,29 +690,21 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         _skip_email(account, email, "skipped_dedup")
         return
 
-    # Skip слишком старые письма (по Date-header).
-    # Защита от разгребания древнего архива по уже-удалённым/проданным объявлениям.
+    # Возраст письма по Date-header. Старше inquiry_max_age_days (по умолчанию 7) —
+    # не обрабатываем, но оператору уведомление (раньше — тихий выброс). Старше
+    # LATE_AFTER_DAYS — «запоздало»: карточка оператору, автопилот и auto-ack молчат
+    # (отвечать через сутки «сейчас за рулём» — хуже, чем не отвечать).
     max_age = config.inquiry_max_age_days()
-    if max_age > 0:
-        from email.utils import parsedate_to_datetime
-        date_str = (email.get("date") or "").strip()
-        if date_str:
-            try:
-                msg_dt = parsedate_to_datetime(date_str)
-                if msg_dt is not None:
-                    # Привести к timezone-aware UTC; некоторые отправители шлют наивные даты.
-                    if msg_dt.tzinfo is None:
-                        msg_dt = msg_dt.replace(tzinfo=__import__("datetime").timezone.utc)
-                    age_days = (datetime.now(msg_dt.tzinfo) - msg_dt).days
-                    if age_days > max_age:
-                        logger.info(
-                            "Skip: too old (%d дн., лимит %d), account=%s, subject=%r",
-                            age_days, max_age, account["gmail_email"], subject[:60],
-                        )
-                        _skip_email(account, email, "skipped_max_age")
-                        return
-            except (TypeError, ValueError) as e:
-                logger.debug("parsedate failed: %s", e)
+    age_days = _email_age_days(email)
+    if max_age > 0 and age_days is not None and age_days > max_age:
+        logger.info(
+            "Skip: too old (%.1f дн., лимит %d), account=%s, subject=%r",
+            age_days, max_age, account["gmail_email"], subject[:60],
+        )
+        _notify_too_old(account, email, age_days, max_age)
+        _skip_email(account, email, "skipped_max_age")
+        return
+    late = age_days is not None and age_days > LATE_AFTER_DAYS
 
     # Defense in depth: IMAP-фильтр по From должен был отсеять до нас, но если
     # пользователь его выключил — не пускаем не-Kleinanzeigen-почту в Claude/Telegram.
@@ -847,7 +886,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     # Уважает send_mode. Любая ошибка → log + продолжаем без ack.
     # Запускается ДО parse_ad — Playwright медленный, а ack должен уложиться в секунды.
     thread_id = email.get("gmail_thread_id") or ""
-    if _row_get(account, "auto_ack_enabled") and thread_id:
+    if late and _row_get(account, "auto_ack_enabled"):
+        logger.info("auto-ack пропущен: письмо запоздало (%.1f дн.) msg=%s", age_days, inserted_id)
+    if _row_get(account, "auto_ack_enabled") and thread_id and not late:
         try:
             thread_msgs = db.thread_history(thread_id)
             in_count = sum(1 for r in thread_msgs if r["direction"] == "in")
@@ -961,6 +1002,10 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     ap_thread_id = email.get("gmail_thread_id") or ""
     autopilot = db.get_thread_autopilot(ap_thread_id) if ap_thread_id else None
     is_autopilot = bool(autopilot and autopilot["active"])
+    if is_autopilot and late:
+        # Запоздалое письмо — автопилот не отвечает, обычная карточка оператору.
+        logger.info("autopilot пропущен: письмо запоздало (%.1f дн.) msg=%s", age_days, inserted_id)
+        is_autopilot = False
 
     if is_autopilot:
         try:
@@ -1050,6 +1095,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         # (status='new' без telegram_message_id) пойдёт веткой «довести до карточки» выше.
         logger.exception("Не удалось послать оператору msg=%s: %s", inserted_id, e)
         raise
+    if late:
+        _notify_late(inserted_id, thread_id, age_days, bool(autopilot and autopilot["active"]))
 
 
 # Публичный алиас для импорта из scheduler.py
