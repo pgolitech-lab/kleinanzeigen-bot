@@ -19,6 +19,7 @@ IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465  # SSL
+SMTP_TIMEOUT = 30
 
 # Без timeout-а imaplib висит бесконечно при сетевом разрыве.
 # История: ночью 2026-05-07 IMAP завис в socket.recv → polling job не вернулся
@@ -162,6 +163,120 @@ def _extract_text(msg: email.message.Message) -> str:
 
 
 # --- IMAP: получение писем ---
+#
+# ВСЕ команды — UID-варианты (`imap.uid("SEARCH"|"FETCH"|"STORE")`). Номер
+# последовательности (seq-num) живёт только в рамках одной сессии и сдвигается,
+# когда в ящик падает новое письмо: раньше `mark_seen` в НОВОМ соединении ставил
+# \Seen по seq-num из fetch_new и мог пометить прочитанным чужое письмо. UID
+# стабилен между сессиями (пока не сменился UIDVALIDITY — у Gmail INBOX не меняется).
+
+# Сколько UID склеивать в один FETCH/STORE. Gmail держит длинные команды, но
+# очень длинная строка UID-ов упирается в лимит строки команды — режем пачками.
+_UID_CHUNK = 100
+
+
+def _uid_set(uids: list[str]) -> str:
+    """Список UID → IMAP message set «1,5,9»."""
+    return ",".join(uids)
+
+
+def _chunks(items: list[str], size: int = _UID_CHUNK) -> list[list[str]]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _norm_uid(uid: Any) -> str:
+    return uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+
+
+def _uid_search(imap: imaplib.IMAP4, *criteria: str) -> list[str]:
+    """UID SEARCH → список UID-строк по возрастанию (свежие в конце)."""
+    typ, data = imap.uid("SEARCH", None, *criteria)
+    if typ != "OK":
+        # Не «писем нет», а сбой — пусть всплывёт как ошибка опроса.
+        raise imaplib.IMAP4.error(f"UID SEARCH не OK: {data!r}")
+    if not data or not data[0]:
+        return []
+    return [_norm_uid(u) for u in data[0].split()]
+
+
+_UID_RE = re.compile(rb"\bUID\s+(\d+)", re.I)
+_THRID_RE = re.compile(rb"X-GM-THRID\s+(\d+)", re.I)
+
+
+def _uid_fetch(imap: imaplib.IMAP4, uids: list[str], what: str) -> dict[str, tuple[bytes, bytes]]:
+    """Пакетный UID FETCH. Возвращает {uid: (заголовок ответа, литерал-данные)}.
+
+    imaplib отдаёт список, где каждое письмо — tuple (b'7 (UID 123 X-GM-THRID 9
+    BODY[] {2048}', b'<raw>'), а между ними — b')'. UID ищем в заголовке tuple
+    (в ответе на UID FETCH сервер обязан его вернуть).
+    """
+    out: dict[str, tuple[bytes, bytes]] = {}
+    for chunk in _chunks(uids):
+        typ, data = imap.uid("FETCH", _uid_set(chunk), what)
+        if typ != "OK" or not data:
+            _log.warning("IMAP UID FETCH %s не OK: %r", _uid_set(chunk), typ)
+            continue
+        # UID обычно в заголовке tuple, но сервер вправе прислать его ПОСЛЕ
+        # литерала — отдельным элементом вида b' UID 5)'. Учитываем оба случая.
+        orphan: Optional[tuple[bytes, bytes]] = None
+        for item in data:
+            if isinstance(item, tuple) and len(item) >= 2:
+                head = item[0] if isinstance(item[0], (bytes, bytearray)) else str(item[0]).encode()
+                body = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
+                m = _UID_RE.search(head)
+                if m:
+                    out[m.group(1).decode()] = (bytes(head), bytes(body))
+                    orphan = None
+                else:
+                    orphan = (bytes(head), bytes(body))
+            elif orphan and isinstance(item, (bytes, bytearray)):
+                m = _UID_RE.search(item)
+                if m:
+                    out[m.group(1).decode()] = (orphan[0] + b" " + bytes(item), orphan[1])
+                orphan = None
+    missing = [u for u in uids if u not in out]
+    if missing:
+        _log.warning("IMAP UID FETCH: сервер не вернул UID %s", missing[:20])
+    return out
+
+
+def _uid_store(imap: imaplib.IMAP4, uids: list[str], op: str) -> None:
+    """Пакетный UID STORE флага \\Seen (op = '+FLAGS' / '-FLAGS')."""
+    for chunk in _chunks(uids):
+        typ, data = imap.uid("STORE", _uid_set(chunk), op, "(\\Seen)")
+        if typ != "OK":
+            raise imaplib.IMAP4.error(f"UID STORE {op} не OK: {data!r}")
+
+
+def _search_criteria(from_filter: Optional[str], *base: str) -> tuple[str, ...]:
+    if from_filter:
+        return (*base, "FROM", f'"{from_filter}"')
+    return base or ("ALL",)
+
+
+def _parse_message(uid: str, head: bytes, raw: bytes) -> dict[str, Any]:
+    """Сырые байты письма → dict, который ест incoming._process_incoming."""
+    m = _THRID_RE.search(head)
+    thrid = m.group(1).decode() if m else ""
+    msg = email.message_from_bytes(raw)
+    from_name, from_email = parseaddr(_decode(msg.get("From")))
+    to_addr = parseaddr(_decode(msg.get("To")))[1]
+    text_body, html_body = _extract_parts(msg)
+    return {
+        "gmail_message_id": (msg.get("Message-ID") or "").strip(),
+        "gmail_thread_id": thrid,
+        "from_email": from_email,
+        "from_name": from_name,
+        "to_email": to_addr,
+        "subject": _decode(msg.get("Subject")),
+        "body": text_body,
+        "body_html": html_body,
+        "in_reply_to": (msg.get("In-Reply-To") or "").strip(),
+        "references": (msg.get("References") or "").strip(),
+        "date": _decode(msg.get("Date")),
+        "uid": uid,
+    }
+
 
 def fetch_new(
     gmail_email: str,
@@ -170,6 +285,7 @@ def fetch_new(
     limit: int = 50,
     from_filter: Optional[str] = None,
     include_seen: bool = False,
+    skip_uids: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
     """Получить непрочитанные (UNSEEN) письма из ящика.
 
@@ -180,70 +296,46 @@ def fetch_new(
     include_seen: если True — игнорировать UNSEEN, брать последние limit
     писем (с учётом from_filter) из всего ящика. Для отладки/реплея.
 
+    skip_uids: UID-ы, которые уже стоят в очереди обработки (ещё не помечены
+    \\Seen) — тело для них не качаем повторно.
+
+    Одна IMAP-сессия: UID SEARCH + один пакетный UID FETCH тел.
+
     Возвращает список dict с полями:
     gmail_message_id, gmail_thread_id, from_email, from_name, to_email,
-    subject, body, in_reply_to, references, date, uid.
+    subject, body, in_reply_to, references, date, uid (UID, строка).
 
     Письма НЕ помечаются прочитанными — это делается отдельно через mark_seen()
     после успешной обработки.
     """
-    results: list[dict[str, Any]] = []
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
         imap.login(gmail_email, gmail_password)
         imap.select(mailbox, readonly=True)
 
-        # imaplib принимает несколько аргументов критериев; AND-ятся неявно
-        if include_seen:
-            criteria = ("FROM", f'"{from_filter}"') if from_filter else ("ALL",)
-        elif from_filter:
-            criteria = ("UNSEEN", "FROM", f'"{from_filter}"')
-        else:
-            criteria = ("UNSEEN",)
-        typ, data = imap.search(None, *criteria)
-        if typ != "OK" or not data or not data[0]:
+        base = () if include_seen else ("UNSEEN",)
+        uids = _uid_search(imap, *_search_criteria(from_filter, *base))
+        if skip_uids:
+            uids = [u for u in uids if u not in skip_uids]
+        # Берём последние limit штук (свежие в конце)
+        uids = uids[-limit:]
+        if not uids:
             return []
 
-        # Берём последние limit штук (свежие в конце)
-        ids = data[0].split()[-limit:]
+        # PEEK не сбрасывает флаг \Seen; одновременно тянем X-GM-THRID
+        fetched = _uid_fetch(imap, uids, "(UID X-GM-THRID BODY.PEEK[])")
 
-        for uid in ids:
-            # PEEK не сбрасывает флаг \Seen; одновременно тянем X-GM-THRID
-            typ, msg_data = imap.fetch(uid, "(BODY.PEEK[] X-GM-THRID)")
-            if typ != "OK" or not msg_data:
-                continue
-
-            raw: Optional[bytes] = None
-            thrid = ""
-            for item in msg_data:
-                if isinstance(item, tuple) and len(item) >= 2:
-                    raw = item[1] if isinstance(item[1], (bytes, bytearray)) else None
-                    header = item[0].decode("utf-8", errors="ignore") if isinstance(item[0], bytes) else str(item[0])
-                    m = re.search(r"X-GM-THRID\s+(\d+)", header)
-                    if m:
-                        thrid = m.group(1)
-            if not raw:
-                continue
-
-            msg = email.message_from_bytes(raw)
-            from_name, from_email = parseaddr(_decode(msg.get("From")))
-            to_addr = parseaddr(_decode(msg.get("To")))[1]
-            text_body, html_body = _extract_parts(msg)
-
-            results.append({
-                "gmail_message_id": (msg.get("Message-ID") or "").strip(),
-                "gmail_thread_id": thrid,
-                "from_email": from_email,
-                "from_name": from_name,
-                "to_email": to_addr,
-                "subject": _decode(msg.get("Subject")),
-                "body": text_body,
-                "body_html": html_body,
-                "in_reply_to": (msg.get("In-Reply-To") or "").strip(),
-                "references": (msg.get("References") or "").strip(),
-                "date": _decode(msg.get("Date")),
-                "uid": uid.decode() if isinstance(uid, bytes) else str(uid),
-            })
-
+    results: list[dict[str, Any]] = []
+    for uid in uids:  # сохраняем порядок SEARCH (старые → новые)
+        got = fetched.get(uid)
+        if not got or not got[1]:
+            continue
+        try:
+            results.append(_parse_message(uid, *got))
+        except Exception:
+            # Одно битое письмо не должно блокировать опрос всего аккаунта:
+            # отдаём заглушку, очередь залогирует, алертнёт и пометит \Seen.
+            _log.exception("Не разобрали письмо UID=%s (%s)", uid, gmail_email)
+            results.append({"uid": uid, "gmail_message_id": "", "_broken": True})
     return results
 
 
@@ -253,14 +345,14 @@ def mark_seen(
     uids: list[str],
     mailbox: str = "INBOX",
 ) -> None:
-    """Пометить письма как прочитанные (флаг \\Seen)."""
+    """Пометить письма как прочитанные (флаг \\Seen) — по UID, одной командой."""
+    uids = [_norm_uid(u) for u in uids if u]
     if not uids:
         return
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
         imap.login(gmail_email, gmail_password)
         imap.select(mailbox)
-        for uid in uids:
-            imap.store(uid, "+FLAGS", "\\Seen")
+        _uid_store(imap, uids, "+FLAGS")
 
 
 def find_orphan_seen_uids(
@@ -271,7 +363,7 @@ def find_orphan_seen_uids(
     since_days: int = 2,
     mailbox: str = "INBOX",
     limit: int = 200,
-) -> list[bytes]:
+) -> list[str]:
     """Найти UID-ы SEEN писем за последние N дней которых НЕТ в known_message_ids.
 
     Защита от race-condition: бот успел `mark_seen`, но не сохранил message-id ни
@@ -279,60 +371,48 @@ def find_orphan_seen_uids(
     `_process_incoming` или crash). Возвращает список UID-ов чтобы вызывающий
     мог снять Seen → следующий poll снова увидит их как UNSEEN и обработает.
 
-    Дёшево: только заголовок Message-ID per UID (минимум IMAP-трафика).
+    Дёшево: один пакетный UID FETCH только заголовка Message-ID.
     """
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(days=since_days)).strftime("%d-%b-%Y")
-    orphans: list[bytes] = []
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
         imap.login(gmail_email, gmail_password)
         imap.select(mailbox, readonly=True)
-        if from_filter:
-            criteria = ("SEEN", "FROM", f'"{from_filter}"', "SINCE", since)
-        else:
-            criteria = ("SEEN", "SINCE", since)
-        typ, data = imap.search(None, *criteria)
-        if typ != "OK" or not data or not data[0]:
-            return []
-        uids = data[0].split()[-limit:]
+        uids = _uid_search(imap, *_search_criteria(from_filter, "SEEN", "SINCE", since))[-limit:]
         if not uids:
             return []
-        for uid in uids:
-            typ, msg_data = imap.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
-            if typ != "OK" or not msg_data:
-                continue
-            msg_id = ""
-            for item in msg_data:
-                if isinstance(item, tuple) and len(item) >= 2:
-                    raw = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
-                    for line in raw.splitlines():
-                        if line.lower().startswith(b"message-id:"):
-                            msg_id = line.split(b":", 1)[1].strip().decode(errors="ignore")
-                            break
-                    if msg_id:
-                        break
-            if msg_id and msg_id not in known_message_ids:
-                orphans.append(uid)
+        fetched = _uid_fetch(imap, uids, "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+
+    orphans: list[str] = []
+    for uid in uids:
+        got = fetched.get(uid)
+        if not got:
+            continue
+        msg_id = ""
+        for line in got[1].splitlines():
+            if line.lower().startswith(b"message-id:"):
+                msg_id = line.split(b":", 1)[1].strip().decode(errors="ignore")
+                break
+        if msg_id and msg_id not in known_message_ids:
+            orphans.append(uid)
     return orphans
 
 
 def unmark_seen(
     gmail_email: str,
     gmail_password: str,
-    uids: list[bytes],
+    uids: list[str],
     mailbox: str = "INBOX",
 ) -> None:
-    """Снять флаг \\Seen с UID-ов (orphan-recovery)."""
+    """Снять флаг \\Seen с UID-ов (orphan-recovery). Ошибка — наверх: вызывающий
+    логирует, следующий orphan-scan повторит."""
+    uids = [_norm_uid(u) for u in uids if u]
     if not uids:
         return
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT) as imap:
         imap.login(gmail_email, gmail_password)
         imap.select(mailbox)
-        for uid in uids:
-            try:
-                imap.store(uid, "-FLAGS", "\\Seen")
-            except Exception:
-                pass  # best-effort; следующий orphan-scan повторит
+        _uid_store(imap, uids, "-FLAGS")
 
 
 def test_connection(gmail_email: str, gmail_password: str) -> tuple[bool, str]:
@@ -387,7 +467,9 @@ def send_reply(
     msg.set_content(body)
 
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context) as smtp:
+    # timeout: без него smtplib висит бесконечно при сетевом разрыве и держит
+    # вызывающий поток (job / HTTP-запрос оператора).
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=SMTP_TIMEOUT) as smtp:
         smtp.login(gmail_email, gmail_password)
         smtp.send_message(msg)
 
