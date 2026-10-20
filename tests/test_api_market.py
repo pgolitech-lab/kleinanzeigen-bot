@@ -43,3 +43,18 @@ def test_market_not_found_404(c):
         assert c.get("/api/ma/market/advice/9", headers=H()).status_code == 404
         assert c.get("/api/ma/market/tips/9", headers=H()).status_code == 404
     assert c.get("/api/ma/market/duplicates").status_code in (401, 403, 422)
+
+
+def test_thread_market_line(c):
+    row = {"ad_id": "A1", "ad_title": "Sitzbank"}
+    with patch("web.api_market.db") as mdb, patch("web.api_market.market_advisor") as m:
+        mdb.thread_history.return_value = [row]
+        m.advise_price.return_value = {"status": "ok", "n": 7, "p25": 380, "median": 420, "p75": 470,
+                                       "recommended_eur": 420, "min_eur": 380, "verdict_ru": "в рынке"}
+        r = c.get("/api/ma/threads/t1/market", headers=H()).json()
+        assert r["text"] == "рынок 380–470 €, медиана 420 · 7 объявл." and r["median"] == 420
+        m.advise_price.assert_called_once_with(ad_id="A1", title="Sitzbank")
+        m.advise_price.return_value = {"status": "few_data", "n": 1, "verdict_ru": "мало данных"}
+        assert c.get("/api/ma/threads/t1/market", headers=H()).json()["text"] == "мало данных"
+        mdb.thread_history.return_value = []
+        assert c.get("/api/ma/threads/t1/market", headers=H()).status_code == 404

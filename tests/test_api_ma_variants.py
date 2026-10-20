@@ -56,12 +56,12 @@ def test_apply_and_stale(env):
     assert c.post(f"/api/ma/messages/{mid}/variants/hold/apply", headers=H()).status_code == 409
 
 
-@pytest.mark.parametrize("exc,code", [("suggest", 409), ("lookup", 404), ("limit", 503), ("llm", 502)])
+@pytest.mark.parametrize("exc,code", [("suggest", 409), ("lookup", 404), ("limit", 503), ("llm", 502), ("boom", 503)])
 def test_error_mapping(env, exc, code):
     c, mid, dv = env
     from modules import claude, llm
     dv.side_effect = {"suggest": claude.SuggestError("нет цены"), "lookup": LookupError("нет письма"),
-                      "limit": llm.LLMLimitError("limit"), "llm": llm.LLMError("timeout")}[exc]
+                      "limit": llm.LLMLimitError("limit"), "llm": llm.LLMError("timeout"), "boom": FileNotFoundError("claude")}[exc]
     r = c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H())
     assert r.status_code == code
 
