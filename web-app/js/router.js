@@ -97,7 +97,9 @@ export function start(mount) {
         return;
       }
     }
-    setError(mount, `Неизвестный путь: ${hash}`);
+    const screenMount = document.createElement("div");
+    mount.replaceChildren(screenMount);
+    setError(screenMount, `Неизвестный путь: ${hash}`);
   }
 
   window.addEventListener("hashchange", dispatch);

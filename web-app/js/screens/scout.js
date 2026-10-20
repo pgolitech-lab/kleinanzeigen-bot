@@ -586,7 +586,9 @@ function pollStatus(statusEl) {
     }
   }).catch(e => {
     console.warn("[scout] status poll failed:", e);
-    if (statusEl.isConnected) again(8000);
+    if (!statusEl.isConnected) return;
+    statusEl.textContent = "⚠️ статус прогона недоступен, повторяю…";
+    again(8000);
   });
 }
 

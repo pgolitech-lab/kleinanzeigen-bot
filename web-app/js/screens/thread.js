@@ -313,7 +313,9 @@ export async function render(mount, params, opts = {}) {
         const lockRes = await api(`/api/ma/messages/${latestPendingMsgId}/lock/acquire`, {method: "POST"});
         if (!mount.isConnected) {
           // Оператор ушёл, пока брали лок, — сразу отдаём, чтобы не висел 5 мин.
-          tryReleaseLock(latestPendingMsgId);
+          // Но не если новый экран уже держит тот же msg (повторное открытие
+          // того же треда): иначе сняли бы лок у активного экрана.
+          if (_heldMsgId !== latestPendingMsgId) tryReleaseLock(latestPendingMsgId);
           return;
         }
         acquired = true;
