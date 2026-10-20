@@ -6,7 +6,7 @@
 import json
 from typing import Any, Optional
 
-import anthropic
+from modules import llm
 
 import config
 from modules.claude_utils import _calc_cost
@@ -65,9 +65,6 @@ def generate_scout_queries(
     extra_instruction — доп. указание оператора (RU), напр. «добавь больше по электричкам».
     Возвращает {queries: [{kind,label,keywords,category,max_pages}], tokens_in, tokens_out, cost_usd}.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
 
     existing = existing_keywords or []
     existing_block = (
@@ -95,7 +92,7 @@ def generate_scout_queries(
         + "\nВерни поле queries (массив)."
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     model = config.claude_model()
     response = client.messages.create(
         model=model,
@@ -181,9 +178,6 @@ def classify_scout_listings(
       few-shot для in-context обучения (учится на корректировках оператора).
     Возвращает {map: {ad_id: 'car'|'part'|'other'}, tokens_in, tokens_out, cost_usd}.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
     if not items:
         return {"map": {}, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0}
 
@@ -223,7 +217,7 @@ def classify_scout_listings(
         "Верни results: массив {id, type} для КАЖДОГО id."
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     model = "claude-haiku-4-5"
     response = client.messages.create(
         model=model,

@@ -26,7 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import anthropic  # noqa: E402
+from modules import llm  # noqa: E402
 import config  # noqa: E402
 import database as db  # noqa: E402
 
@@ -190,11 +190,8 @@ def main() -> None:
                         help="High-confidence не применяется в messages автоматом")
     args = parser.parse_args()
 
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        sys.exit("Нет anthropic_api_key в config")
     model = config.claude_model()
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
 
     threads = candidate_threads(CUTOFF, args.limit, args.thread)
     logger.info("Threads to scan: %d (model=%s, autocommit=%s, dry_run=%s)",

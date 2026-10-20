@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Optional
 
-import anthropic
+from modules import llm
 
 import config
 import database as db
@@ -284,11 +284,8 @@ def generate_reply(
     Возвращает dict: {ru_client, ru_answer, de_answer}.
     Бросает RuntimeError если не задан API ключ или Claude вернул мусор.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ в настройках")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
 
     user_text = _build_user_message(
         de_client_text=de_client_text,
@@ -403,9 +400,6 @@ def generate_autopilot_reply(
     Возвращает dict с полями generate_reply + should_stop / stop_reason /
     client_pressing_below_floor / used_web_search.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ")
 
     user_text = _build_user_message(
         de_client_text=de_client_text,
@@ -440,7 +434,7 @@ def generate_autopilot_reply(
 
     full_user = user_text + autopilot_addendum
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     response = client.messages.create(
         model=config.claude_model(),
         max_tokens=max_tokens,
@@ -518,9 +512,6 @@ def translate_only(
     context: опциональная контекстная подсказка — название/описание объявления,
         чтобы переводчик корректно выбирал терминологию (Sitze vs Plätze для сидений).
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ в настройках")
 
     if target_lang and source_lang:
         target_name, _ = lang_display(target_lang)
@@ -533,7 +524,7 @@ def translate_only(
         src, dst = "русского", "немецкий"
     else:
         src, dst = "немецкого", "русский"
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
 
     schema = {
         "type": "object",
@@ -648,9 +639,6 @@ def _regenerate_core(
     include_current_draft: для tweak/instruction — True (Claude видит текущий драфт);
                           для price/strategy-quick — False (фреш генерация).
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ в настройках")
 
     client_lang = msg_row["client_lang"] or msg_row["answer_lang"] or "de"
     lang_name, _ = lang_display(client_lang)
@@ -698,7 +686,7 @@ def _regenerate_core(
     parts.append("")
     parts.append(GERMAN_CLOSING_RULE)
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     response = client.messages.create(
         model=config.claude_model(),
         max_tokens=900,
@@ -816,9 +804,6 @@ def generate_followup_ping(
 
     Возвращает {ru_text, client_text, target_lang, tokens_in, tokens_out, cost_usd}.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ в настройках")
 
     lang_name, _flag = lang_display(client_lang or "de")
     parts: list[str] = []
@@ -855,7 +840,7 @@ def generate_followup_ping(
     parts.append("")
     parts.append(GERMAN_CLOSING_RULE)
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     response = client.messages.create(
         model=config.claude_model(),
         max_tokens=600,
@@ -898,9 +883,6 @@ def summarize_thread(history: list[dict[str, Any]]) -> dict[str, Any]:
     history: rows из db.thread_history (исключая текущий msg).
     Возвращает {summary_ru, tokens_in, tokens_out, cost_usd}.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API ключ")
 
     parts: list[str] = ["=== ПЕРЕПИСКА ==="]
     for h in history:
@@ -918,7 +900,7 @@ def summarize_thread(history: list[dict[str, Any]]) -> dict[str, Any]:
         "summary_ru — только сам текст резюме."
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     response = client.messages.create(
         model=config.claude_model(),
         max_tokens=300,
@@ -965,11 +947,8 @@ def classify_email_is_inquiry(
     Возвращает {is_inquiry, reason, tokens_in, tokens_out, cost_usd}.
     Используется в `_process_incoming` как финальный gate перед дорогими операциями.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     classifier_model = "claude-haiku-4-5"
     response = client.messages.create(
         model=classifier_model,
@@ -1033,11 +1012,8 @@ def detect_text_lang(text: str) -> dict[str, Any]:
     кириллице пропускает. Возвращает {lang, tokens_in, tokens_out, cost_usd};
     lang='und' для языково-нейтрального текста (числа, «Ok», emoji).
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     detector_model = "claude-haiku-4-5"
     response = client.messages.create(
         model=detector_model,
@@ -1096,9 +1072,6 @@ def generate_auto_ack(
     excuse_hint: повод почему не отвечаю сейчас (RU), Haiku переведёт.
     Возвращает {client_lang, ack_text, tokens_in, tokens_out, cost_usd}.
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
 
     name_part = buyer_display_name.strip() if buyer_display_name else ""
     name_line = f"Имя: {name_part}" if name_part else "Имя: не указано"
@@ -1122,7 +1095,7 @@ def generate_auto_ack(
         f"Поля: client_lang (ISO 639-1), ack_text."
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     classifier_model = "claude-haiku-4-5"
     response = client.messages.create(
         model=classifier_model,
@@ -1168,12 +1141,9 @@ def detect_and_translate_to_ru(text: str) -> dict[str, Any]:
     Используется для archived rows у которых ru_client пуст (был backfill без Sonnet).
     Дешёво (~$0.001 на короткий текст).
     """
-    api_key = config.anthropic_api_key()
-    if not api_key:
-        raise RuntimeError("Не задан Anthropic API key")
     if not text or not text.strip():
         return {"lang": "?", "translation_ru": "", "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.Client()
     classifier_model = "claude-haiku-4-5"
     response = client.messages.create(
         model=classifier_model,
@@ -1211,24 +1181,9 @@ def history_for(gmail_thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
-def test_api_key(api_key: str) -> tuple[bool, str]:
-    """Проверка API ключа дешёвым запросом на Haiku. Для веб-морды."""
-    if not api_key:
-        return False, "API ключ пустой"
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-        client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=10,
-            messages=[{"role": "user", "content": "ping"}],
-        )
-        return True, "API ключ валиден"
-    except anthropic.AuthenticationError:
-        return False, "Невалидный API ключ"
-    except anthropic.APIError as e:
-        return False, f"Ошибка API: {e}"
-    except Exception as e:
-        return False, f"Ошибка: {e}"
+def test_api_key(api_key: str = "") -> tuple[bool, str]:
+    """Проверка доступа к Claude. Теперь — подписка через Claude Code CLI, ключ API не нужен."""
+    return llm.status()
 
 
 # re-export для обратной совместимости
