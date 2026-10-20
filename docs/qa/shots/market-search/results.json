@@ -1,0 +1,184 @@
+{
+ "flip5/0-empty": {
+  "hs": 0,
+  "over": 1,
+  "small": [],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nРазведка машин и запчастей по городам ›"
+ },
+ "flip5/0b-empty-click": {
+  "hs": 0,
+  "over": 1,
+  "small": [],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n\nВведите товар — например «сиденья Peugeot» или «скамья». Или нажмите на подсказку выше.\n\nРазведка машин и запчастей по городам ›"
+ },
+ "flip5/1-sitzbank": {
+  "hs": 0,
+  "over": 1,
+  "small": [],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nПродаётся 12 объявлений\n\nЦена от 100 € до 99.999.999 €, обычно 435 €\n\nнаша цена 450 € — около медианы 435 € (+3 %), дешевле 42 % рынка\n\nГДЕ ПРОДАЁТСЯ\nKöln\n11 объявлений · обычно 420 €\nОБЪЯВЛЕНИЯ\n<img src=x onerror=\"window.__xss="
+ },
+ "flip5/2-werkbank-nodata": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔎 Искать на Kleinanzeige"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n\nПо «Werkbank» в накопленных данных ничего нет — scout такой товар не ищет. Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч).\n\n🔎 Искать на Kleinanzeigen\nРазведка машин и запчастей по городам ›"
+ },
+ "flip5/3-tisch-few": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔎 Поискать на Kleinanzei"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nПродаётся 2 объявления\n\nЦена от 55 € до 55 €, обычно 55 €\n\nУ нас 1.100 €\n\nМало данных: объявлений 2, с ценой 1 — цифры ориентировочные.\n\n🔎 Поискать на Kleinanzeigen\nГДЕ ПРОДАЁТСЯ\nBerlin\n2 объявления · обычно 55 €\nОБЪЯВЛЕНИЯ\nKla"
+ },
+ "flip5/4-xss": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔎 Поискать на Kleinanzei"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nПродаётся 1 объявление\n\nЦена от 100 € до 100 €, обычно 100 €\n\nУ нас 10 €\n\nМало данных: объявлений 1, с ценой 1 — цифры ориентировочные.\n\n🔎 Поискать на Kleinanzeigen\nГДЕ ПРОДАЁТСЯ\nKöln\n1 объявление · обычно 100 €\nОБЪЯВЛЕНИЯ\n<img"
+ },
+ "flip5/xss": false,
+ "flip5/5-longquery": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔄 Повторить"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n\nНе получилось посмотреть рынок.\n\n🔄 Повторить\nРазведка машин и запчастей по городам ›"
+ },
+ "flip5/dbl-calls": 2,
+ "flip5/6-neterr": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔄 Повторить"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nНет связи с сервером. Проверьте интернет и нажмите «Повторить». Если не помогает — закройте мини-приложение и откройте его кнопкой меню бота (адрес мог смениться).\n\n🔄 "
+ },
+ "flip5/7-retry-ok": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔄 Повторить"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nНет связи с сервером. Проверьте интернет и нажмите «Повторить». Если не помогает — закройте мини-приложение и откройте его кнопкой меню бота (адрес мог смениться).\n\n🔄 "
+ },
+ "flip5/8a-nodata2": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔎 Искать на Kleinanzeige"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nПо «Werkbank» в накопленных данных ничего нет — scout такой товар не ищет. Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч).\n\n🔎 Искать на Kleinanzeigen\nРа"
+ },
+ "flip5/8c-live-result": {
+  "hs": 0,
+  "over": 1,
+  "small": [
+   "🔎 Искать на Kleinanzeige"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nПо «Werkbank» в накопленных данных ничего нет — scout такой товар не ищет. Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч).\n\n🔎 Искать на Kleinanzeigen\nРа"
+ },
+ "flip5/kbd-input-visible": true,
+ "flip5/kbd-blur": true,
+ "flip5/kbd-headline-in-view": false,
+ "flip5/errors": [
+  "Failed to load resource: net::ERR_FAILED",
+  "Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"
+ ],
+ "fold-inner/0-empty": {
+  "hs": 0,
+  "over": 0,
+  "small": [],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nРазведка машин и запчастей по городам ›"
+ },
+ "fold-inner/0b-empty-click": {
+  "hs": 0,
+  "over": 0,
+  "small": [],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n\nВведите товар — например «сиденья Peugeot» или «скамья». Или нажмите на подсказку выше.\n\nРазведка машин и запчастей по городам ›"
+ },
+ "fold-inner/1-sitzbank": {
+  "hs": 0,
+  "over": 0,
+  "small": [],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nПродаётся 12 объявлений\n\nЦена от 100 € до 99.999.999 €, обычно 435 €\n\nнаша цена 450 € — около медианы 435 € (+3 %), дешевле 42 % рынка\n\nГДЕ ПРОДАЁТСЯ\nKöln\n11 объявлений · обычно 420 €\nОБЪЯВЛЕНИЯ\n<img src=x onerror=\"window.__xss="
+ },
+ "fold-inner/2-werkbank-nodata": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔎 Искать на Kleinanzeige"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n\nПо «Werkbank» в накопленных данных ничего нет — scout такой товар не ищет. Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч).\n\n🔎 Искать на Kleinanzeigen\nРазведка машин и запчастей по городам ›"
+ },
+ "fold-inner/3-tisch-few": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔎 Поискать на Kleinanzei"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nПродаётся 2 объявления\n\nЦена от 55 € до 55 €, обычно 55 €\n\nУ нас 1.100 €\n\nМало данных: объявлений 2, с ценой 1 — цифры ориентировочные.\n\n🔎 Поискать на Kleinanzeigen\nГДЕ ПРОДАЁТСЯ\nBerlin\n2 объявления · обычно 55 €\nОБЪЯВЛЕНИЯ\nKla"
+ },
+ "fold-inner/4-xss": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔎 Поискать на Kleinanzei"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\nПродаётся 1 объявление\n\nЦена от 100 € до 100 €, обычно 100 €\n\nУ нас 10 €\n\nМало данных: объявлений 1, с ценой 1 — цифры ориентировочные.\n\n🔎 Поискать на Kleinanzeigen\nГДЕ ПРОДАЁТСЯ\nKöln\n1 объявление · обычно 100 €\nОБЪЯВЛЕНИЯ\n<img"
+ },
+ "fold-inner/xss": false,
+ "fold-inner/5-longquery": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔄 Повторить"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n\nНе получилось посмотреть рынок.\n\n🔄 Повторить\nРазведка машин и запчастей по городам ›"
+ },
+ "fold-inner/dbl-calls": 2,
+ "fold-inner/6-neterr": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔄 Повторить"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nНет связи с сервером. Проверьте интернет и нажмите «Повторить». Если не помогает — закройте мини-приложение и откройте его кнопкой меню бота (адрес мог смениться).\n\n🔄 "
+ },
+ "fold-inner/7-retry-ok": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔄 Повторить"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nНет связи с сервером. Проверьте интернет и нажмите «Повторить». Если не помогает — закройте мини-приложение и откройте его кнопкой меню бота (адрес мог смениться).\n\n🔄 "
+ },
+ "fold-inner/8a-nodata2": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔎 Искать на Kleinanzeige"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nПо «Werkbank» в накопленных данных ничего нет — scout такой товар не ищет. Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч).\n\n🔎 Искать на Kleinanzeigen\nРа"
+ },
+ "fold-inner/8c-live-result": {
+  "hs": 0,
+  "over": 0,
+  "small": [
+   "🔎 Искать на Kleinanzeige"
+  ],
+  "text": "Какой товар?\nНайти\n⭐ Sitzbank Peugeot Traveller 2+1 Leder schwarz\n⭐ <img src=x onerror=\"window.__xss=1\">Hack<script>window.__xss2=1</script>\n⭐ Einzelsitz Fahrersitz VW T6\n⭐ Komplettsatz Traveller: Bank + 2 VIP + Tisch\n⭐ Sitzbank 2er Mercedes Vito\n⭐ Sitzbank Citroën Jumpy\n🕘 <img src=x onerror=window.__xss=1>\n🕘 Tisch\n🕘 Werkbank\n\nПо «Werkbank» в накопленных данных ничего нет — scout такой товар не ищет. Нажмите «Искать на Kleinanzeigen» (живая выдача, 1 раз в 6 ч).\n\n🔎 Искать на Kleinanzeigen\nРа"
+ },
+ "fold-inner/kbd-input-visible": true,
+ "fold-inner/kbd-blur": true,
+ "fold-inner/kbd-headline-in-view": false,
+ "fold-inner/errors": [
+  "Failed to load resource: net::ERR_FAILED",
+  "Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"
+ ]
+}
