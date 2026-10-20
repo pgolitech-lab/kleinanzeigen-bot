@@ -1557,6 +1557,23 @@ class InstructionBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=1000)
 
 
+_PRICE_TEMPLATES = {
+    "de": "Hallo, ich kann Ihnen den Preis von {p} € anbieten. Bei Interesse melden Sie sich gern.\n\nViele Grüße",
+    "en": "Hello, I can offer you the price of {p} €. Let me know if you are interested.\n\nBest regards",
+    "ru": "Здравствуйте, могу предложить цену {p} €. Если интересно — напишите.\n\nС уважением",
+}
+
+
+def _price_template(lang: str, eur: float) -> "dict[str, str] | None":
+    """Шаблонный ответ с ценой на языке клиента (de/en/ru); других языков нет → None (не шлём не на его языке)."""
+    t = _PRICE_TEMPLATES.get(lang)
+    if t is None:
+        return None
+    p = str(int(eur)) if float(eur).is_integer() else f"{eur:.2f}".replace(".", ",")
+    ru = _PRICE_TEMPLATES["ru"].format(p=p)
+    return {"client": t.format(p=p), "ru": ru, "ru_back": ru}
+
+
 @router.post("/messages/{msg_id}/price")
 def ma_price(msg_id: int, body: PriceBody,
              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
@@ -1568,7 +1585,18 @@ def ma_price(msg_id: int, body: PriceBody,
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
-    _run_regenerate(scheduler.regenerate_draft_with_price(msg_id, body.eur))
+    res = scheduler.regenerate_draft_with_price(msg_id, body.eur)
+    if res.get("kind") == "error":
+        # Цена — арифметика, LLM нужен только для текста: при отказе LLM даём шаблон на языке клиента
+        tpl = _price_template(_client_lang(row), body.eur)
+        if tpl is None:
+            raise HTTPException(502, f"{res.get('message', 'LLM недоступен')} (шаблона для языка "
+                                     f"«{_client_lang(row)}» нет — напишите текст вручную)")
+        logger.warning("price: LLM не ответил msg=%s — сохранён шаблон (%s)", msg_id, res.get("message"))
+        db.update_message(msg_id, ru_answer=tpl["ru"], de_answer=tpl["client"],
+                          ru_translation=tpl["ru_back"], status="edited")
+        return {**_message_review_dict(msg_id), "fallback": True,
+                "fallback_reason": "ИИ недоступен — подставлен шаблон с вашей ценой"}
     return _message_review_dict(msg_id)
 
 

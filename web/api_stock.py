@@ -273,6 +273,23 @@ def stock_kit(product_id: int, body: KitBody, user: dict = Depends(verify_init_d
     return {"stock": _call(inventory.set_kit, product_id, comps)}
 
 
+@router.get("/stock/products/{product_id}/kit")
+def stock_kit_get(product_id: int, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Состав комплекта (пусто — не комплект) + остаток комплекта."""
+    if inv_db.get_product(product_id) is None:
+        raise HTTPException(404, "товар не найден")
+    comps = [{"product_id": c["component_product_id"], "title": c["title"], "qty": c["qty"]}
+             for c in inv_db.kit_components(product_id)]
+    return {"components": comps, "stock": inventory.stock_view(product_id)}
+
+
+@router.get("/stock/hidden")
+def stock_hidden(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Товары, скрытые со склада («не запчасть»), — чтобы вернуть обратно через /non-stock."""
+    items = [dict(r) for r in inv_db.list_products(include_non_stock=True) if r["non_stock"]]
+    return {"items": items, "count": len(items)}
+
+
 class BatchItem(BaseModel):
     product_id: int
     qty: int = Field(..., ge=1, le=100_000)
