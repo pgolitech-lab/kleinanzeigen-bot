@@ -6,12 +6,13 @@ import logging
 import random
 import re
 import zoneinfo
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Optional
 
 import config
 import database as db
-from modules import ad_brief, claude, gmail, parser, telegram_bot
+from modules import ad_brief, claude, guardrails, parser, telegram_bot
+from modules.outgoing import _row_get, _send_reply
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,6 @@ AUTO_ACK_EXCUSES: list[str] = [
     "сейчас в дороге",
 ]
 
-
-# Глобальный статус задач: {job_id: {last_run, ok, result, error}}.
-# Заполняется через event listener — поэтому работает без обёрток вокруг каждой job.
 def _clean_display_name(name: str) -> str:
     """Срезать суффиксы Kleinanzeigen из display name отправителя.
 
@@ -46,23 +44,14 @@ def _clean_display_name(name: str) -> str:
     return cleaned.strip()
 
 
-
-def _row_get(row: Any, key: str) -> Any:
-    """sqlite3.Row не имеет .get() — обернём чтобы безопасно читать новые колонки
-    (на случай старых row объектов до миграции)."""
-    try:
-        return row[key]
-    except (IndexError, KeyError):
-        return None
-
-
 def _skip_email(account: Any, email: dict[str, Any], reason: str) -> None:
-    """DRY: пометить письмо `\\Seen` в Gmail + записать в `processed_messages`.
+    """DRY: записать skip-нутое письмо в `processed_messages`.
 
     Используется во всех skip-точках `_process_incoming` (noreply / junk-subject /
     purchase-side / classifier / max-age / sold / no-ad-ref / dedup). Запись в
     processed_messages нужна orphan-recovery — иначе recovery в цикле снимает
-    Seen с тех же junk-писем и реклассифицирует.
+    Seen с тех же junk-писем и реклассифицирует. Флаг `\\Seen` ставит вызывающий
+    (`mail_queue`) одной пачкой после обработки — здесь IMAP не трогаем.
     """
     msg_id = (email.get("gmail_message_id") or "").strip()
     if msg_id:
@@ -70,10 +59,6 @@ def _skip_email(account: Any, email: dict[str, Any], reason: str) -> None:
             db.mark_processed(msg_id, account["id"], reason)
         except Exception:
             logger.exception("mark_processed fail (msg_id=%s, reason=%s)", msg_id, reason)
-    try:
-        gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-    except Exception as e:
-        logger.warning("mark_seen fail для UID=%s: %s", email.get("uid"), e)
 
 
 def _ack_already_sent_for_thread(thread_id: Optional[str]) -> bool:
@@ -201,27 +186,86 @@ def _send_auto_ack(
     return ack_id
 
 
+def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any) -> Optional[str]:
+    """Детерминированные проверки авто-ответа ДО отправки («код владеет числами»).
+
+    Возвращает причину остановки или None, если ответ можно слать:
+      guard_language — текст не на языке клиента (напр. ушёл бы русский черновик);
+      guard_floor    — цена сделки в брифе ниже операторского floor.
+    """
+    if not guardrails.outgoing_language_ok(reply.get("de_answer") or "", reply.get("client_lang")):
+        return "guard_language"
+    price = (reply.get("deal_brief") or {}).get("negotiated_price_eur")
+    floor = autopilot_row["floor_price_eur"]
+    if isinstance(price, (int, float)) and floor and guardrails.floor_violation(price, floor):
+        return "guard_floor"
+    return None
+
+
+def _autopilot_to_review(msg_id: int, thread_id: str, stop_reason: Optional[str]) -> None:
+    """Отдать черновик автопилота оператору на ревью; с stop_reason — ещё и
+    выключить автопилот треда и прислать уведомление об остановке."""
+    if stop_reason:
+        db.stop_thread_autopilot(thread_id, stop_reason)
+    try:
+        telegram_bot.send_for_review(msg_id)
+    except Exception:
+        logger.exception("send_for_review (autopilot) fail msg=%s", msg_id)
+    if stop_reason:
+        try:
+            telegram_bot.send_autopilot_stop_notification(msg_id, stop_reason)
+        except Exception:
+            logger.exception("autopilot stop notification fail msg=%s", msg_id)
+
+
 def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) -> None:
     """Обработать reply в автопилот-режиме.
 
-    Stop checks, авто-отправка / review-card / threat warning, counter increment, notification.
+    Порядок: stop-причины от модели и лимит (`autopilot_message_cap`) → guard'ы
+    языка и floor (`guardrails`) → shadow-режим (`autopilot_shadow_mode`: только
+    черновик оператору, без отправки) → авто-отправка + counter + уведомление.
     """
     thread_id = autopilot_row["gmail_thread_id"]
     notify_mode = autopilot_row["notify_mode"]
-    current_count = autopilot_row["messages_sent"]
+    current_count = autopilot_row["messages_sent"] or 0
+    cap = config.autopilot_message_cap()
+    shadow = config.autopilot_shadow_mode()
 
-    # Stop checks ПЕРЕД отправкой
     stop_reason: Optional[str] = None
     if reply.get("should_stop"):
         stop_reason = (reply.get("stop_reason") or "stopped_by_sonnet").strip() or "stopped_by_sonnet"
-    elif (current_count + 1) > 20:
+    elif (current_count + 1) > cap:
         stop_reason = "limit"
 
+    # Остановка без отправки — оператор разрулит через обычную review-карточку.
+    # threat — исключение: отправляем предупреждение клиенту (если пройдёт guard).
+    if stop_reason and stop_reason != "threat":
+        _autopilot_to_review(msg_id, thread_id, stop_reason)
+        return
+
+    guard = _autopilot_guard_reason(reply, autopilot_row)
+    if stop_reason == "threat" and guard == "guard_floor":
+        guard = None  # в предупреждении об угрозе цены нет — floor неприменим
+    if guard:
+        logger.warning("autopilot guard %s: msg=%s thread=%s — не отправляем, стоп + ревью",
+                       guard, msg_id, thread_id)
+        _autopilot_to_review(msg_id, thread_id, guard)
+        return
+
+    if shadow:
+        # Shadow: ответ сгенерён и сохранён в row как черновик, но не уходит
+        # клиенту. Автопилот остаётся активным, counter не растёт.
+        logger.info("autopilot SHADOW: msg=%s thread=%s stop=%s — черновик оператору, не отправлен",
+                    msg_id, thread_id, stop_reason or "-")
+        _autopilot_to_review(msg_id, thread_id, "threat" if stop_reason == "threat" else None)
+        return
+
+    db.update_message(msg_id, status="approved", is_autopilot_reply=1)
+    result = _send_reply(db.get_message(msg_id))
+    sent_ok = result.get("kind") in ("sent", "skipped")
+
     if stop_reason == "threat":
-        # Отправить предупреждение клиенту + остановить автопилот
-        db.update_message(msg_id, status="approved", is_autopilot_reply=1)
-        result = _send_reply(db.get_message(msg_id))
-        if result.get("kind") in ("sent", "skipped"):
+        if sent_ok:
             db.increment_autopilot_messages(thread_id)
         db.stop_thread_autopilot(thread_id, "threat")
         try:
@@ -230,34 +274,21 @@ def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) 
             logger.exception("autopilot threat notification fail")
         return
 
-    if stop_reason:
-        # Остановить БЕЗ отправки — оператор сам разрулит через обычную review-карточку
-        db.stop_thread_autopilot(thread_id, stop_reason)
-        try:
-            telegram_bot.send_for_review(msg_id)
-        except Exception:
-            logger.exception("send_for_review (autopilot stop) fail")
-        try:
-            telegram_bot.send_autopilot_stop_notification(msg_id, stop_reason)
-        except Exception:
-            logger.exception("autopilot stop notification fail")
-        return
-
-    # Нормальная авто-отправка
-    db.update_message(msg_id, status="approved", is_autopilot_reply=1)
-    result = _send_reply(db.get_message(msg_id))
-    if result.get("kind") in ("sent", "skipped"):
+    if sent_ok:
         new_count = db.increment_autopilot_messages(thread_id)
         if notify_mode == "notify":
             try:
                 telegram_bot.send_autopilot_progress(msg_id, new_count)
             except Exception:
                 logger.exception("autopilot progress notification fail")
-        logger.info("autopilot reply sent: msg=%s thread=%s count=%d/20",
-                    msg_id, thread_id, new_count)
+        logger.info("autopilot reply sent: msg=%s thread=%s count=%d/%d",
+                    msg_id, thread_id, new_count, cap)
     else:
-        # SMTP fail — counter НЕ инкрементим, автопилот остаётся active
-        logger.warning("autopilot SMTP fail msg=%s — autopilot остаётся active", msg_id)
+        # SMTP fail — counter НЕ инкрементим, автопилот остаётся active.
+        # Клиент ответа не получил — карточку оператору, чтобы не повисло молча.
+        logger.warning("autopilot SMTP fail msg=%s — autopilot остаётся active, карточка оператору: %s",
+                       msg_id, result.get("message"))
+        _autopilot_to_review(msg_id, thread_id, None)
 
 
 # Маркеры служебного web-relay футера Kleinanzeigen — по ним дёшево (SQL LIKE)
@@ -351,17 +382,72 @@ def reclean_incoming_bodies(scan_limit: int = 500, translate_cap: int = 25) -> s
     return f"reclean: fixed={fixed}, stuck={stuck}, translated={translated}, scanned={len(rows)}"
 
 
+def _already_processed(gmail_message_id: str) -> bool:
+    """Есть ли письмо в журнале processed_messages (skip-нутые и т. п.)."""
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM processed_messages WHERE gmail_message_id = ? LIMIT 1",
+            (gmail_message_id,),
+        ).fetchone()
+    return bool(row)
+
+
+def _known_thread_ad(thread_id: str, exclude_id: Optional[int] = None) -> Optional[dict[str, str]]:
+    """Данные объявления из прошлых писем этого треда (если их уже парсил Playwright).
+
+    Признак настоящего парсинга — непустое описание (fallback из темы письма
+    даёт только title). None — тред новый или парсинг раньше не удался.
+    """
+    if not thread_id:
+        return None
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT ad_title, ad_price, ad_description, seller_name FROM messages "
+            "WHERE gmail_thread_id = ? AND direction = 'in' AND id != ? "
+            "AND COALESCE(ad_title, '') != '' AND COALESCE(ad_description, '') != '' "
+            "ORDER BY id DESC LIMIT 1",
+            (thread_id, exclude_id or -1),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "title": row["ad_title"] or "",
+        "price": row["ad_price"] or "",
+        "description": row["ad_description"] or "",
+        "seller_name": row["seller_name"] or "",
+    }
+
+
 def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) -> None:
     """Обработать одно входящее письмо: создать запись, спарсить, сгенерить ответ, послать оператору.
 
-    force=True — режим отладочного реплея: дедуп пропускаем, IMAP `Seen` не ставим
-    (чтобы можно было повторить). Используется через /debug/reprocess.
+    force=True — режим отладочного реплея: дедуп пропускаем. Используется через
+    /debug/reprocess.
+
+    IMAP не трогает: флаг `\\Seen` ставит вызывающий (`modules/mail_queue.py`)
+    после нормального возврата. Исключение наружу = письмо остаётся UNSEEN и
+    будет повторено (с потолком попыток в очереди).
     """
     msg_id = email.get("gmail_message_id") or ""
 
     # Дедуп по Message-ID (только в обычном режиме)
-    if not force and msg_id and db.find_by_gmail_message_id(msg_id):
+    existing = db.find_by_gmail_message_id(msg_id) if (not force and msg_id) else None
+    if existing:
+        if existing["direction"] == "in" and existing["status"] == "new":
+            # Строка сохранена, но прошлая обработка упала до карточки оператору
+            # (исключение / рестарт посреди обработки). Не глотаем дедупом —
+            # доводим: карточка уйдёт с тем, что успели сохранить. Ошибка здесь
+            # пробрасывается → очередь повторит письмо.
+            logger.warning("Письмо %s уже в БД (msg=%s), но не дошло до оператора — "
+                           "довожу до карточки", msg_id, existing["id"])
+            telegram_bot.send_for_review(existing["id"])
+            return
         _skip_email(account, email, "skipped_dedup")
+        return
+    # Уже видели и сознательно skip-нули (junk / classifier / …), но \Seen тогда
+    # не встал (сбой IMAP) — не гоняем повторно через платный классификатор.
+    if not force and msg_id and _already_processed(msg_id):
+        logger.info("Skip: письмо %s уже в processed_messages", msg_id)
         return
 
     raw_body = email.get("body") or ""
@@ -424,9 +510,72 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         _skip_email(account, email, "skipped_dedup")
         return
 
+    # Skip слишком старые письма (по Date-header).
+    # Защита от разгребания древнего архива по уже-удалённым/проданным объявлениям.
+    max_age = config.inquiry_max_age_days()
+    if max_age > 0:
+        from email.utils import parsedate_to_datetime
+        date_str = (email.get("date") or "").strip()
+        if date_str:
+            try:
+                msg_dt = parsedate_to_datetime(date_str)
+                if msg_dt is not None:
+                    # Привести к timezone-aware UTC; некоторые отправители шлют наивные даты.
+                    if msg_dt.tzinfo is None:
+                        msg_dt = msg_dt.replace(tzinfo=__import__("datetime").timezone.utc)
+                    age_days = (datetime.now(msg_dt.tzinfo) - msg_dt).days
+                    if age_days > max_age:
+                        logger.info(
+                            "Skip: too old (%d дн., лимит %d), account=%s, subject=%r",
+                            age_days, max_age, account["gmail_email"], subject[:60],
+                        )
+                        _skip_email(account, email, "skipped_max_age")
+                        return
+            except (TypeError, ValueError) as e:
+                logger.debug("parsedate failed: %s", e)
+
+    # Defense in depth: IMAP-фильтр по From должен был отсеять до нас, но если
+    # пользователь его выключил — не пускаем не-Kleinanzeigen-почту в Claude/Telegram.
+    filter_str = (config.gmail_from_filter() or "").lower().strip()
+    if filter_str:
+        from_email = (email.get("from_email") or "").lower()
+        from_domain_match = filter_str in from_email
+        body_has_ad = bool(
+            parser.KLEINANZEIGEN_URL_RE.search(body)
+            or parser.KLEINANZEIGEN_URL_RE.search(body_html)
+        )
+        if not (from_domain_match or body_has_ad):
+            logger.info(
+                "Пропускаем не-Kleinanzeigen письмо: from=%s, subj=%r",
+                from_email, subject[:60],
+            )
+            # Помечаем seen + журналим, иначе письмо перечитывается и заново
+            # прогоняется через платный Haiku-classifier на КАЖДОМ поле навсегда.
+            _skip_email(account, email, "skipped_filter")
+            return
+
+    # Поиск URL: text → html. Если нет — конструируем из ID.
+    ad_url = parser.extract_url(body, body_html)
+    ad_id = parser.extract_ad_id(body, body_html)
+    if not ad_url and ad_id:
+        ad_url = parser.url_from_ad_id(ad_id)
+        logger.info("URL объявления построен из ID %s: %s", ad_id, ad_url)
+
+    # Defense in depth: настоящий inquiry ВСЕГДА содержит ссылку или ID объявления.
+    # Если ни ad_url ни ad_id извлечь не удалось — это системное письмо или мусор,
+    # которое прошло subject-blacklist. Скипаем тихо.
+    if not ad_id and not ad_url:
+        logger.info(
+            "Skip: no ad reference in body, account=%s, from=%s, subject=%r",
+            account["gmail_email"], email.get("from_email"), subject[:80],
+        )
+        _skip_email(account, email, "skipped_no_ad_ref")
+        return
+
     # AI-классификатор (Haiku): финальный gate перед дорогими операциями.
     # Дешёвая модель решает «buyer-inquiry или системная рассылка».
-    # Срабатывает на всё что прошло cheap-фильтры (noreply / age / junk-subject blacklist).
+    # Срабатывает только на то, что прошло ВСЕ бесплатные фильтры выше
+    # (noreply / junk-subject / max-age / from / ссылка на объявление).
     #
     # Bypass: если в этом gmail_thread_id уже есть сохранённый incoming inquiry —
     # это follow-up клиента, не системка. Haiku ошибается на коротких follow-up-ах
@@ -473,33 +622,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             logger.exception("classifier упал, пропускаю проверку")
             # Fail-open: если classifier недоступен — продолжаем по cheap-правилам
 
-    # Skip слишком старые письма (по Date-header).
-    # Защита от разгребания древнего архива по уже-удалённым/проданным объявлениям.
-    max_age = config.inquiry_max_age_days()
-    if max_age > 0:
-        from email.utils import parsedate_to_datetime
-        date_str = (email.get("date") or "").strip()
-        if date_str:
-            try:
-                msg_dt = parsedate_to_datetime(date_str)
-                if msg_dt is not None:
-                    # Привести к timezone-aware UTC; некоторые отправители шлют наивные даты.
-                    if msg_dt.tzinfo is None:
-                        msg_dt = msg_dt.replace(tzinfo=__import__("datetime").timezone.utc)
-                    age_days = (datetime.now(msg_dt.tzinfo) - msg_dt).days
-                    if age_days > max_age:
-                        logger.info(
-                            "Skip: too old (%d дн., лимит %d), account=%s, subject=%r",
-                            age_days, max_age, account["gmail_email"], subject[:60],
-                        )
-                        _skip_email(account, email, "skipped_max_age")
-                        return
-            except (TypeError, ValueError) as e:
-                logger.debug("parsedate failed: %s", e)
-
-    # Извлечём ID объявления заранее — нужен для проверки sold-флага
-    early_ad_id = parser.extract_ad_id(body, body_html)
-    if early_ad_id and db.is_ad_sold(early_ad_id):
+    # Проданное объявление — после классификатора: проверка бесплатная, но шлёт
+    # уведомление оператору, а на системную рассылку его слать незачем.
+    if ad_id and db.is_ad_sold(ad_id):
         # Объявление помечено проданным — не обрабатываем, не зовём Claude.
         # Тихая нотификация в Telegram чтобы оператор знал.
         try:
@@ -508,51 +633,13 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 "text": (
                     f"📭 <b>Inquiry на проданное объявление</b>\n"
                     f"От: {email.get('from_name') or email.get('from_email')}\n"
-                    f"Объявление #{early_ad_id} помечено как продано — пропустил."
+                    f"Объявление #{ad_id} помечено как продано — пропустил."
                 ),
                 "parse_mode": "HTML",
             })
         except Exception:
             logger.exception("Не удалось послать notification про sold")
         _skip_email(account, email, "skipped_sold")
-        return
-
-    # Defense in depth: IMAP-фильтр по From должен был отсеять до нас, но если
-    # пользователь его выключил — не пускаем не-Kleinanzeigen-почту в Claude/Telegram.
-    filter_str = (config.gmail_from_filter() or "").lower().strip()
-    if filter_str:
-        from_email = (email.get("from_email") or "").lower()
-        from_domain_match = filter_str in from_email
-        body_has_ad = bool(
-            parser.KLEINANZEIGEN_URL_RE.search(body)
-            or parser.KLEINANZEIGEN_URL_RE.search(body_html)
-        )
-        if not (from_domain_match or body_has_ad):
-            logger.info(
-                "Пропускаем не-Kleinanzeigen письмо: from=%s, subj=%r",
-                from_email, subject[:60],
-            )
-            # Помечаем seen + журналим, иначе письмо перечитывается и заново
-            # прогоняется через платный Haiku-classifier на КАЖДОМ поле навсегда.
-            _skip_email(account, email, "skipped_filter")
-            return
-
-    # Поиск URL: text → html. Если нет — конструируем из ID.
-    ad_url = parser.extract_url(body, body_html)
-    ad_id = parser.extract_ad_id(body, body_html)
-    if not ad_url and ad_id:
-        ad_url = parser.url_from_ad_id(ad_id)
-        logger.info("URL объявления построен из ID %s: %s", ad_id, ad_url)
-
-    # Defense in depth: настоящий inquiry ВСЕГДА содержит ссылку или ID объявления.
-    # Если ни ad_url ни ad_id извлечь не удалось — это системное письмо или мусор,
-    # которое прошло subject-blacklist. Скипаем тихо.
-    if not ad_id and not ad_url:
-        logger.info(
-            "Skip: no ad reference in body, account=%s, from=%s, subject=%r",
-            account["gmail_email"], email.get("from_email"), subject[:80],
-        )
-        _skip_email(account, email, "skipped_no_ad_ref")
         return
 
     # Сохраняем входящее СРАЗУ, до медленного Playwright-парсинга. Это:
@@ -648,9 +735,14 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 inserted_id,
             )
 
-    # Парсинг страницы Playwright — ПОСЛЕ auto-ack, потому что медленно.
+    # Парсинг страницы Playwright — ПОСЛЕ auto-ack, потому что медленно (10–30 с,
+    # целый Chromium). Для ответа в уже известном треде объявление берём из БД.
     ad = {"title": "", "price": "", "description": "", "seller_name": ""}
-    if ad_url:
+    known_ad = _known_thread_ad(thread_id, exclude_id=inserted_id)
+    if known_ad:
+        ad = known_ad
+        logger.info("Объявление для thread=%s взято из БД, без Playwright", thread_id)
+    elif ad_url:
         try:
             ad = parser.parse_ad(ad_url)
         except Exception as e:
@@ -755,7 +847,13 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 last_our_price_eur=last_price,
             )
         except Exception as e:
+            # Письмо клиента не должно потеряться: без ответа модели отдаём его
+            # оператору обычной карточкой (автопилот остаётся активным).
             logger.exception("Autopilot Claude упал для msg=%s: %s", inserted_id, e)
+            try:
+                telegram_bot.send_for_review(inserted_id)
+            except Exception:
+                logger.exception("send_for_review после сбоя автопилота fail msg=%s", inserted_id)
             return
 
         deal_brief_json = json.dumps(reply["deal_brief"], ensure_ascii=False) if reply.get("deal_brief") else None
@@ -778,7 +876,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             try:
                 telegram_bot.send_for_review(inserted_id)
             except Exception:
-                pass
+                logger.exception("send_for_review после сбоя dispatch fail msg=%s", inserted_id)
         try:
             telegram_bot.refresh_pipeline_for_active_chats()
         except Exception:
@@ -814,8 +912,10 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     try:
         telegram_bot.send_for_review(inserted_id)
     except Exception as e:
+        # Пробрасываем: очередь оставит письмо UNSEEN и повторит, а повтор
+        # (строка status='new') пойдёт веткой «довести до карточки» выше.
         logger.exception("Не удалось послать оператору msg=%s: %s", inserted_id, e)
-        return
+        raise
 
     try:
         # Обновить thread-state на всех ранее отправленных мини-карточках треда
@@ -828,12 +928,6 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         telegram_bot.refresh_pipeline_for_active_chats()
     except Exception:
         logger.exception("refresh_pipeline after incoming fail")
-
-    if not force:
-        try:
-            gmail.mark_seen(account["gmail_email"], account["gmail_app_password"], [email["uid"]])
-        except Exception as e:
-            logger.warning("Не пометили письмо прочитанным: %s", e)
 
 
 # Публичный алиас для импорта из scheduler.py
