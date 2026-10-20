@@ -290,14 +290,16 @@ def check_reminders() -> str:
         return f"Кандидатов на пинг нет (порог {after_days} дн.)"
     sent = 0
     failed = 0
-    for row in candidates:
-        try:
-            telegram_bot.send_reminder_offer(row["id"], days_silent=after_days)
-            db.update_message(row["id"], reminder_state="offered")
-            sent += 1
-        except Exception:
-            logger.exception("Не удалось предложить пинг для msg=%s", row["id"])
-            failed += 1
+    ids = [row["id"] for row in candidates]
+    try:
+        # одна карточка-пачка вместо отдельного сообщения на каждого молчуна
+        telegram_bot.send_reminder_batch(ids, days_silent=after_days)
+        for mid in ids:
+            db.update_message(mid, reminder_state="offered")
+        sent = len(ids)
+    except Exception:
+        logger.exception("Не удалось отправить пачку напоминаний (%d)", len(ids))
+        failed = len(ids)
     return f"Предложено пингов: {sent}, ошибок: {failed} (порог {after_days} дн.)"
 
 
@@ -433,6 +435,20 @@ def build_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    # Утренняя сводка в боте — 08:00 по Берлину (склад, рынок, вчерашние продажи)
+    _morning = getattr(telegram_bot, "send_morning_summary", None)
+    if _morning is not None:
+        sched.add_job(
+            _morning,
+            trigger="cron",
+            hour=8, minute=0,
+            timezone="Europe/Berlin",
+            id="morning_summary",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
     # Итог дня в боте — 20:00 по Берлину (идея «ленивого продажника»)
     _evening = getattr(telegram_bot, "send_evening_summary", None)
