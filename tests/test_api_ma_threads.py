@@ -191,3 +191,21 @@ def test_open_thread_rejects_message_from_other_thread(client):
     res = c.post("/api/ma/threads/t1/open", json={"focus": 99, "acquire": False},
                  headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     assert res.status_code == 404
+
+
+def test_draft_not_shown_in_feed_as_sent(client):
+    """QA B-02: неотправленный черновик не рисуется в ленте как «наш ответ»."""
+    c, mdb = client
+    _open_thread_setup(mdb)
+    mdb.thread_events.return_value = [
+        {"ts": "1", "kind": "in", "text": "Hallo", "ru_text": "Привет", "is_auto_ack": False,
+         "row": _row(id=42, status="pending"), "status": "pending"},
+        {"ts": "2", "kind": "out", "text": "Draft", "ru_text": "черновик", "is_auto_ack": False,
+         "row": _row(id=42, status="pending"), "status": "pending"},
+        {"ts": "3", "kind": "out", "text": "Sent", "ru_text": "ушло", "is_auto_ack": False,
+         "row": _row(id=41, status="sent"), "status": "sent"},
+        {"ts": "4", "kind": "out", "text": "Site", "ru_text": "с сайта", "is_auto_ack": False,
+         "row": _row(id=40, status="sent_external"), "status": "sent_external"},
+    ]
+    ev = c.get("/api/ma/threads/t1", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()["events"]
+    assert [e["text"] for e in ev] == ["Hallo", "Sent", "Site"]

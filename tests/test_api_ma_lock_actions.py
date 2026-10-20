@@ -98,7 +98,7 @@ def test_release_succeeds(client):
     res = c.post("/api/ma/messages/123/lock/release",
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 204
-    mtb._release_lock.assert_called_once_with(123)
+    mtb._release_lock.assert_called_once_with(123, "@pgtest#999")  # только свой лок
 
 
 def test_release_idempotent_no_holder(client):
@@ -125,7 +125,7 @@ def test_beacon_release_valid_initdata_in_body(client):
     res = c.post("/api/ma/messages/123/lock/release-beacon",
                  content=init, headers={"Content-Type": "text/plain"})
     assert res.status_code == 204
-    mtb._release_lock.assert_called_once_with(123)
+    mtb._release_lock.assert_called_once_with(123, "@pgtest#999")  # только свой лок
 
 
 def test_beacon_release_rejects_garbage_body(client):

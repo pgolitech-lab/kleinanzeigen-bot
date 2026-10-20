@@ -530,8 +530,14 @@ def _claim_lock(msg_id: int, actor: str) -> Optional[str]:
     return None
 
 
-def _release_lock(msg_id: int) -> None:
-    operator_lock.forget(msg_id)
+def _release_lock(msg_id: int, actor: Optional[str] = None) -> bool:
+    """Снять лок карточки (+ busy треда, + в фоне поднять отложенные письма).
+    С actor — только свой: лок другого оператора не трогаем и возвращаем False."""
+    if actor is not None:
+        if not operator_lock.forget_if_owner(msg_id, actor):
+            return False
+    else:
+        operator_lock.forget(msg_id)
     thread_id = _msg_thread_id(msg_id)
     clear_thread_busy(thread_id, "operator")
     if thread_id:
@@ -540,6 +546,7 @@ def _release_lock(msg_id: int) -> None:
         # drain поднимает отложенные карточки и шлёт send_for_review (Telegram, до 30 с
         # на каждый DM) — в фоне, чтобы не держать ответ MA
         run_in_background(_drain_deferred, thread_id)
+    return True
 
 
 def _drain_deferred(thread_id: str) -> None:

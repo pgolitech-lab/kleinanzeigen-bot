@@ -49,6 +49,16 @@ def remember(msg_id: int, actor: str) -> None:
         _LOCKS[msg_id] = (actor, time.time())
 
 
+def forget_if_owner(msg_id: int, actor: str) -> bool:
+    """Атомарно снять лок, только если он наш (или его уже нет). False — держит другой."""
+    with _MUTEX:
+        e = state(msg_id)
+        if e is not None and e[0] != actor:
+            return False
+        _LOCKS.pop(msg_id, None)
+        return True
+
+
 def forget(msg_id: int) -> None:
     """Низкоуровневый del. No-op если key отсутствует."""
     with _MUTEX:
