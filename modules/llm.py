@@ -14,11 +14,14 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,70 @@ _SLOTS = threading.BoundedSemaphore(2)
 
 class LLMError(RuntimeError):
     """Ошибка вызова Claude через подписку."""
+
+
+class LLMLimitError(LLMError):
+    """Исчерпан лимит подписки (5-часовой / недельный, 429). reset_at — когда снимется
+    (datetime с tz) или None, если CLI не сообщил время."""
+
+    def __init__(self, raw: str, reset_at: "datetime | None" = None) -> None:
+        self.raw = raw
+        self.reset_at = reset_at
+        super().__init__(f"Лимит подписки Claude исчерпан — LLM недоступен {self.until_text()}")
+
+    def until_text(self) -> str:
+        if not self.reset_at:
+            return "до сброса лимита (время сброса неизвестно)"
+        local = self.reset_at.astimezone(ZoneInfo("Europe/Berlin"))
+        now = datetime.now(ZoneInfo("Europe/Berlin"))
+        fmt = "%H:%M" if local.date() == now.date() else "%d.%m %H:%M"
+        return f"до {local.strftime(fmt)} (Берлин)"
+
+
+# «usage limit reached|1760000000», «5-hour limit reached ∙ resets 3pm», «weekly limit … resets Oct 22, 4am»
+_LIMIT_RE = re.compile(r"(usage limit|rate limit|limit reached|weekly limit|session limit|"
+                       r"out of (extra )?usage|too many requests)", re.IGNORECASE)
+_EPOCH_RE = re.compile(r"\|(\d{10})\b")
+_RESETS_RE = re.compile(r"resets?\s+(?:at\s+)?(?:(?P<mon>[A-Z][a-z]{2})\s+(?P<day>\d{1,2}),?\s+)?"
+                        r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ampm>am|pm)?"
+                        r"(?:\s*\((?P<tz>[^)]+)\))?", re.IGNORECASE)
+
+
+def _parse_reset(text: str) -> "datetime | None":
+    """Время сброса лимита из текста ошибки CLI (эпоха после «|» или «resets 3pm (Europe/Berlin)»)."""
+    m = _EPOCH_RE.search(text)
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)), tz=timezone.utc)
+    m = _RESETS_RE.search(text)
+    if not m:
+        return None
+    try:
+        tz = ZoneInfo(m.group("tz")) if m.group("tz") else ZoneInfo("Europe/Berlin")
+    except Exception:  # noqa: BLE001 — неизвестная зона в тексте
+        tz = ZoneInfo("Europe/Berlin")
+    hour = int(m.group("h")) % 12 if m.group("ampm") else int(m.group("h"))
+    if (m.group("ampm") or "").lower() == "pm":
+        hour += 12
+    if hour > 23:
+        return None
+    now = datetime.now(tz)
+    cand = now.replace(hour=hour, minute=int(m.group("m") or 0), second=0, microsecond=0)
+    if m.group("mon"):
+        try:
+            month = datetime.strptime(m.group("mon"), "%b").month
+            cand = cand.replace(month=month, day=int(m.group("day")))
+            if cand < now - timedelta(days=1):
+                cand = cand.replace(year=cand.year + 1)
+        except ValueError:
+            return None
+    elif cand <= now:
+        cand += timedelta(days=1)
+    return cand
+
+
+def _raise_if_limit(text: str, status: Any = None) -> None:
+    if str(status) == "429" or _LIMIT_RE.search(text or ""):
+        raise LLMLimitError((text or "")[:300], _parse_reset(text or ""))
 
 
 def _env(max_tokens: int | None, thinking_off: bool) -> dict[str, str]:
@@ -125,8 +192,10 @@ def run(*, model: str, messages: list[dict[str, Any]], system: Any = None, max_t
 
     if result is None:
         err = (proc.stderr or proc.stdout or "").strip()[-500:]
+        _raise_if_limit(err)
         raise LLMError(f"Claude CLI завершился без результата (код {proc.returncode}): {err}")
     if result.get("is_error"):
+        _raise_if_limit(str(result.get("result") or ""), result.get("api_error_status"))
         raise LLMError(f"Claude вернул ошибку: {result.get('subtype')} {str(result.get('result'))[:300]}"
                        f" {result.get('api_error_status') or ''}".strip())
 

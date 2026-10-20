@@ -15,18 +15,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import re
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from modules import llm  # noqa: E402
+from modules import claude  # noqa: E402
+from modules.claude_utils import call_json  # noqa: E402
 import config  # noqa: E402
 import database as db  # noqa: E402
 
@@ -61,97 +59,61 @@ SYSTEM = (
     "Если sold_price_eur не упомянут явно — оставь null (можно отрабатывать вручную потом).\n"
     "sold_at_date — лучшая оценка из последнего relevant события (формат YYYY-MM-DD).\n"
     "evidence — короткая ЦИТАТА (макс 200 символов) ключевой фразы.\n\n"
-    "Ответь СТРОГО JSON, без markdown-обёртки:\n"
-    "{\n"
-    '  "is_sale": true | false,\n'
-    '  "confidence": "high" | "medium" | "low",\n'
-    '  "sold_price_eur": number | null,\n'
-    '  "ad_title": "короткое название товара",\n'
-    '  "sold_at_date": "YYYY-MM-DD" | null,\n'
-    '  "evidence": "цитата"\n'
-    "}"
+    "Поля ответа: is_sale, confidence, sold_price_eur, ad_title (короткое название товара), "
+    "sold_at_date, evidence."
 )
 
+SALE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_sale": {"type": "boolean"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "sold_price_eur": {"type": ["number", "null"]},
+        "ad_title": {"type": "string"},
+        "sold_at_date": {"type": ["string", "null"]},
+        "evidence": {"type": "string"},
+    },
+    "required": ["is_sale", "confidence", "sold_price_eur", "ad_title", "sold_at_date", "evidence"],
+    "additionalProperties": False,
+}
 
-def _format_thread(rows: list) -> str:
-    """История треда → текстовый промпт."""
+
+def _format_thread(gmail_thread_id: str, rows: list) -> str:
+    """История треда → текстовый промпт.
+
+    Строка in хранит И вопрос покупателя, И наш ответ — разворачивает
+    claude.format_history (наши реплики — только отправленные).
+    """
     parts: list[str] = []
-    ad_title = None
-    ad_price = None
-    for r in rows:
-        if not ad_title and r["ad_title"]:
-            ad_title = r["ad_title"]
-        if not ad_price and r["ad_price"]:
-            ad_price = r["ad_price"]
+    ad_title = next((r["ad_title"] for r in rows if r["ad_title"]), None)
+    ad_price = next((r["ad_price"] for r in rows if r["ad_price"]), None)
     if ad_title or ad_price:
         parts.append(f"ОБЪЯВЛЕНИЕ: {ad_title or '?'} | цена: {ad_price or '?'}")
     parts.append("---")
-    for r in rows:
-        ts = (r["created_at"] or "")[:19]
-        if r["direction"] == "in":
-            who = "ПОКУПАТЕЛЬ"
-            body = (r["de_client"] or "")[:1500]
-        else:
-            who = "МЫ (продавец)"
-            body = (r["de_answer"] or "")[:1500]
-            ts = (r["sent_at"] or ts)[:19]
-        if not body.strip():
-            continue
-        parts.append(f"[{ts}] {who}:\n{body}")
-    return "\n\n".join(parts)
+    text, _ = claude.format_history(claude.rows_to_history(rows), max_chars=12000, with_dates=True)
+    parts.append(text)
+    return "\n".join(parts)
 
 
-def _calc_cost(model: str, in_tok: int, out_tok: int) -> float:
-    # Sonnet 4.6: $3/M input, $15/M output
-    if "sonnet" in (model or "").lower():
-        return in_tok * 3 / 1_000_000 + out_tok * 15 / 1_000_000
-    if "haiku" in (model or "").lower():
-        return in_tok * 1 / 1_000_000 + out_tok * 5 / 1_000_000
-    return 0.0
-
-
-def _parse_json(text: str) -> dict:
-    """Достать JSON из ответа модели (модели иногда оборачивают ```json...```)."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-    return json.loads(text)
-
-
-def detect_one(client, model: str, gmail_thread_id: str) -> dict:
+def detect_one(model: str, gmail_thread_id: str) -> dict:
     rows = db.thread_history(gmail_thread_id)
     if not rows:
         return {"skipped": "empty_thread"}
-    formatted = _format_thread(rows)
-    resp = client.messages.create(
-        model=model,
-        max_tokens=400,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": formatted}],
+    data, meta = call_json(
+        label=f"detect_sales {gmail_thread_id[:16]}",
+        model=model, system=SYSTEM, user=_format_thread(gmail_thread_id, rows),
+        schema=SALE_SCHEMA, max_tokens=600,
     )
-    text = "".join(b.text for b in resp.content if hasattr(b, "text"))
-    try:
-        parsed = _parse_json(text)
-    except json.JSONDecodeError as e:
-        logger.warning("JSON parse failed for thread %s: %s | raw=%r",
-                       gmail_thread_id, e, text[:200])
-        return {"error": "json_parse"}
-
-    in_tok = resp.usage.input_tokens
-    out_tok = resp.usage.output_tokens
-    cost = _calc_cost(model, in_tok, out_tok)
-
     return {
-        "is_sale": bool(parsed.get("is_sale")),
-        "confidence": parsed.get("confidence", "low"),
-        "sold_price_eur": parsed.get("sold_price_eur"),
-        "ad_title": parsed.get("ad_title"),
-        "sold_at_date": parsed.get("sold_at_date"),
-        "evidence": parsed.get("evidence"),
-        "tokens_in": in_tok,
-        "tokens_out": out_tok,
-        "cost_usd": cost,
+        "is_sale": bool(data.get("is_sale")),
+        "confidence": data.get("confidence") or "low",
+        "sold_price_eur": data.get("sold_price_eur"),
+        "ad_title": data.get("ad_title"),
+        "sold_at_date": data.get("sold_at_date"),
+        "evidence": data.get("evidence"),
+        "tokens_in": meta["tokens_in"],
+        "tokens_out": meta["tokens_out"],
+        "cost_usd": meta["cost_usd"],
     }
 
 
@@ -191,7 +153,6 @@ def main() -> None:
     args = parser.parse_args()
 
     model = config.claude_model()
-    client = llm.Client()
 
     threads = candidate_threads(CUTOFF, args.limit, args.thread)
     logger.info("Threads to scan: %d (model=%s, autocommit=%s, dry_run=%s)",
@@ -203,7 +164,7 @@ def main() -> None:
 
     for i, tid in enumerate(threads, 1):
         try:
-            result = detect_one(client, model, tid)
+            result = detect_one(model, tid)
         except Exception as e:
             logger.exception("detect failed for %s: %s", tid, e)
             stats["error"] += 1
