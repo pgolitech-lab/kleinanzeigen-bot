@@ -14,7 +14,7 @@
 # другие модули НЕ должны из этого делать вывод «нет в наличии».
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 import database
@@ -93,6 +93,10 @@ def ensure_inventory_schema(conn: sqlite3.Connection) -> None:
     _add_column(conn, "inv_products", "non_stock", "INTEGER NOT NULL DEFAULT 0")  # 1 — не запчасть (гараж, личное): скрыт со склада
     _add_column(conn, "inv_movements", "batch_id", "INTEGER")        # приход из партии inv_batches
     _add_column(conn, "inv_movements", "kit_product_id", "INTEGER")  # списание составляющей при продаже комплекта
+    # Идемпотентность ручных движений: повтор запроса с тем же request_id не пишет второе движение
+    _add_column(conn, "inv_movements", "request_id", "TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_mov_request ON inv_movements(request_id) "
+                 "WHERE request_id IS NOT NULL")
     # Одна продажа на тред и товар: повторная отметка «Продано» / применение найденной продажи
     # не списывают второй раз. Продажа комплекта — по движению на каждую составляющую (отсюда
     # product_id в ключе). Отменённые (voided) не мешают записать заново.
@@ -233,6 +237,7 @@ def create_product(*, title: str, **fields: Any) -> int:
         raise ValueError(f"неизвестные поля товара: {', '.join(sorted(bad))}")
     if not (title or "").strip():
         raise ValueError("пустое название товара")
+    _check_prices(fields.get("list_price_eur"), fields.get("min_price_eur"))
     now = _now()
     cols = ["title", *fields.keys(), "created_at", "updated_at"]
     vals = [title.strip(), *fields.values(), now, now]
@@ -244,6 +249,11 @@ def create_product(*, title: str, **fields: Any) -> int:
         return int(cur.lastrowid)
 
 
+def _check_prices(list_price: Any, min_price: Any) -> None:
+    if list_price and min_price and float(min_price) > float(list_price):
+        raise ValueError(f"минимальная цена {float(min_price):g} € выше цены {float(list_price):g} €")
+
+
 def update_product(product_id: int, **fields: Any) -> None:
     ensure_schema()
     bad = set(fields) - set(_PRODUCT_FIELDS)
@@ -251,6 +261,11 @@ def update_product(product_id: int, **fields: Any) -> None:
         raise ValueError(f"неизвестные поля товара: {', '.join(sorted(bad))}")
     if not fields:
         return
+    if "list_price_eur" in fields or "min_price_eur" in fields:
+        cur_p = get_product(product_id)
+        if cur_p is not None:
+            _check_prices(fields.get("list_price_eur", cur_p["list_price_eur"]),
+                          fields.get("min_price_eur", cur_p["min_price_eur"]))
     sets = ", ".join(f"{k} = ?" for k in fields)
     with get_conn() as conn:
         cur = conn.execute(
@@ -370,12 +385,16 @@ def relink_listing(ad_id: str, product_id: int, link_method: str = "operator") -
 
 # ─── движения ─────────────────────────────────────────────────────────────────
 
+MAX_QTY = 100_000   # потолок одной операции: 999999999 — опечатка, а не приход
+
+
 def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[str] = None,
                  unit_cost_eur: Optional[float] = None, unit_price_eur: Optional[float] = None,
                  source: str = "manual", gmail_thread_id: Optional[str] = None,
                  message_id: Optional[int] = None, ad_id: Optional[str] = None,
                  note: Optional[str] = None, created_by: Optional[str] = None,
                  batch_id: Optional[int] = None, kit_product_id: Optional[int] = None,
+                 request_id: Optional[str] = None,
                  conn: Optional[sqlite3.Connection] = None) -> int:
     """Записать движение. Знак qty проверяется по виду: приход > 0, продажа/списание < 0,
     корректировка — любая. Приход и корректировка включают учёт остатка (stock_tracked=1)."""
@@ -383,6 +402,12 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
     if kind not in MOVEMENT_KINDS:
         raise ValueError(f"неизвестный вид движения: {kind}")
     qty = int(qty)
+    if abs(qty) > MAX_QTY:
+        raise ValueError(f"слишком большое количество: {abs(qty)} шт. (максимум {MAX_QTY})")
+    if kind in ("receipt", "writeoff", "adjust") and source == "manual":
+        when = norm_ts(occurred_at)
+        if when > (datetime.utcnow() + timedelta(days=1)).isoformat():
+            raise ValueError(f"дата {when[:10]} в будущем")
     if kind == "receipt" and qty <= 0:
         raise ValueError("приход должен быть > 0")
     if kind in ("sale", "writeoff") and qty >= 0:
@@ -393,13 +418,21 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
     def _write(c: sqlite3.Connection) -> int:
         if c.execute("SELECT 1 FROM inv_products WHERE id = ?", (int(product_id),)).fetchone() is None:
             raise ValueError(f"товар {product_id} не найден")
+        if request_id:
+            dup = c.execute("SELECT id, product_id, kind, qty FROM inv_movements WHERE request_id = ?",
+                            (request_id,)).fetchone()
+            if dup is not None:
+                if (dup["product_id"], dup["kind"], dup["qty"]) != (int(product_id), kind, qty):
+                    raise ValueError("request_id уже использован для другой операции")
+                return int(dup["id"])      # повтор того же запроса — то же движение
         cur = c.execute("""
             INSERT INTO inv_movements (product_id, kind, qty, unit_cost_eur, unit_price_eur, source,
                                        gmail_thread_id, message_id, ad_id, note, occurred_at,
-                                       created_at, created_by, batch_id, kit_product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       created_at, created_by, batch_id, kit_product_id, request_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (int(product_id), kind, qty, unit_cost_eur, unit_price_eur, source, gmail_thread_id,
-              message_id, ad_id, note, norm_ts(occurred_at), now, created_by, batch_id, kit_product_id))
+              message_id, ad_id, note, norm_ts(occurred_at), now, created_by, batch_id, kit_product_id,
+              request_id))
         if kind in ("receipt", "adjust"):
             c.execute("UPDATE inv_products SET stock_tracked = 1, updated_at = ? WHERE id = ?",
                       (now, int(product_id)))
@@ -635,6 +668,10 @@ def merge_products(src_id: int, dst_id: int) -> dict[str, int]:
             raise ValueError("один товар скрыт со склада, другой нет — сначала выровняйте")
         dst_is_kit = conn.execute("SELECT 1 FROM inv_kit_components WHERE kit_product_id = ?",
                                   (int(dst_id),)).fetchone()
+        src_is_kit = conn.execute("SELECT 1 FROM inv_kit_components WHERE kit_product_id = ?",
+                                  (int(src_id),)).fetchone()
+        if bool(dst_is_kit) != bool(src_is_kit):
+            raise ValueError("комплект и обычный товар не сливаются — это разные товары")
         src_is_comp = conn.execute("SELECT 1 FROM inv_kit_components WHERE component_product_id = ?",
                                    (int(src_id),)).fetchone()
         if dst_is_kit and (src_is_comp or conn.execute(

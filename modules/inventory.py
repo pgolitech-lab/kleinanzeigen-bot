@@ -698,15 +698,38 @@ def record_sale(*, price_eur: Optional[float], gmail_thread_id: Optional[str] = 
     return {"movement_id": mid, "product_id": pid, "created": True, "kit": bool(comps), **state}
 
 
+class StockSyncError(ValueError):
+    """Пересчёт не сделан: не удалось перенести свежие продажи. Для API — 409/503, не ошибка ввода."""
+
+
+def _batch_repeat(request_id: str) -> Optional[dict[str, Any]]:
+    esc = request_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ":%"
+    with get_conn() as conn:
+        rows = conn.execute("SELECT id, product_id, qty, unit_cost_eur, batch_id FROM inv_movements "
+                            "WHERE request_id LIKE ? ESCAPE '\\' ORDER BY id", (esc,)).fetchall()
+    if not rows:
+        return None
+    return {"batch_id": rows[0]["batch_id"], "repeated": True,
+            "movements": [{"product_id": r["product_id"], "qty": r["qty"],
+                           "unit_cost_eur": None if r["unit_cost_eur"] is None else round(r["unit_cost_eur"], 2),
+                           "movement_id": r["id"]} for r in rows]}
+
+
 def receive_batch(items: list[tuple[int, int]], total_cost_eur: Optional[float], *,
                   occurred_at: Optional[str] = None, note: Optional[str] = None,
-                  created_by: Optional[str] = None) -> dict[str, Any]:
+                  created_by: Optional[str] = None, request_id: Optional[str] = None) -> dict[str, Any]:
     """Партия: купили несколько позиций за общую сумму (напр. машину на разбор). items = [(товар, шт.)].
     Сумма делится по позициям пропорционально цене объявления × шт. (у кого цены нет — по средней
     цене остальных; ни у кого нет — поровну на штуку). total_cost_eur=None — себестоимость неизвестна.
     Возвращает {batch_id, movements: [{product_id, qty, unit_cost_eur, movement_id}]}."""
     if not items:
         raise ValueError("партия пуста")
+    if len({pid for pid, _ in items}) != len(items):
+        raise ValueError("товар в партии указан дважды")
+    if request_id:   # повтор той же партии (двойной тап, обрыв ответа) → прежний результат
+        rep = _batch_repeat(request_id)
+        if rep:
+            return rep
     if total_cost_eur is not None and total_cost_eur < 0:
         raise ValueError("сумма партии не может быть отрицательной")
     prods = []
@@ -721,22 +744,29 @@ def receive_batch(items: list[tuple[int, int]], total_cost_eur: Optional[float],
     weights = [(p["list_price_eur"] or avg) * q for p, q in prods]
     total_w = sum(weights)
     out: list[dict[str, Any]] = []
-    with transaction() as conn:
-        bid = inv.create_batch(total_cost_eur=total_cost_eur, occurred_at=occurred_at, note=note,
-                               created_by=created_by, conn=conn)
-        left = total_cost_eur
-        for i, ((p, q), w) in enumerate(zip(prods, weights)):
-            if total_cost_eur is None:
-                unit = None
-            else:
-                part = left if i == len(prods) - 1 else round(total_cost_eur * w / total_w, 2)
-                left -= part
-                unit = part / q
-            mid = inv.add_movement(product_id=p["id"], kind="receipt", qty=q, unit_cost_eur=unit,
-                                   occurred_at=occurred_at, note=note, created_by=created_by,
-                                   batch_id=bid, conn=conn)
-            out.append({"product_id": p["id"], "qty": q, "unit_cost_eur": None if unit is None else round(unit, 2),
-                        "movement_id": mid})
+    try:
+        with transaction() as conn:
+            bid = inv.create_batch(total_cost_eur=total_cost_eur, occurred_at=occurred_at, note=note,
+                                   created_by=created_by, conn=conn)
+            left = total_cost_eur
+            for i, ((p, q), w) in enumerate(zip(prods, weights)):
+                if total_cost_eur is None:
+                    unit = None
+                else:
+                    part = left if i == len(prods) - 1 else round(total_cost_eur * w / total_w, 2)
+                    left -= part
+                    unit = part / q
+                mid = inv.add_movement(product_id=p["id"], kind="receipt", qty=q, unit_cost_eur=unit,
+                                       occurred_at=occurred_at, note=note, created_by=created_by,
+                                       batch_id=bid, request_id=f"{request_id}:{p['id']}" if request_id else None,
+                                       conn=conn)
+                out.append({"product_id": p["id"], "qty": q, "unit_cost_eur": None if unit is None else round(unit, 2),
+                            "movement_id": mid})
+    except sqlite3.IntegrityError:   # гонка: параллельный запрос с тем же request_id успел раньше
+        rep = _batch_repeat(request_id) if request_id else None
+        if rep:
+            return rep
+        raise
     return {"batch_id": bid, "movements": out}
 
 
@@ -763,16 +793,19 @@ def parse_receipt_line(text: str) -> tuple[int, Optional[float]]:
             price = price / qty if qty else price
     if qty <= 0:
         raise ValueError("количество должно быть больше нуля")
+    if qty > inv.MAX_QTY:
+        raise ValueError(f"слишком много: {qty} шт. (максимум {inv.MAX_QTY}) — проверьте число")
     return qty, None if price is None else round(price, 2)
 
 
 def receive_line(product_id: int, text: str, *, occurred_at: Optional[str] = None,
-                 note: Optional[str] = None, created_by: Optional[str] = None) -> dict[str, Any]:
+                 note: Optional[str] = None, created_by: Optional[str] = None,
+                 request_id: Optional[str] = None) -> dict[str, Any]:
     """Приход одной строкой («10 шт × 45 €») + подтверждение для оператора.
     Возвращает {qty, unit_cost_eur, qty_after, message}; message — «Принято 10 шт × 45 € · на складе стало 12»."""
     qty, unit = parse_receipt_line(text)
     r = receive_batch([(product_id, qty)], None if unit is None else round(unit * qty, 2),
-                      occurred_at=occurred_at, note=note, created_by=created_by)
+                      occurred_at=occurred_at, note=note, created_by=created_by, request_id=request_id)
     after = stock_view(product_id)
     left = after["qty"] if after["tracked"] else None
     price_txt = f" × {unit:g} €" if unit is not None else " (цена не указана)"
@@ -976,44 +1009,71 @@ def _plain_product(product_id: int) -> int:
 
 def receive(product_id: int, qty: int, unit_cost_eur: Optional[float] = None, *,
             occurred_at: Optional[str] = None, note: Optional[str] = None,
-            created_by: Optional[str] = None) -> int:
-    """Приход: купили qty шт. по unit_cost_eur за штуку (None — по стандарту типа / оценке товара)."""
+            created_by: Optional[str] = None, request_id: Optional[str] = None) -> int:
+    """Приход: купили qty шт. по unit_cost_eur за штуку (None — по стандарту типа / оценке товара).
+    request_id — ключ идемпотентности от клиента: повтор запроса возвращает то же движение."""
     return inv.add_movement(product_id=_plain_product(product_id), kind="receipt", qty=qty, unit_cost_eur=unit_cost_eur,
-                            occurred_at=occurred_at, note=note, created_by=created_by)
+                            occurred_at=occurred_at, note=note, created_by=created_by, request_id=request_id)
 
 
 def write_off(product_id: int, qty: int, *, note: Optional[str] = None,
-              created_by: Optional[str] = None) -> int:
-    """Списание (брак, отдали, потеряли): −qty без выручки."""
-    return inv.add_movement(product_id=_plain_product(product_id), kind="writeoff", qty=-abs(int(qty)), note=note,
-                            created_by=created_by)
+              created_by: Optional[str] = None, request_id: Optional[str] = None) -> int:
+    """Списание (брак, отдали, потеряли): −qty без выручки. Больше остатка списать нельзя
+    (ValueError «на складе N шт.»); у товара без учёта остаток неизвестен — сначала пересчёт."""
+    pid = _plain_product(product_id)
+    n = abs(int(qty))
+    with transaction() as conn:
+        if request_id:   # повтор — не проверять остаток заново (он уже уменьшен этим же списанием)
+            dup = conn.execute("SELECT id FROM inv_movements WHERE request_id = ?", (request_id,)).fetchone()
+            if dup is not None:
+                return inv.add_movement(product_id=pid, kind="writeoff", qty=-n, note=note,
+                                        created_by=created_by, request_id=request_id, conn=conn)
+        if inv.tracked_since(pid, conn=conn) is None:
+            raise ValueError("остаток этого товара не внесён — сначала «Пересчитать», потом списывать")
+        have = inv.stock_qty(pid, conn=conn)
+        if n > have:
+            raise ValueError(f"на складе {max(have, 0)} шт., списать {n} нельзя")
+        return inv.add_movement(product_id=pid, kind="writeoff", qty=-n, note=note, created_by=created_by,
+                                request_id=request_id, conn=conn)
 
 
 def set_stock(product_id: int, qty: int, *, note: Optional[str] = None,
-              created_by: Optional[str] = None) -> Optional[int]:
+              created_by: Optional[str] = None, request_id: Optional[str] = None) -> Optional[int]:
     """Инвентаризация: «сейчас на складе qty шт.» — корректировка на разницу с остатком с начала
     учёта. У товара без учёта она же начинает учёт (продажи из истории до неё не считаются).
     Возвращает id движения или None, если остаток уже такой."""
     if qty < 0:
         raise ValueError("остаток не может быть отрицательным")
     product_id = _plain_product(product_id)
+    if request_id:   # повтор — не гонять sync_sales и не пересчитывать заново
+        with get_conn() as conn:
+            dup = conn.execute("SELECT id FROM inv_movements WHERE request_id = ?", (request_id,)).fetchone()
+        if dup is not None:
+            return int(dup["id"])
     # Оператор считает склад уже без только что проданной штуки — перенести свежие «Продано»
     # до корректировки, иначе джоб запишет их после неё и спишет второй раз
     try:
         sync_sales()
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        # Считать дальше нельзя: непереданная продажа спишется второй раз уже после корректировки
         logger.exception("склад: sync_sales перед инвентаризацией товара %s упал", product_id)
+        raise StockSyncError("не удалось перенести свежие продажи на склад — пересчёт не сделан, повторите позже") from e
     with transaction() as conn:
         p = conn.execute("SELECT stock_tracked FROM inv_products WHERE id = ?", (int(product_id),)).fetchone()
         if p is None:
             raise ValueError(f"товар {product_id} не найден")
+        if request_id:
+            dup = conn.execute("SELECT id FROM inv_movements WHERE request_id = ?", (request_id,)).fetchone()
+            if dup is not None:
+                return int(dup["id"])
         started = inv.tracked_since(product_id, conn=conn) is not None
         delta = int(qty) - (inv.stock_qty(product_id, conn=conn) if started else 0)
         if delta == 0 and started:
             return None
         # delta == 0 у товара без учёта («0 шт.») — всё равно движение: оно отмечает начало учёта
         return inv.add_movement(product_id=product_id, kind="adjust", qty=delta,
-                                note=note or f"инвентаризация: {qty} шт.", created_by=created_by, conn=conn)
+                                note=note or f"инвентаризация: {qty} шт.", created_by=created_by,
+                                request_id=request_id, conn=conn)
 
 
 # ─── правила для других модулей ───────────────────────────────────────────────
@@ -1867,6 +1927,30 @@ def seed_ads_from_messages() -> list[AdInfo]:
 # ─── профиль товара (стабильный контракт для kab-market) ──────────────────────
 
 PROFILE_VERSION = 1
+
+
+def product_card(product_id: int) -> Optional[dict[str, Any]]:
+    """Данные карточки товара для Mini App. Контракт:
+    {"product": {...строка...}, "listings": [...], "movements": [...],
+     "qty": int|None — остаток (None = учёт не начат, показывать «не внесён», НЕ «0 шт.»),
+     "stock": {"tracked", "qty", "negative", "kit", "components"},
+     "context": ad_context_safe по живому объявлению | None — у товара без объявлений None, это норма,
+     "min_price_eur", "min_price_source", "unit_cost_eur", "unit_cost_source"}
+    None — товара нет."""
+    p = inv.get_product(int(product_id))
+    if p is None:
+        return None
+    pid = p["id"]
+    listings = [dict(r) for r in inv.list_listings(pid)]
+    sv = stock_view(pid)
+    ctx = ad_context_safe(listings[0]["ad_id"]) if listings else None
+    unit, usrc = _unit_cost(pid, p)
+    mp, msrc = effective_min_price(p, unit)
+    return {"product": dict(p), "listings": listings,
+            "movements": [dict(r) for r in inv.list_movements(pid)],
+            "qty": sv["qty"], "stock": sv, "context": ctx,
+            "min_price_eur": mp, "min_price_source": msrc,
+            "unit_cost_eur": unit, "unit_cost_source": usrc}
 
 
 def product_profile(product_id: int) -> Optional[dict[str, Any]]:

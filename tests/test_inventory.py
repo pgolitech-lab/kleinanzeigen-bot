@@ -965,3 +965,71 @@ def test_receive_line_confirmation(inv):
     assert r["qty"] == 10 and r["unit_cost_eur"] == 45.0 and r["qty_after"] == 10
     assert r["message"] == "Принято 10 шт × 45 € · на складе стало 10"
     assert inv.receive_line(p, "2")["message"].endswith("на складе стало 12")
+
+
+def test_writeoff_not_more_than_stock(inv):
+    p = inv.inv.create_product(title="Sitzbank")
+    inv.receive(p, 5, 10.0)
+    with pytest.raises(ValueError, match="на складе 5"):
+        inv.write_off(p, 50)
+    inv.write_off(p, 5)
+    assert inv.stock_view(p)["qty"] == 0
+    q = inv.inv.create_product(title="Tisch")
+    with pytest.raises(ValueError, match="не внесён"):
+        inv.write_off(q, 1)
+
+
+def test_idempotent_request_id(inv):
+    p = inv.inv.create_product(title="Sitzbank")
+    m1 = inv.receive(p, 3, 10.0, request_id="r1")
+    assert inv.receive(p, 3, 10.0, request_id="r1") == m1 and inv.stock_view(p)["qty"] == 3
+    w1 = inv.write_off(p, 2, request_id="w1")
+    assert inv.write_off(p, 2, request_id="w1") == w1 and inv.stock_view(p)["qty"] == 1
+    with pytest.raises(ValueError, match="request_id"):
+        inv.receive(p, 4, 10.0, request_id="r1")
+    s1 = inv.set_stock(p, 7, request_id="c1")
+    assert inv.set_stock(p, 7, request_id="c1") == s1
+    b1 = inv.receive_batch([(p, 2)], 20.0, request_id="b1")
+    b2 = inv.receive_batch([(p, 2)], 20.0, request_id="b1")
+    assert b2["repeated"] and b2["movements"] == b1["movements"] and inv.stock_view(p)["qty"] == 9
+    assert inv.receive_line(p, "1 × 5", request_id="l1")["qty_after"] == 10
+    assert inv.receive_line(p, "1 × 5", request_id="l1")["qty_after"] == 10
+
+
+def test_set_stock_aborts_when_sync_fails(inv, monkeypatch):
+    p = inv.inv.create_product(title="Sitzbank")
+    monkeypatch.setattr(inv, "sync_sales", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(ValueError, match="пересчёт не сделан"):
+        inv.set_stock(p, 3)
+    assert inv.stock_view(p)["tracked"] is False
+
+
+def test_p2_guards(inv):
+    with pytest.raises(ValueError, match="выше цены"):
+        inv.inv.create_product(title="X", list_price_eur=100.0, min_price_eur=150.0)
+    p = inv.inv.create_product(title="Y", list_price_eur=100.0)
+    with pytest.raises(ValueError, match="выше цены"):
+        inv.inv.update_product(p, min_price_eur=150.0)
+    with pytest.raises(ValueError, match="в будущем"):
+        inv.receive(p, 1, 1.0, occurred_at="2099-01-01")
+    with pytest.raises(ValueError, match="слишком"):
+        inv.receive(p, 999_999_999, 1.0)
+    with pytest.raises(ValueError):
+        inv.parse_receipt_line("999999999")
+    with pytest.raises(ValueError):
+        inv.parse_receipt_line("-3 столика по -50")
+    a = inv.inv.create_product(title="A"); b = inv.inv.create_product(title="B")
+    kit = inv.inv.create_product(title="Komplett")
+    inv.set_kit(kit, [(a, 1), (b, 1)])
+    plain = inv.inv.create_product(title="Plain")
+    with pytest.raises(ValueError, match="комплект"):
+        inv.inv.merge_products(plain, kit)
+
+
+def test_product_card_no_listings(inv):
+    p = inv.inv.create_product(title="Sitzbank")
+    assert inv.product_card(p)["qty"] is None
+    inv.receive(p, 5, 10.0)
+    c = inv.product_card(p)
+    assert c["qty"] == 5 and c["context"] is None and c["listings"] == []
+    assert inv.product_card(99999) is None
