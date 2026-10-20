@@ -242,7 +242,8 @@ def system_prompt() -> str:
 def send_mode() -> str:
     """Режим отправки: production | redirect | disabled.
     Любое неизвестное значение трактуется как disabled (fail-safe)."""
-    val = (get("send_mode") or "disabled").strip().lower()
+    # Мимо кэша: оператор выключил отправку — это должно действовать сразу.
+    val = (db.get_setting_fresh("send_mode", DEFAULTS["send_mode"]) or "disabled").strip().lower()
     return val if val in ("production", "redirect", "disabled") else "disabled"
 
 

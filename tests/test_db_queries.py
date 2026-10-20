@@ -421,6 +421,28 @@ def test_transaction_nested_joins_outer(tmp_db):
     assert tmp_db.get_setting("k_inner") is None
 
 
+def test_nested_transaction_savepoint_isolates_inner_failure(tmp_db):
+    with tmp_db.transaction():
+        tmp_db.set_setting("outer", "1")
+        try:
+            with tmp_db.transaction():
+                tmp_db.set_setting("inner", "1")
+                raise ValueError
+        except ValueError:
+            pass
+    assert tmp_db.get_setting("outer") == "1"
+    assert tmp_db.get_setting("inner") is None
+
+
+def test_send_mode_bypasses_cache(tmp_db):
+    import config
+    tmp_db.set_setting("send_mode", "production")
+    assert config.send_mode() == "production"
+    with tmp_db.get_conn() as conn:  # запись мимо set_setting (другой процесс)
+        conn.execute("UPDATE settings SET value='disabled' WHERE key='send_mode'")
+    assert config.send_mode() == "disabled"
+
+
 def test_increment_autopilot_returning(tmp_db):
     tmp_db.start_thread_autopilot("ap", 10.0, "silent")
     assert tmp_db.increment_autopilot_messages("ap") == 1

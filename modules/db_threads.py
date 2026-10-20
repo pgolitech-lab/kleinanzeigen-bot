@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn, transaction
+from database import DB_PATH, get_conn, norm_name, transaction
 
 # --- CLOSED THREADS ---
 
@@ -515,40 +515,65 @@ def find_related_inquiries(
     buyer_email: Optional[str],
     exclude_thread_id: Optional[str] = None,
     limit: int = 10,
+    *,
+    display_name: Optional[str] = None,
+    account_id: Optional[int] = None,
 ) -> list[sqlite3.Row]:
-    """Найти ДРУГИЕ треды того же клиента — по email (buyer_name).
+    """Найти ДРУГИЕ треды того же клиента.
 
-    Раньше матчили по buyer_display_name, из-за чего однофамильцы
-    («Hans», «Peter») склеивались в одного человека (Bug 8). Email
-    relay-адреса — надёжный идентификатор конкретного покупателя.
+    Уровень 1 (точно, maybe_same=0): тот же email (buyer_name). Раньше матчили по
+    buyer_display_name, из-за чего однофамильцы склеивались (Bug 8).
+    Уровень 2 (возможно, maybe_same=1): relay-email Kleinanzeigen живёт на паре
+    «покупатель + объявление», поэтому тот же человек по другому объявлению
+    приходит с НОВЫМ email. Ловим его по нормализованному buyer_display_name
+    (norm_name) в ТОМ ЖЕ аккаунте. Это догадка — UI должен показывать её как
+    «возможно тот же клиент».
 
-    Возвращает по одной row на gmail_thread_id (последний incoming в треде),
-    отсортировано DESC по времени последнего события.
+    display_name / account_id берутся из аргументов, а если не заданы — из
+    последнего входящего треда exclude_thread_id.
+
+    Возвращает по одной row на gmail_thread_id (последний по id incoming в треде),
+    сначала точные, внутри — DESC по времени последнего события.
     """
     if not buyer_email or not buyer_email.strip():
         return []
-    sql = """
-    WITH last_in AS (
-        SELECT m.* FROM messages m
-        WHERE m.direction = 'in'
-          AND m.buyer_name = ?
-          AND m.gmail_thread_id IS NOT NULL AND m.gmail_thread_id != ''
-          AND m.id = (
-              SELECT MAX(m2.id) FROM messages m2
-              WHERE m2.gmail_thread_id = m.gmail_thread_id
-                AND m2.direction = 'in'
-          )
-    )
-    SELECT * FROM last_in
-    WHERE 1=1
-    """
-    params: list[Any] = [buyer_email.strip()]
-    if exclude_thread_id:
-        sql += " AND gmail_thread_id != ?"
-        params.append(exclude_thread_id)
-    sql += " ORDER BY COALESCE(sent_at, created_at) DESC LIMIT ?"
-    params.append(limit)
+    email = buyer_email.strip()
     with get_conn() as conn:
+        if exclude_thread_id and (display_name is None or account_id is None):
+            cur = conn.execute(
+                "SELECT buyer_display_name, account_id FROM messages "
+                "WHERE gmail_thread_id = ? AND direction = 'in' "
+                "ORDER BY id DESC LIMIT 1",
+                (exclude_thread_id,),
+            ).fetchone()
+            if cur:
+                if display_name is None:
+                    display_name = cur["buyer_display_name"]
+                if account_id is None:
+                    account_id = cur["account_id"]
+        name_key = norm_name(display_name) if account_id is not None else None
+        sql = """
+        WITH last_ids AS (
+            SELECT id, ROW_NUMBER() OVER (
+                       PARTITION BY gmail_thread_id ORDER BY id DESC) AS rn
+              FROM messages
+             WHERE direction = 'in'
+               AND gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+        )
+        SELECT m.*,
+               CASE WHEN m.buyer_name = ? THEN 0 ELSE 1 END AS maybe_same
+          FROM messages m
+          JOIN last_ids r ON r.id = m.id AND r.rn = 1
+         WHERE (m.buyer_name = ?
+                OR (? IS NOT NULL AND m.account_id = ?
+                    AND norm_name(m.buyer_display_name) = ?))
+        """
+        params: list[Any] = [email, email, name_key, account_id, name_key]
+        if exclude_thread_id:
+            sql += " AND m.gmail_thread_id != ?"
+            params.append(exclude_thread_id)
+        sql += " ORDER BY maybe_same ASC, COALESCE(m.sent_at, m.created_at) DESC LIMIT ?"
+        params.append(limit)
         return conn.execute(sql, params).fetchall()
 
 

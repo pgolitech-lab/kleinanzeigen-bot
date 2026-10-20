@@ -21,6 +21,15 @@ DB_PATH = Path(__file__).parent / "kleinanzeigen.db"
 _local = threading.local()
 
 
+def norm_name(name: Optional[str]) -> Optional[str]:
+    """Нормализованное имя покупателя для сравнения: casefold + схлопнутые пробелы.
+    Пустое → None (не совпадает ни с чем). Доступна в SQL как norm_name()."""
+    if not name:
+        return None
+    n = " ".join(str(name).split()).casefold()
+    return n or None
+
+
 def _thread_conn() -> sqlite3.Connection:
     """Соединение текущего потока для текущего DB_PATH (создаётся лениво)."""
     path = str(DB_PATH)
@@ -35,6 +44,7 @@ def _thread_conn() -> sqlite3.Connection:
         # В WAL безопасно и заметно быстрее FULL: при сбое питания теряется лишь
         # последняя транзакция, целостность файла сохраняется.
         conn.execute("PRAGMA synchronous = NORMAL")
+        conn.create_function("norm_name", 1, norm_name, deterministic=True)
         conns[path] = conn
     return conn
 
@@ -67,20 +77,36 @@ def transaction() -> Iterator[sqlite3.Connection]:
     """Атомарный блок записи: BEGIN IMMEDIATE … COMMIT, при исключении ROLLBACK.
 
     IMMEDIATE берёт блокировку записи сразу — никакой другой писатель не вклинится
-    между SELECT и UPDATE внутри блока. Вложенный вызов присоединяется к внешней
-    транзакции (коммит/откат делает внешний).
+    между SELECT и UPDATE внутри блока. Вложенный вызов — SAVEPOINT: его ошибка
+    откатывает только его записи, даже если внешний код поймает исключение.
     """
     with get_conn() as conn:
         if conn.in_transaction:
-            yield conn
+            depth = getattr(_local, "sp", 0) + 1
+            _local.sp = depth
+            name = f"sp_{depth}"
+            conn.execute(f"SAVEPOINT {name}")
+            try:
+                yield conn
+                conn.execute(f"RELEASE {name}")
+            except BaseException:
+                conn.execute(f"ROLLBACK TO {name}")
+                conn.execute(f"RELEASE {name}")
+                raise
+            finally:
+                _local.sp = depth - 1
             return
         conn.execute("BEGIN IMMEDIATE")
         try:
             yield conn
+            conn.commit()
         except BaseException:
             conn.rollback()
             raise
-        conn.commit()
+        finally:
+            # set_setting внутри транзакции сбросил кэш ДО коммита — сбрасываем
+            # ещё раз, чтобы старые значения, прочитанные в окне, не осели в кэше.
+            invalidate_settings_cache()
 
 
 def close_thread_conn() -> None:
@@ -105,7 +131,9 @@ def init_db() -> None:
     """Создаёт таблицы при первом запуске. Идемпотентна."""
     with get_conn() as conn:
         # WAL хранится в файле БД — достаточно выставить один раз при старте.
-        conn.execute("PRAGMA journal_mode = WAL")
+        mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            logger.warning("init_db: journal_mode=%s вместо wal — возможны 'database is locked'", mode)
         # Аккаунты Kleinanzeigen + связанный Gmail
         conn.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
@@ -765,8 +793,15 @@ def invalidate_settings_cache() -> None:
 
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
-    """Прочитать значение настройки. Возвращает default если ключ не найден."""
+    """Прочитать значение настройки (из кэша, TTL). default если ключа нет."""
     return _settings_snapshot().get(key, default)
+
+
+def get_setting_fresh(key: str, default: Optional[str] = None) -> Optional[str]:
+    """То же мимо кэша — для настроек, где 5 с устаревания недопустимы (send_mode)."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
 
 
 def set_setting(key: str, value: Optional[str]) -> None:
