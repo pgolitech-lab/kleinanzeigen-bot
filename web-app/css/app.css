@@ -1463,3 +1463,12 @@ em.good { color: var(--good); }
 .r-totalrow{display:flex;flex-direction:column;gap:4px;margin:8px 0}
 .r-hint{opacity:.7}
 .kit-warn{opacity:.75}
+
+/* рынок-советник */
+.mk-card{padding:12px;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:12px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px}
+.mk-card.bad{border-color:#d9534f}.mk-card.warn{border-color:#e0a800}
+.mk-ad{display:flex;flex-direction:column;padding:4px 0;color:inherit;text-decoration:none}
+.mk-m,.mk-win,.mk-note{opacity:.7}
+.mk-copy{text-align:left;display:flex;flex-direction:column;gap:2px;padding:8px 10px;margin:4px 0;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:10px;background:none;color:inherit;font:inherit;white-space:pre-wrap}
+.mk-why,.mk-steps{margin:0;padding-left:18px}
+.mk-verdict{font-weight:600}

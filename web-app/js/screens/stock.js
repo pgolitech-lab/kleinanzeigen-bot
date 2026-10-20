@@ -10,6 +10,7 @@ import { el, setLoading, setError, eur, berlinTime, parseEur } from "../utils.js
 import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js";
 import { setTitle } from "../components/backbar.js";
 import { icon, toast } from "../components/kit.js";
+import { adviceSheet, tipsSheet } from "./market.js";
 
 const money = v => (v == null ? "—" : eur(Math.round(v)));
 const days = v => (v == null ? "—" : `${Math.round(v)} дн.`);
@@ -61,6 +62,7 @@ async function renderList(mount) {
       <div class="st-actions">
         <button class="btn btn-primary st-in" type="button">➕ Приход</button>
         <a class="btn st-month" href="#/stock/month">📊 Отчёт за месяц</a>
+        <a class="btn st-market" href="#/stock/market">🧭 Дубли и перевыкладывание</a>
         <a class="btn st-types" href="#/stock/types">🏷 Типы и себестоимость</a>
       </div>
       <input type="search" class="form-control st-q" placeholder="Товар…" aria-label="Поиск товара">
@@ -316,6 +318,8 @@ async function renderProduct(mount, id) {
     v => api(`/api/ma/stock/products/${id}/writeoff`, { method: "POST", body: v }), reload));
   act("✏️ Цены", () => numberSheet("Цены товара", [["list_price_eur", "Цена в объявлениях, €", p.list_price_eur], ["min_price_eur", "Минимум, €", p.min_price_eur], ["unit_cost_eur", "Себестоимость, €", p.unit_cost_eur]],
     v => api(`/api/ma/stock/products/${id}`, { method: "PATCH", body: v }), reload, true));
+  act("💶 Цена и рынок", () => adviceSheet(id));
+  act("👀 Как стать заметнее", () => tipsSheet(id));
   act(`🧩 ${ctx.kit ? "Состав комплекта" : "Комплект…"}`, () => kitSheet(id, ctx.components ?? [], reload));
   act("🙈 Не запчасть", async () => {
     if (!(await confirmSheet("Скрыть товар со склада (гараж, личное, не запчасть)? Из отчётов он пропадёт, переписка останется.", "Скрыть"))) return;
