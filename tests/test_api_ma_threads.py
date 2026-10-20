@@ -132,7 +132,7 @@ def test_thread_header_has_account_id(client):
     _open_thread_setup(mdb)
     res = c.get("/api/ma/threads/t1", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     assert res.json()["header"]["account_id"] == 3
-    assert "review" not in res.json()  # без focus/acquire — прежний ответ
+    assert "review" not in res.json()  # GET — прежний ответ, без лока
 
 
 def test_open_thread_in_one_request(client):
@@ -143,7 +143,7 @@ def test_open_thread_in_one_request(client):
         mtb._claim_lock.return_value = None
         mol.remaining_min.return_value = 5
         mol.state.return_value = ("@pgtest#999", 0)
-        res = c.get("/api/ma/threads/t1?acquire=1",
+        res = c.post("/api/ma/threads/t1/open", json={},
                     headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     body = res.json()
     assert res.status_code == 200
@@ -159,7 +159,7 @@ def test_open_thread_locked_by_other_is_read_only(client):
         mtb._claim_lock.return_value = "@other#1"
         mol.remaining_min.return_value = 4
         mol.state.return_value = ("@other#1", 0)
-        res = c.get("/api/ma/threads/t1?focus=42&acquire=1",
+        res = c.post("/api/ma/threads/t1/open", json={"focus": 42},
                     headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     assert res.status_code == 200
     assert res.json()["lock"] == {"acquired": False, "holder": "@other#1", "remaining_min": 4}
@@ -171,7 +171,7 @@ def test_open_thread_does_not_lock_sent_message(client):
     with patch("web.api_ma.telegram_bot") as mtb, patch("web.api_ma.operator_lock") as mol:
         mol.remaining_min.return_value = 0
         mol.state.return_value = None
-        res = c.get("/api/ma/threads/t1?focus=42&acquire=1",
+        res = c.post("/api/ma/threads/t1/open", json={"focus": 42},
                     headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     assert res.json()["lock"]["acquired"] is False
     mtb._claim_lock.assert_not_called()
@@ -180,5 +180,14 @@ def test_open_thread_does_not_lock_sent_message(client):
 def test_open_thread_without_drafts(client):
     c, mdb = client
     _open_thread_setup(mdb, draft_status="sent", sent_at="x")
-    res = c.get("/api/ma/threads/t1?acquire=1", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    res = c.post("/api/ma/threads/t1/open", json={}, headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     assert res.json()["review"] is None and res.json()["lock"] is None
+
+
+def test_open_thread_rejects_message_from_other_thread(client):
+    c, mdb = client
+    _open_thread_setup(mdb)
+    mdb.get_message.return_value = _row(id=99, gmail_thread_id="other")
+    res = c.post("/api/ma/threads/t1/open", json={"focus": 99, "acquire": False},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 404

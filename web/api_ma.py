@@ -6,7 +6,7 @@ existing scheduler.* helpers — никакой бизнес-логики.
 Все endpoint'ы требуют валидной Telegram initData через verify_init_data_dep.
 """
 from __future__ import annotations
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -289,29 +289,38 @@ _DRAFT_STATUSES = {"pending", "new", "edited", "approved"}
 
 
 @router.get("/threads/{thread_id}")
-def ma_thread(thread_id: str, focus: "int | None" = None, acquire: bool = False,
-              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Тред. С focus/acquire — всё для открытия экрана одним запросом (вместо thread → message → lock):
+def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    return _thread_dict(thread_id)
 
-    - review: карточка черновика focus (или последнего неотправленного черновика треда), иначе null;
-    - lock (только при acquire=1): попытка взять лок на этот черновик. Занят другим — не ошибка,
-      acquired=false и holder (экран откроется только для чтения).
+
+class ThreadOpenBody(BaseModel):
+    focus: "int | None" = None  # msg_id черновика; нет — последний неотправленный черновик треда
+    acquire: bool = True        # взять лок на этот черновик
+
+
+@router.post("/threads/{thread_id}/open")
+def ma_thread_open(thread_id: str, body: "ThreadOpenBody | None" = None,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Всё для открытия экрана треда одним запросом (вместо thread → message → lock/acquire).
+
+    Ответ = GET /threads/{id} + review (карточка черновика или null) + lock (при acquire:
+    {acquired, holder, remaining_min}; занят другим — acquired=false, экран только для чтения).
+    POST, а не GET: берёт лок, повтор/префетч GET не должен его захватывать.
     """
+    b = body or ThreadOpenBody()
     data = _thread_dict(thread_id)
-    if focus is None and not acquire:
-        return data
-    msg_id = focus
+    data["review"], data["lock"] = None, None
+    msg_id = b.focus
     if msg_id is None:
         drafts = [e["msg_id"] for e in data["events"]
                   if e["kind"] == "in" and e["msg_id"] and e["status"] in _DRAFT_STATUSES]
         msg_id = drafts[-1] if drafts else None
     if msg_id is None:
-        data["review"], data["lock"] = None, None
         return data
-    if acquire:
-        row = db.get_message(msg_id)
-        if row is None or row["gmail_thread_id"] != thread_id:
-            raise HTTPException(404, "message not found in thread")
+    row = db.get_message(msg_id)
+    if row is None or row["gmail_thread_id"] != thread_id:
+        raise HTTPException(404, "message not found in thread")
+    if b.acquire:
         actor = actor_from_user(user)
         # Отправленное/закрытое не лочим — его всё равно нельзя править
         foreign = None if _is_answered(row) else telegram_bot._claim_lock(msg_id, actor)
@@ -319,8 +328,6 @@ def ma_thread(thread_id: str, focus: "int | None" = None, acquire: bool = False,
         data["lock"] = {"acquired": acquired,
                         "holder": actor if acquired else foreign,
                         "remaining_min": operator_lock.remaining_min(msg_id)}
-    else:
-        data["lock"] = None
     data["review"] = _message_review_dict(msg_id)
     return data
 
@@ -711,13 +718,20 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     status = fresh["status"] if fresh else "sent"
     if status in ("sent", "sent_debug"):
         # Оператор переписал черновик LLM → урок для следующих ответов (Sonnet, в фоне; ошибка — в лог)
-        telegram_bot.run_in_background(_learn_from_sent, msg_id)
+        _LEARN_POOL.submit(_learn_from_sent, msg_id)
     return {"ok": True, "status": status, "closed_drafts": closed_drafts}
+
+
+# Свой однопоточный пул: Sonnet через CLI — десятки секунд, не занимать пул Telegram-уведомлений
+_LEARN_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-learn")
 
 
 def _learn_from_sent(msg_id: int) -> None:
     from modules import llm_memory
-    llm_memory.learn_from_sent(msg_id)
+    try:
+        llm_memory.learn_from_sent(msg_id)
+    except Exception:
+        logger.exception("learn_from_sent msg=%s упал — урок не извлечён", msg_id)
 
 
 class TranslateDraftBody(BaseModel):
@@ -1197,6 +1211,7 @@ def ma_suggest_reply(thread_id: str,
     _claim_or_409(msg_id, actor_from_user(user))  # не перезаписывать черновик, который правит другой
     result = scheduler.regenerate_draft(msg_id, "regen")
     if result.get("kind") == "error":
+        telegram_bot._release_lock(msg_id)  # не держать карточку 5 мин после сбоя LLM
         raise HTTPException(500, result.get("message", "regenerate failed"))
 
     return _thread_dict(thread_id)
