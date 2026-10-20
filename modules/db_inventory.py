@@ -126,9 +126,11 @@ def ensure_inventory_schema(conn: sqlite3.Connection) -> None:
             updated_by TEXT
         )
     """)
-    for cat, cost in STANDARD_COSTS_DEFAULT.items():
-        conn.execute("INSERT OR IGNORE INTO inv_category_costs (category, unit_cost_eur, updated_at, updated_by) "
-                     "VALUES (?, ?, ?, 'default')", (cat, cost, _now()))
+    # Стандарты по умолчанию — только в пустую таблицу: удалённый оператором тип не воскресает
+    if conn.execute("SELECT 1 FROM inv_category_costs LIMIT 1").fetchone() is None:
+        for cat, cost in STANDARD_COSTS_DEFAULT.items():
+            conn.execute("INSERT INTO inv_category_costs (category, unit_cost_eur, updated_at, updated_by) "
+                         "VALUES (?, ?, ?, 'default')", (cat, cost, _now()))
     # Комплект (Komplettsatz): товар, собранный из других товаров. Своего остатка нет —
     # доступность = min(остаток составляющей // qty); продажа комплекта списывает составляющие.
     conn.execute("""
