@@ -59,7 +59,7 @@ def test_autopilot_start_silent(client):
     assert args[1] == 1200
     assert args[2] == "silent"
     # Silent → notification NOT sent
-    mtb.send_autopilot_start_notification.assert_not_called()
+    mtb.run_in_background.assert_not_called()
 
 
 def test_autopilot_start_notify_sends_notification(client):
@@ -69,9 +69,11 @@ def test_autopilot_start_notify_sends_notification(client):
                  json={"floor_eur": 1500, "notify_mode": "notify"},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    mtb.send_autopilot_start_notification.assert_called_once()
-    args, kwargs = mtb.send_autopilot_start_notification.call_args
-    # signature: (msg_id, floor, actor)
+    # уведомление уходит в фон: run_in_background(send_autopilot_start_notification, msg_id, floor, actor)
+    mtb.run_in_background.assert_called_once()
+    args, kwargs = mtb.run_in_background.call_args
+    assert args[0] is mtb.send_autopilot_start_notification
+    args = args[1:]
     assert args[0] == 42  # latest msg_id из thread_history
     assert args[1] == 1500
     assert args[2] == "@pgtest#999"

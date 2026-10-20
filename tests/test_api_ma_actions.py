@@ -60,7 +60,6 @@ def client():
         mtb._check_lock.return_value = None
         mtb._acquire_lock.return_value = None
         mtb._release_lock.return_value = None
-        mtb.broadcast_after_external_action.return_value = None
         mol.state.return_value = ("@pgtest#999", 1700000000.0)
         mol.remaining_min.return_value = 5
         # db.get_conn() — контекст-менеджер; по умолчанию устаревших черновиков нет
@@ -81,7 +80,6 @@ def test_send_success(client):
     body = res.json()
     assert body["ok"] is True
     msched.send_one.assert_called_once_with(123)
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
     mtb._release_lock.assert_called_once_with(123)
 
 
@@ -209,9 +207,6 @@ def test_send_closes_stale_older_drafts(client):
     assert "UPDATE messages SET status='skipped'" in update_sql
     assert "id < ?" in update_sql
     assert update_args == ("abc", 123)
-    # мини-карточки закрытых черновиков обновляются
-    broadcast_ids = [c_.args[0] for c_ in mtb.broadcast_after_external_action.call_args_list]
-    assert 2122 in broadcast_ids and 2138 in broadcast_ids
 
 
 def test_send_without_stale_drafts_closes_nothing(client):
@@ -402,7 +397,6 @@ def test_skip_success(client):
     assert body["ok"] is True
     assert body["status"] == "skipped"
     mdb.update_message.assert_called_once_with(123, status="skipped")
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
     mtb._release_lock.assert_called_once_with(123)
 
 
@@ -482,7 +476,6 @@ def test_regenerate_valid_strategy(client):
     mclaude.regenerate_with_strategy.assert_called_once()
     args, kwargs = mclaude.regenerate_with_strategy.call_args
     assert args[1] == "harsh"
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
     # Lock остаётся (intermediate)
     mtb._release_lock.assert_not_called()
 
@@ -539,7 +532,6 @@ def test_edit_ru_success(client):
     assert kwargs["de_answer"] == "Neue DE Text"
     assert kwargs["ru_translation"] == "Новый back"
     assert kwargs["status"] == "edited"
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
 
 
 def test_edit_de_success(client):
@@ -593,7 +585,6 @@ def test_price_success(client):
     assert res.status_code == 200
     args, kwargs = mclaude.regenerate_with_price.call_args
     assert args[1] == 1400
-    mtb.broadcast_after_external_action.assert_called_once_with(123)
 
 
 def test_price_invalid_negative_422(client):

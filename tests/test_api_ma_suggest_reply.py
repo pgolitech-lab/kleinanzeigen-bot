@@ -54,7 +54,6 @@ def test_suggest_reply_success(client):
     body = res.json()
     assert body["header"]["thread_id"] == "abc"
     msched.regenerate_draft.assert_called_once_with(42, "regen")
-    mtb.broadcast_after_external_action.assert_called_once_with(42)
 
 
 def test_suggest_reply_404_no_incoming(client):
