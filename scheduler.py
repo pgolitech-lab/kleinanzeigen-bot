@@ -355,7 +355,10 @@ def scout_job() -> str:
             text += f"\n<b>{label_}</b>\n" + "\n".join(_fmt_scout_listing(it) for it in shown)
             if extra > 0:
                 text += f"\n… и ещё {extra}"
-        telegram_bot.notify(text, "scout", label="🔎 Открыть Рынок")
+        try:
+            telegram_bot.notify(text, "scout", label="🔎 Открыть Рынок")
+        except Exception:  # noqa: BLE001 — данные scout уже сохранены, не роняем джоб
+            logger.exception("scout: уведомление о новых объявлениях не доставлено")
     return msg
 
 
