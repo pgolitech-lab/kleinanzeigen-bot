@@ -21,8 +21,8 @@
   --accent2: #9b6bff;
   --good: #2fd38a;
   --warn: #ffb547;
-  --line: color-mix(in srgb, var(--text) 10%, transparent);
-  --line2: color-mix(in srgb, var(--text) 16%, transparent);
+  --line: color-mix(in srgb, var(--text) 16%, transparent);
+  --line2: color-mix(in srgb, var(--text) 24%, transparent);
   --tonal: color-mix(in srgb, var(--text) 7%, transparent);
   --glass: color-mix(in srgb, var(--bg) 72%, transparent);
   --grad: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -932,7 +932,7 @@ em.good { color: var(--good); }
 
 /* полоса сделки */
 .deal-strip {
-  position: sticky; top: -12px; z-index: 8;
+  z-index: 8;   /* не залипает: иначе закрывает переписку */
   padding: 10px 12px; border-radius: var(--r);
   background: color-mix(in srgb, var(--card) 94%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
   box-shadow: var(--shadow-sm);
@@ -951,6 +951,8 @@ em.good { color: var(--good); }
 .ds-more p.bad { color: var(--danger); font-weight: 700; }
 .deal-strip.open .ds-more { display: block; }
 .deal-strip .scale.lg { margin-top: 6px; }
+.deal-strip:not(.open) .ds-scale { display: none; }   /* термометр — по тапу, в строке только числа */
+body.kb .tdock, body.kb .dock { display: none; }   /* док не закрывает поле при вводе */
 :root[data-layout="split3"] .deal-strip { display: none; }   /* на Fold-ландшафте — в правой панели */
 
 /* похожий покупатель */
@@ -1484,3 +1486,17 @@ em.good { color: var(--good); }
 .mk-copy{text-align:left;display:flex;flex-direction:column;gap:2px;padding:8px 10px;margin:4px 0;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:10px;background:none;color:inherit;font:inherit;white-space:pre-wrap}
 .mk-why,.mk-steps{margin:0;padding-left:18px}
 .mk-verdict{font-weight:600}
+
+/* полоса «Отменить отправку»: сверху, не гасится тостами */
+.undo-bar { position: fixed; top: calc(var(--sat) + 8px); left: 50%; transform: translateX(-50%); z-index: 1200;
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 16px;
+  background: var(--text); color: var(--bg); box-shadow: var(--shadow); max-width: calc(100% - 24px); }
+.undo-bar .ta { background: none; border: 0; font: inherit; font-weight: 800; color: var(--accent); filter: brightness(.8); min-height: 36px; padding: 0 6px; }
+.ac-st.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+
+/* Flex Window (306×340): компактная переписка — тонкая шапка, сжатый док */
+:root[data-layout="flex"] .tdock { padding: 4px 6px; gap: 4px; }
+:root[data-layout="flex"] .tdock .ibtn, :root[data-layout="flex"] .tdock > .btn { min-height: 38px; font-size: .86rem; }
+:root[data-layout="flex"] .th-head { gap: 4px; }
+:root[data-layout="flex"] .th-head .av { --s: 26px; }
+:root[data-layout="flex"] .th-sub, :root[data-layout="flex"] .th-ad { display: none; }

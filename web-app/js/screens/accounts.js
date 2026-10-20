@@ -144,14 +144,17 @@ export async function render(mount) {
     c.querySelector(".ac-dot").style.background = accountColor(a.id);
     c.querySelector(".ac-name").textContent = a.name;
     const st = c.querySelector(".ac-st");
-    st.textContent = a.active ? "работает" : "выключен";
-    st.classList.add(a.active ? "good" : "mut");
+    // статус по факту: включён без пароля Gmail — письма не придут
+    const noPw = a.active && !a.gmail_app_password_set;
+    st.textContent = noPw ? "нет пароля Gmail" : a.active ? "работает" : "выключен";
+    st.classList.add(noPw ? "warn" : a.active ? "good" : "mut");
     c.querySelector(".ac-mail").textContent = a.gmail_email ?? "";
     const tg = c.querySelector(".ac-tgls");
     tg.appendChild(toggle("Принимать письма", a.active, async v => {
       await api(`/api/ma/accounts/${a.id}`, { method: "POST", body: { is_active: v } });
-      st.textContent = v ? "работает" : "выключен";
-      st.className = `ac-st ${v ? "good" : "mut"}`;
+      const bad = v && !a.gmail_app_password_set;
+      st.textContent = bad ? "нет пароля Gmail" : v ? "работает" : "выключен";
+      st.className = `ac-st ${bad ? "warn" : v ? "good" : "mut"}`;
     }));
     tg.appendChild(toggle("Авто-приветствие новым покупателям", a.auto_ack_enabled, v =>
       api(`/api/ma/accounts/${a.id}`, { method: "POST", body: { auto_ack_enabled: v } })));
