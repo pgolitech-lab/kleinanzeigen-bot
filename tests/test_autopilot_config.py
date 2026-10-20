@@ -1,4 +1,4 @@
-"""Autopilot config keys: message cap + shadow mode (Track B Increment 2)."""
+"""Autopilot config keys: message cap."""
 from __future__ import annotations
 
 import pytest
@@ -22,17 +22,6 @@ def test_message_cap_override(tmp_db):
     import config
     tmp_db.set_setting("autopilot_message_cap", "5")
     assert config.autopilot_message_cap() == 5
-
-
-def test_shadow_mode_default_true(tmp_db):
-    import config
-    assert config.autopilot_shadow_mode() is True
-
-
-def test_shadow_mode_off(tmp_db):
-    import config
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
-    assert config.autopilot_shadow_mode() is False
 
 
 def test_keys_whitelisted_and_validated():
