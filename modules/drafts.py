@@ -76,7 +76,7 @@ def generate_draft_for_msg(message_id: int) -> dict[str, Any]:
             history=history, brief_text=brief_text,
             client_lang=msg["client_lang"] or None,
             memory_text=memory_text, lessons_text=lessons_text,
-            ad_state=claude.ad_state_for(msg),
+            ad_state=claude.ad_state_for(msg), stock_note=claude.stock_note_for(msg),
         )
     except Exception as e:
         logger.exception("generate_draft_for_msg упал msg=%s", message_id)

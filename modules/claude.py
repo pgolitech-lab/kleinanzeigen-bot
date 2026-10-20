@@ -274,23 +274,30 @@ def _context_parts(
     history: Optional[list[dict[str, Any]]] = None,
     memory_text: str = "",
     lessons_text: str = "",
-    ad_state: str = "",
+    ad_state: Optional[str] = None,
+    stock_note: str = "",
 ) -> list[str]:
-    """Общий контекст генераций: бриф, объявление, память о клиенте, уроки, история.
+    """Общий контекст генераций: бриф, объявление, склад, память о клиенте, уроки, история.
 
-    ad_state — 'deleted' / 'reserved' / 'sold' (из `ad_state_for`); пусто — по ad_title."""
+    ad_state — из `ad_state_for` (с учётом склада): 'out_of_stock' / 'deleted' / 'reserved' / '';
+    None — вызывающий не знает объявления, определяем по ad_title (без склада).
+    stock_note — inventory.prompt_note(ad_id): что известно о наличии."""
     parts: list[str] = []
     if brief_text:
         parts += [brief_text, ""]
 
     # Объявление помечено Gelöscht / Reserviert — чтобы модель не обещала товар
     from modules.parser import detect_ad_state
-    state = ad_state or detect_ad_state(ad_title or "")
+    state = ad_state if ad_state is not None else detect_ad_state(ad_title or "")
     # Товар у продавца обычно не кончается: «продано» по одному объявлению, снятое
     # или перевыложенное объявление НЕ значат «товара нет» (решение владельца 2026-10-20).
-    # Наличие — только из склада (inventory), когда он появится; до того модели запрещено
-    # сообщать покупателю «продано / нет в наличии» по статусу объявления.
-    if state in ("sold", "deleted", "reserved"):
+    # Наличие — только со склада (inventory): 'out_of_stock' = учёт ведётся и остаток 0;
+    # неизвестный остаток — НЕ «нет в наличии».
+    if stock_note:
+        parts += [stock_note, ""]
+    if state == "out_of_stock" and not stock_note:
+        parts += ["Склад: по учёту товара сейчас нет. Не обещай наличие — скажи, что уточнишь.", ""]
+    elif state in ("sold", "deleted", "reserved"):
         what = {"sold": "по этому объявлению уже была продажа",
                 "deleted": "это объявление снято (продавец часто снимает и перевыкладывает объявления)",
                 "reserved": "объявление помечено «Reserviert»"}[state]
@@ -444,7 +451,8 @@ def generate_draft(
     current_draft: str = "",
     memory_text: str = "",
     lessons_text: str = "",
-    ad_state: str = "",
+    ad_state: Optional[str] = None,
+    stock_note: str = "",
     max_tokens: int = 2000,
 ) -> dict[str, Any]:
     """Ответ клиенту с полным контекстом (объявление, бриф, история).
@@ -457,7 +465,7 @@ def generate_draft(
     parts = _context_parts(
         ad_title=ad_title, ad_price=ad_price, ad_description=ad_description,
         seller_name=seller_name, brief_text=brief_text, history=history,
-        memory_text=memory_text, lessons_text=lessons_text, ad_state=ad_state,
+        memory_text=memory_text, lessons_text=lessons_text, ad_state=ad_state, stock_note=stock_note,
     )
     parts += ["=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (de_client_text or "").strip(), ""]
     if current_draft:
@@ -533,10 +541,18 @@ def generate_autopilot_reply(
     if client_memory is None:
         anchor = next((h for h in reversed(history or []) if h.get("buyer_name")), None)
         client_memory = _safe_memory(anchor) if anchor else ""
+    # Статус объявления и склад — по ad_id из истории (incoming передаёт только поля объявления)
+    ad_anchor = next((h for h in reversed(history or []) if h.get("ad_id")), None)
+    ad_state: Optional[str] = None
+    stock_note = ""
+    if ad_anchor is not None:
+        ad_state = ad_state_for({**ad_anchor, "ad_title": ad_title or ad_anchor.get("ad_title")})
+        stock_note = stock_note_for(ad_anchor)
     parts = _context_parts(
         ad_title=ad_title, ad_price=ad_price, ad_description=ad_description,
         seller_name=seller_name, brief_text=brief_text, history=history,
         memory_text=client_memory, lessons_text=llm_memory.format_lessons(lessons),
+        ad_state=ad_state, stock_note=stock_note,
     )
     parts += [
         "=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (de_client_text or "").strip(), "",
@@ -746,26 +762,39 @@ def draft_context(msg_row: Any) -> tuple[list[dict[str, Any]], str]:
 
 
 def ad_state_for(msg_row: Any) -> str:
-    """Статус объявления для промпта: 'sold' (ad_briefs.sold_at), 'deleted'/'reserved'
-    (префикс в САМОМ СВЕЖЕМ заголовке треда), иначе ''. Ошибка БД → '' с записью в лог.
-    Это только справка для модели: «товара нет» из статуса НЕ следует (см. _context_parts)."""
+    """Статус объявления для промпта с учётом склада: inventory.effective_ad_state(ad_id, raw).
+
+    raw — то, что видно по объявлению: 'sold' (ad_briefs.sold_at), 'deleted'/'reserved'
+    (префикс в САМОМ СВЕЖЕМ заголовке треда) или ''. Результат: 'out_of_stock' (учёт ведётся,
+    остаток 0) / 'reserved' / 'deleted' / ''. Ошибка БД → '' с записью в лог.
+    """
+    from modules import inventory
     from modules.parser import detect_ad_state
     try:
         ad_id = _rget(msg_row, "ad_id")
+        raw = ""
         if ad_id:
             bf = db.get_ad_brief(ad_id)
             if bf is not None and _rget(bf, "sold_at"):
-                return "sold"
-        title = _rget(msg_row, "ad_title") or ""
-        tid = _rget(msg_row, "gmail_thread_id")
-        if tid:
-            titles = [_rget(r, "ad_title") for r in db.thread_history(tid) if _rget(r, "ad_title")]
-            title = titles[-1] if titles else title
-        state = detect_ad_state(title)
-        return state if state in ("deleted", "reserved") else ""
+                raw = "sold"
+        if not raw:
+            title = _rget(msg_row, "ad_title") or ""
+            tid = _rget(msg_row, "gmail_thread_id")
+            if tid:
+                titles = [_rget(r, "ad_title") for r in db.thread_history(tid) if _rget(r, "ad_title")]
+                title = titles[-1] if titles else title
+            st = detect_ad_state(title)
+            raw = st if st in ("deleted", "reserved") else ""
+        return inventory.effective_ad_state(ad_id, raw)
     except Exception:  # noqa: BLE001
         logger.exception("статус объявления не определён для msg=%s", _rget(msg_row, "id"))
         return ""
+
+
+def stock_note_for(msg_row: Any) -> str:
+    """inventory.prompt_note(ad_id) — что склад знает о наличии ('' — ничего / сбой склада)."""
+    from modules import inventory
+    return inventory.prompt_note(_rget(msg_row, "ad_id"))
 
 
 def _safe_memory(msg_row: Any) -> str:
@@ -820,6 +849,7 @@ def _regenerate_core(
         current = _rget(msg_row, "ru_answer") or _rget(msg_row, "de_answer") or ""
     memory_text, lessons_text = extra_context(msg_row)
     ad_state = ad_state_for(msg_row)
+    stock_note = stock_note_for(msg_row)
     return generate_draft(
         _rget(msg_row, "de_client") or "",
         ad_title=_rget(msg_row, "ad_title") or "",
@@ -829,7 +859,7 @@ def _regenerate_core(
         history=history, brief_text=brief_text,
         client_lang=_rget(msg_row, "client_lang") or _rget(msg_row, "answer_lang") or None,
         task=instruction, current_draft=current,
-        memory_text=memory_text, lessons_text=lessons_text, ad_state=ad_state,
+        memory_text=memory_text, lessons_text=lessons_text, ad_state=ad_state, stock_note=stock_note,
     )
 
 
@@ -1038,7 +1068,7 @@ def generate_variants(
         ad_title=_rget(msg_row, "ad_title") or "", ad_price=_rget(msg_row, "ad_price") or "",
         ad_description=_rget(msg_row, "ad_description") or "", seller_name=_rget(msg_row, "seller_name") or "",
         brief_text=brief_text, history=history, memory_text=memory_text, lessons_text=lessons_text,
-        ad_state=ad_state_for(msg_row),
+        ad_state=ad_state_for(msg_row), stock_note=stock_note_for(msg_row),
     )
     parts += [
         "=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (_rget(msg_row, "de_client") or "").strip(), "",
@@ -1210,7 +1240,7 @@ def generate_followup_ping(
         ad_title=_rget(anchor_row, "ad_title") or "", ad_price=_rget(anchor_row, "ad_price") or "",
         ad_description=_rget(anchor_row, "ad_description") or "", seller_name=_rget(anchor_row, "seller_name") or "",
         brief_text=brief_text, history=history, memory_text=memory_text, lessons_text=lessons_text,
-        ad_state=ad_state_for(anchor_row),
+        ad_state=ad_state_for(anchor_row), stock_note=stock_note_for(anchor_row),
     )
     lang_name, _ = lang_display(client_lang)
     days = int(days_silent) if days_silent >= 1 else 1
