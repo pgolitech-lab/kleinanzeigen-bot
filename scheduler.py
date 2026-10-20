@@ -683,7 +683,7 @@ def monitor_errors_job() -> str:
         lines_out.append(f"\n…и ещё {len(new_groups) - 5} типов в логах")
 
     try:
-        telegram_bot.notify("\n".join(lines_out))
+        telegram_bot.notify("\n".join(lines_out), urgent=True)
     except Exception as e:
         # Не помечаем отправленными — попробуем в следующий раз. warning, а не
         # exception: ERROR отсюда снова попал бы в сборщик и зациклил алерт.

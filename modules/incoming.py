@@ -678,7 +678,7 @@ def _hot_followup(message_id: int, thread_id: str, verdict: str, why: str, body:
 def _notify_hot(message_id: int, thread_id: str, reason: str) -> None:
     text = f"🔥 <b>Горячий покупатель</b> · #{message_id}\n{telegram_bot._html(reason)}"
     try:
-        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред", urgent=True)
     except Exception:
         logger.exception("Уведомление о горячем покупателе не ушло msg=%s", message_id)
 
@@ -702,7 +702,7 @@ def _notify_llm_limit(message_id: int, thread_id: str, err: Exception) -> None:
             f"Письмо #{message_id} ждёт ручного ответа (карточки следующих писем придут "
             f"без повтора этого уведомления). Автопилот треда остаётся включённым.")
     try:
-        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред", urgent=True)
         _LLM_LIMIT_NOTIFIED = str(err)
     except Exception:
         logger.exception("Уведомление о лимите LLM не ушло msg=%s", message_id)

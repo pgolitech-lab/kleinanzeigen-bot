@@ -144,7 +144,7 @@ def _alert_gave_up(acc: dict[str, Any], em: dict[str, Any], why: str) -> None:
         f"Помечено прочитанным — проверьте его в Gmail вручную."
     )
     try:
-        telegram_bot.notify(text)
+        telegram_bot.notify(text, urgent=True)
     except Exception:
         # ERROR в журнал → monitor_errors_job продублирует в Telegram позже.
         logger.exception("Алерт о необработанном письме не ушёл: %s", why)
@@ -256,7 +256,7 @@ def start() -> None:
                      "in-flight %d (заберутся опросом заново)", dropped, inflight)
         try:
             telegram_bot.notify("⚠️ <b>Поток обработки почты падал</b> — перезапущен. "
-                                f"Писем будет перечитано: {inflight}.")
+                                f"Писем будет перечитано: {inflight}.", urgent=True)
         except Exception:
             logger.exception("Алерт о перезапуске mail_queue не ушёл")
     _worker = threading.Thread(target=_run, name="mail-queue", daemon=True)

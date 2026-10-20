@@ -302,7 +302,8 @@ def reset_stuck_sending() -> int:
             f"⚠️ <b>После рестарта: {len(ids)} писем не подтвердили отправку</b>\n"
             f"Процесс упал во время SMTP — письма могли уйти, а могли и нет. "
             f"Статус → error_send_failed, проверьте и при необходимости отправьте вручную: "
-            f"{', '.join('#' + str(i) for i in ids[:20])}"
+            f"{', '.join('#' + str(i) for i in ids[:20])}",
+            urgent=True
         )
     except Exception:
         logger.exception("reset_stuck_sending: уведомление оператору не ушло")
