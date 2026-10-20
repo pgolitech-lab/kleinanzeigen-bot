@@ -3,13 +3,9 @@
 #   generate_scout_queries  — генерация поисковых запросов (Sonnet)
 #   classify_scout_listings — классификация объявлений car/part/other (Haiku)
 
-import json
 from typing import Any, Optional
 
-from modules import llm
-
-import config
-from modules.claude_utils import _calc_cost
+from modules.claude_utils import call_json, fast_model, smart_model
 
 # --- MARKET SCOUT: генерация поисковых запросов ---
 
@@ -92,24 +88,12 @@ def generate_scout_queries(
         + "\nВерни поле queries (массив)."
     )
 
-    client = llm.Client()
-    model = config.claude_model()
-    response = client.messages.create(
-        model=model,
-        max_tokens=4000,
-        system=_SCOUT_SYSTEM,
-        thinking={"type": "disabled"},
-        output_config={
-            "effort": "low",
-            "format": {"type": "json_schema", "schema": _SCOUT_QUERIES_SCHEMA},
-        },
-        messages=[{"role": "user", "content": user_msg}],
+    data, meta = call_json(
+        label="scout: поисковые запросы",
+        model=smart_model(), system=_SCOUT_SYSTEM, user=user_msg,
+        schema=_SCOUT_QUERIES_SCHEMA, max_tokens=4000,
     )
-    raw = next((b.text for b in response.content if b.type == "text"), "")
-    if not raw:
-        raise RuntimeError("Пустой ответ generate_scout_queries")
-    data = json.loads(raw)
-    in_t, out_t, cost = _calc_cost(model, response.usage)
+    in_t, out_t, cost = meta["tokens_in"], meta["tokens_out"], meta["cost_usd"]
 
     queries: list[dict[str, Any]] = []
     for q in data.get("queries", []):
@@ -217,23 +201,14 @@ def classify_scout_listings(
         "Верни results: массив {id, type} для КАЖДОГО id."
     )
 
-    client = llm.Client()
-    model = "claude-haiku-4-5"
-    response = client.messages.create(
-        model=model,
-        max_tokens=4000,
+    data, meta = call_json(
+        label="scout: классификация объявлений",
+        model=fast_model(),
         system=("Ты классификатор объявлений авторынка. Точно отличаешь целый "
                 "автомобиль от отдельной запчасти."),
-        output_config={
-            "format": {"type": "json_schema", "schema": _SCOUT_CLASSIFY_SCHEMA},
-        },
-        messages=[{"role": "user", "content": user_msg}],
+        user=user_msg, schema=_SCOUT_CLASSIFY_SCHEMA, max_tokens=4000,
     )
-    raw = next((b.text for b in response.content if b.type == "text"), "")
-    if not raw:
-        raise RuntimeError("Пустой ответ classify_scout_listings")
-    data = json.loads(raw)
-    in_t, out_t, cost = _calc_cost(model, response.usage)
+    in_t, out_t, cost = meta["tokens_in"], meta["tokens_out"], meta["cost_usd"]
 
     out_map: dict[str, str] = {}
     for r in data.get("results", []):

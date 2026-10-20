@@ -9,10 +9,8 @@ import json
 import logging
 from typing import Any, Optional
 
-from modules import llm
-
 import config
-from modules.claude_utils import _calc_cost
+from modules.claude_utils import call_json, smart_model
 
 logger = logging.getLogger(__name__)
 
@@ -108,35 +106,42 @@ def generate_brief(
         f"brief_md: 3-5 предложений на русском, краткое резюме."
     )
 
-    client = llm.Client()
-    response = client.messages.create(
-        model=config.claude_model(),
-        max_tokens=1500,
+    data, meta = call_json(
+        label="бриф объявления",
+        model=smart_model(),
         system=(
             "Ты помощник продавца автозапчастей и других товаров на Kleinanzeigen.de. "
             "Анализируешь объявления и делаешь брифы для оператора."
         ),
-        thinking={"type": "disabled"},
-        output_config={
-            "effort": "low",
-            "format": {"type": "json_schema", "schema": BRIEF_SCHEMA},
-        },
-        messages=[{"role": "user", "content": "\n".join(parts)}],
+        user="\n".join(parts),
+        schema=BRIEF_SCHEMA, max_tokens=1500, nonempty=("brief_md",),
     )
-
-    raw = next((b.text for b in response.content if b.type == "text"), "")
-    if not raw:
-        raise RuntimeError("Claude вернул пустой ответ для брифа")
-
-    data = json.loads(raw)
-    in_t, out_t, cost = _calc_cost(config.claude_model(), response.usage)
     return {
         "brief_md": data["brief_md"].strip(),
         "key_facts": data.get("key_facts") or {},
-        "tokens_in": in_t,
-        "tokens_out": out_t,
-        "cost_usd": cost,
+        "tokens_in": meta["tokens_in"],
+        "tokens_out": meta["tokens_out"],
+        "cost_usd": meta["cost_usd"],
     }
+
+
+def brief_text_for(ad_id: Optional[str]) -> str:
+    """Текст брифа из кэша ad_briefs для подачи в промпт ("" если брифа нет).
+
+    Только читает кэш — бриф генерируется при первом письме по объявлению (incoming).
+    """
+    if not ad_id:
+        return ""
+    import database as db
+    cached = db.get_ad_brief(ad_id)
+    if not cached:
+        return ""
+    try:
+        key_facts = json.loads(cached["key_facts_json"] or "{}")
+    except json.JSONDecodeError:
+        logger.warning("ad_briefs[%s]: битый key_facts_json — бриф без фактов", ad_id)
+        key_facts = {}
+    return format_brief_for_claude(cached["brief_md"], key_facts)
 
 
 def format_brief_for_telegram(brief_md: str, key_facts: dict[str, Any]) -> str:
