@@ -70,7 +70,13 @@ def main() -> int:
         max_age_days=args.max_age_days, force=True, translate=not args.no_translate,
     )
     print(json.dumps(rep, ensure_ascii=False, indent=1, default=str))
-    return 1 if rep.get("errors") else 0
+    if rep.get("errors"):
+        return 1
+    accs = rep.get("accounts") or {}
+    if rep.get("skipped") == "busy" or (accs and not rep.get("threads")
+                                        and all("skipped" in a for a in accs.values())):
+        return 2  # ничего не прочитали: лок / блок / нет кредов — см. accounts.*.skipped
+    return 0
 
 
 if __name__ == "__main__":

@@ -206,7 +206,7 @@ def test_recheck_interval_per_thread(env):
     st["accounts"]["3"]["last_run_at"] = "2000-01-01T00:00:00"
     ka_site_sync._save_state(st)
     rep = _sync(session_factory=FakeSession({CONV: _conv_json()}, calls=calls))
-    assert calls == [CONV] and rep["already"] == 0 and rep["known"] == 2
+    assert calls == [CONV] and rep["already"] == 2 and rep["known"] == 0
 
 
 def test_dry_run_writes_nothing(env):
@@ -333,3 +333,137 @@ def test_all_mail_box_parsing():
             return "OK", [b'(\\HasNoChildren) "/" "INBOX"',
                           b'(\\All \\HasNoChildren) "/" "[Gmail]/Alle Nachrichten"']
     assert ka_site_sync._all_mail_box(I()) == "[Gmail]/Alle Nachrichten"
+
+
+# --- громкие отказы (silent-failure-hunter) -------------------------------------------
+
+def test_parse_raises_when_text_field_renamed():
+    data = {"messages": [{"messageId": "1", "boundness": "OUTBOUND",
+                          "receivedDate": "2026-01-01T00:00:00Z", "content": "Hallo"}]}
+    with pytest.raises(KaFormatError):
+        ka_site.parse_conversation(data, "c1:d2")
+    # только фото — это нормально, не ошибка
+    photo = {"messages": [{"messageId": "1", "boundness": "OUTBOUND",
+                           "receivedDate": "2026-01-01T00:00:00Z", "attachments": [{"u": 1}]}]}
+    assert ka_site.parse_conversation(photo, "c1:d2") == []
+
+
+def test_not_found_is_remembered_and_403_is_error(env):
+    db, _ = env
+    _thread(db)
+    _sync(session_factory=FakeSession({}))
+    st = ka_site_sync._load_state()
+    assert "t1" in st["accounts"]["3"]["checked"]
+    rep = _sync(session_factory=FakeSession(raise_on_get=ka_site.KaSiteError("x: HTTP 403")), force=True)
+    assert rep["errors"] and "403" in rep["errors"][0]
+
+
+def test_unexpected_gmail_exception_does_not_stop_others(env, monkeypatch):
+    db, _ = env
+    _thread(db, tid="old", conv=None, gmid="<o@x>")
+    _thread(db, tid="t1")
+
+    def boom(*a):
+        raise ValueError("weird")
+    monkeypatch.setattr(ka_site_sync, "conversation_ids_from_gmail", boom)
+    rep = _sync(session_factory=FakeSession({CONV: _conv_json()}))
+    assert rep["errors"] and rep["fetched_ok"] == 1
+
+
+def test_gmail_miss_is_cached(env, monkeypatch):
+    db, _ = env
+    _thread(db, conv=None)
+    calls = []
+    monkeypatch.setattr(ka_site_sync, "conversation_ids_from_gmail",
+                        lambda *a: calls.append(a) or {})
+    _sync(session_factory=FakeSession())
+    rep = _sync(session_factory=FakeSession())
+    assert len(calls) == 1 and rep["no_conv_id"] == 1
+
+
+def test_inactive_account_ignored(env):
+    db, _ = env
+    db.update_account(3, is_active=0)
+    _thread(db)
+    rep = _sync(session_factory=FakeSession({CONV: _conv_json()}))
+    assert rep["candidates"] == 0
+
+
+def test_block_reminder_after_a_day(env):
+    state: dict = {}
+    assert ka_site_sync._set_block(state, 3, "captcha", ("k", "p"))
+    assert not ka_site_sync._set_block(state, 3, "captcha", ("k", "p"))
+    state["accounts"]["3"]["notified_at"] = "2000-01-01T00:00:00"
+    assert ka_site_sync._set_block(state, 3, "captcha", ("k", "p"))
+
+
+def test_corrupt_state_is_kept_aside(env, caplog):
+    ka_site.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ka_site_sync.STATE_FILE.write_text("{oops")
+    assert ka_site_sync._load_state() == {}
+    assert ka_site_sync.STATE_FILE.with_suffix(".corrupt").exists()
+    assert "не читается" in caplog.text
+
+
+def test_run_scheduled_stale_health_error(env, caplog):
+    db, _ = env
+    db.set_setting("ka_site_sync_enabled", "1")
+    _thread(db)
+    ka_site_sync._save_state({"first_run_at": "2000-01-01T00:00:00",
+                              "accounts": {"3": {"block_reason": "captcha",
+                                                 "blocked_until": "2999-01-01T00:00:00",
+                                                 "pw_fp": "x"}}})
+    rep = ka_site_sync.run_scheduled()
+    assert rep["accounts"][3]["skipped"] == "blocked:captcha"
+    assert "нет успешного чтения сайта" in caplog.text
+
+
+# --- замечания ревьюера -----------------------------------------------------------------
+
+def test_repeated_identical_owner_reply_is_imported(env):
+    db, _ = env
+    _thread(db, at="2026-10-19T09:00:00")
+    data = _conv_json()
+    data["messages"].append({"messageId": "m6", "boundness": "OUTBOUND",
+                             "receivedDate": "2026-10-19T13:00:00.000+0200",
+                             "text": "Hallo, ja, noch da.\n\nMfG"})
+    rep = _sync(session_factory=FakeSession({CONV: data}))
+    assert rep["imported"] == 3 and rep["known"] == 0
+
+
+def test_system_cards_are_skipped_not_fatal():
+    data = _conv_json()
+    data["messages"].append({"type": "PAYMENT_AND_SHIPPING_CARD", "title": "Bezahlung"})
+    assert len(ka_site.parse_conversation(data, CONV)) == 4
+
+
+def test_block_is_forgotten_after_success_so_next_block_notifies(env):
+    db, notes = env
+    _thread(db)
+    _sync(session_factory=FakeSession(raise_on_get=KaBlocked("captcha")))
+    st = ka_site_sync._load_state()
+    st["accounts"]["3"]["blocked_until"] = "2000-01-01T00:00:00"  # блок истёк
+    ka_site_sync._save_state(st)
+    _sync(session_factory=FakeSession({CONV: _conv_json()}), force=True)
+    assert "block_reason" not in ka_site_sync._load_state()["accounts"]["3"]
+    _thread(db, gmid="<n2@x>")
+    _sync(session_factory=FakeSession(raise_on_get=KaBlocked("captcha")), force=True)
+    assert len(notes) == 2
+
+
+def test_user_id_from_token_ignores_email():
+    b = base64.urlsafe_b64encode(json.dumps({"sub": "a@b.de"}).encode()).decode().rstrip("=")
+    assert ka_site.user_id_from_token(f"Bearer h.{b}.s") is None
+
+
+def test_ua_for_browser_version():
+    assert "Chrome/147.0.0.0" in ka_site.ua_for("147.0.7727.15")
+    assert "Headless" not in ka_site.ua_for("147.0")
+
+
+def test_password_fingerprint_is_keyed(env):
+    fp = ka_site_sync._pw_fingerprint("k", "p")
+    import hashlib
+    assert fp != hashlib.sha256(b"k\0p").hexdigest()[:16]
+    assert (ka_site.STATE_DIR / "ka_site.key").stat().st_mode & 0o777 == 0o600
+    assert ka_site.STATE_DIR.stat().st_mode & 0o777 == 0o700

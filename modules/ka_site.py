@@ -42,9 +42,15 @@ MESSAGES_URL = f"{WWW}/m-nachrichten.html"
 GATEWAY = "https://gateway.kleinanzeigen.de"
 LOGIN_HOST = "login.kleinanzeigen.de"
 
-# Реальный десктопный Chrome (как в scout). Менять вместе с версией Chromium Playwright.
-UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
+# UA собираем из версии реального Chromium Playwright (major), чтобы UA не расходился
+# с sec-ch-ua / userAgentData; «HeadlessChrome» в UA не светим.
+UA_TEMPLATE = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36")
+
+
+def ua_for(browser_version: str) -> str:
+    major = (browser_version or "").split(".")[0]
+    return UA_TEMPLATE.format(major=major if major.isdigit() else "129")
 
 STATE_DIR = Path(os.path.expanduser("~/.local/state/kleinanzeigen-bot"))
 
@@ -53,6 +59,20 @@ CONV_ID_RE = re.compile(r"^[0-9a-z]{2,20}(?::[0-9a-z]{2,20}){1,4}$", re.I)
 _GW_USER_RE = re.compile(r"/messagebox/api/users/([^/?#]+)/")
 
 NAV_TIMEOUT_MS = 45_000
+# Основная кнопка Auth0. Первая button[name=action] на странице — скрытая ловушка
+# (opacity:0, pointer-events:none): нестрогий селектор кликнул бы её и упал по таймауту.
+SUBMIT_BTN = "button[data-action-button-primary=true]"
+# Видимые виджеты капчи (iframe или div — Friendly Captcha рисуется без iframe).
+_CAPTCHA_JS = """() => {
+  const sel = 'iframe[src*="arkoselabs"], iframe[src*="recaptcha"], iframe[src*="hcaptcha"],'
+    + ' iframe[src*="challenges.cloudflare"], iframe[src*="friendlycaptcha"],'
+    + ' .frc-captcha, .cf-turnstile, .h-captcha, .g-recaptcha, [data-captcha-provider] iframe';
+  return [...document.querySelectorAll(sel)].some(e => {
+    const r = e.getBoundingClientRect(); const st = getComputedStyle(e);
+    return r.width > 20 && r.height > 20 && st.visibility !== 'hidden' && st.display !== 'none'
+      && parseFloat(st.opacity || '1') > 0.1;
+  });
+}"""
 TOKEN_WAIT_MS = 15_000
 
 
@@ -150,9 +170,14 @@ def parse_conversation(data: Any, conversation_id: str) -> list[dict[str, Any]]:
     role = str(data.get("role") or "").strip().lower()
     we_are_buyer = role == "buyer"
     out: list[dict[str, Any]] = []
+    textless_plain = 0  # без текста И без вложений — подозрение, что поле текста переименовали
     for m in msgs:
         if not isinstance(m, dict):
             raise KaFormatError("сообщение не объект")
+        mtype = str(m.get("type") or "MESSAGE").upper()
+        if mtype not in ("MESSAGE", "TEXT", "TEXT_MESSAGE"):
+            # Системные карточки (оплата, доставка, «reserviert» …) — не реплики.
+            continue
         mid = _first(m, "messageId", "id")
         ours = _is_ours(m)
         when = _first(m, "receivedDate", "sentDate", "createdAt", "date", "timestamp")
@@ -165,6 +190,8 @@ def parse_conversation(data: Any, conversation_id: str) -> list[dict[str, Any]]:
             raise KaFormatError(f"время не разобрано: {when!r}") from e
         text = _first(m, "text", "textShort", "body")
         if not isinstance(text, str) or not text.strip():
+            if not m.get("attachments"):
+                textless_plain += 1
             continue
         if ours:
             sender = "buyer" if we_are_buyer else "seller"
@@ -177,6 +204,10 @@ def parse_conversation(data: Any, conversation_id: str) -> list[dict[str, Any]]:
             "sent_at": sent_at,
             "external_id": f"{conversation_id}:{mid}",
         })
+    if not out and textless_plain:
+        # Ни у одного сообщения не нашли текст — скорее всего, сменилось имя поля.
+        raise KaFormatError(f"ни у одного из {len(msgs)} сообщений нет текста "
+                            f"(ключи: {sorted(msgs[0])[:15]})")
     out.sort(key=lambda r: r["sent_at"])
     return out
 
@@ -194,7 +225,7 @@ def user_id_from_token(auth: str) -> Optional[str]:
         return None
     for k in ("userId", "user_id", "uid", "preferred_username", "sub"):
         v = payload.get(k)
-        if isinstance(v, (str, int)) and str(v).strip():
+        if isinstance(v, (str, int)) and str(v).strip() and "@" not in str(v):
             v = str(v).strip()
             # Auth0-подобный sub «auth0|12345» → берём хвост
             return v.split("|")[-1]
@@ -252,15 +283,21 @@ class KaSession:
     def __enter__(self) -> "KaSession":
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=self.headless)
-        sp = session_path(self.account_id)
-        kwargs: dict[str, Any] = dict(user_agent=UA, locale="de-DE", timezone_id="Europe/Berlin",
-                                      viewport={"width": 1366, "height": 900})
-        if sp.exists():
-            kwargs["storage_state"] = str(sp)
-        self._ctx = self._browser.new_context(**kwargs)
-        self._page = self._ctx.new_page()
-        self._page.on("request", self._sniff)
+        try:
+            self._browser = self._pw.chromium.launch(headless=self.headless)
+            sp = session_path(self.account_id)
+            kwargs: dict[str, Any] = dict(user_agent=ua_for(self._browser.version), locale="de-DE",
+                                          timezone_id="Europe/Berlin",
+                                          viewport={"width": 1366, "height": 900})
+            if sp.exists():
+                kwargs["storage_state"] = str(sp)
+            self._ctx = self._browser.new_context(**kwargs)
+            self._page = self._ctx.new_page()
+            self._page.on("request", self._sniff)
+        except BaseException:
+            # __exit__ не вызовется — иначе драйвер Playwright останется висеть в процессе бота.
+            self.__exit__(None, None, None)
+            raise
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -322,23 +359,43 @@ class KaSession:
 
     def _check_obstacle(self) -> None:
         kind = detect_login_obstacle(self._page.url, self._page.content())
+        if kind is None:
+            try:
+                if self._page.evaluate(_CAPTCHA_JS):
+                    kind = "captcha"
+            except Exception:
+                logger.debug("ka_site: проверка видимой капчи не удалась", exc_info=True)
         if kind == "mfa" and self.mfa_code_cb is not None:
             return
         if kind:
             raise KaBlocked(kind, f"страница {self._page.url.split('?')[0]}")
 
     def _login(self) -> None:
+        try:
+            self._login_steps()
+        except KaBlocked:
+            raise
+        except Exception as e:
+            # Таймаут/селектор (сменилась вёрстка Auth0): НЕ пробовать снова каждые 45 мин —
+            # блок login_failed (см. ka_site_sync.BLOCK_HOURS) + уведомление оператору.
+            raise KaBlocked("login_failed", f"{type(e).__name__}: {str(e)[:160]}") from e
+
+    def _login_steps(self) -> None:
         if not (self.email and self.password):
             raise KaBlocked("no_credentials", "сессия протухла, логин/пароль Kleinanzeigen не заданы")
         p = self._page
         if not self._on_login_page():
+            # Сессия протухла без редиректа — сами открываем вход (уводит на Auth0).
+            if "m-einloggen" not in (p.url or ""):
+                p.goto(f"{WWW}/m-einloggen.html?targetUrl=/m-nachrichten.html",
+                       wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
             p.wait_for_url(f"**{LOGIN_HOST}/**", timeout=NAV_TIMEOUT_MS)
         self._check_obstacle()
         p.wait_for_selector("input#username", timeout=NAV_TIMEOUT_MS)
         _pause()
         p.fill("input#username", self.email)
         _pause(0.8, 2.0)
-        p.click("button[type=submit][name=action], button[type=submit]")
+        p.click(SUBMIT_BTN)
         try:
             p.wait_for_selector("input#password, input[name=password]", state="visible",
                                 timeout=20_000)
@@ -349,11 +406,16 @@ class KaSession:
         _pause()
         p.fill("input#password, input[name=password]", self.password)
         _pause(0.8, 2.0)
-        p.click("button[type=submit][name=action], button[type=submit]")
+        p.click(SUBMIT_BTN)
         try:
             p.wait_for_url(f"{WWW}/**", timeout=30_000)
         except Exception as e:
-            kind = detect_login_obstacle(p.url, p.content())
+            self_kind = None
+            try:
+                self._check_obstacle()
+            except KaBlocked as b:
+                self_kind = b.kind
+            kind = self_kind or detect_login_obstacle(p.url, p.content())
             if kind == "mfa" and self.mfa_code_cb is not None:
                 self._enter_mfa_code()
             else:
@@ -372,7 +434,7 @@ class KaSession:
         if not code:
             raise KaBlocked("mfa", "код подтверждения не введён")
         p.fill("input#code, input[name=code]", code)
-        p.click("button[type=submit][name=action], button[type=submit]")
+        p.click(SUBMIT_BTN)
         try:
             p.wait_for_url(f"{WWW}/**", timeout=30_000)
         except Exception as e:
@@ -387,6 +449,15 @@ class KaSession:
         if not self._auth:
             # Запасной путь: тот же эндпоинт, что дёргает клиент для токена.
             r = self._fetch(f"{WWW}/m-access-token.json", auth=None)
+            if r["status"] in (401, 403):
+                # Сессия протухла без редиректа на форму входа.
+                if self.logged_in_now:
+                    raise KaBlocked("login_failed", f"после входа токен не выдан (HTTP {r['status']})")
+                self._login()
+                self._wait_token()
+                return
+            if r["status"] != 200:
+                raise KaSiteError(f"m-access-token.json: HTTP {r['status']}")
             self._auth = r["headers"].get("authorization") or None
         if self._auth and not self._user_id:
             self._user_id = user_id_from_token(self._auth)
@@ -422,8 +493,11 @@ class KaSession:
             self._auth = None
             self.open_messages()
             r = self._fetch(url, self._auth)
-        if r["status"] in (403, 404):
-            raise KaNotFound(f"{conversation_id}: HTTP {r['status']}")
+        if r["status"] == 404:
+            raise KaNotFound(f"{conversation_id}: HTTP 404")
+        if r["status"] == 403:
+            # Akamai/отозванный токен/ограничение аккаунта — не «переписки нет».
+            raise KaSiteError(f"{conversation_id}: HTTP 403 (доступ запрещён)")
         if r["status"] != 200:
             raise KaSiteError(f"{conversation_id}: HTTP {r['status']}")
         try:
