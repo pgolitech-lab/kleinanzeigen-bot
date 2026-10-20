@@ -83,7 +83,8 @@ def test_link_new_then_repost_same_product(inv):
                           price="1.500 €", account_id=1)
     assert r2["method"] == "normalized" and r2["product_id"] == r1["product_id"]
     p = inv.inv.get_product(r1["product_id"])
-    assert p["category"] == "sitzbank" and p["list_price_eur"] == 1299.0 and p["stock_tracked"] == 0
+    # цена товара = цена свежего объявления (перепост с новой ценой)
+    assert p["category"] == "sitzbank" and p["list_price_eur"] == 1500.0 and p["stock_tracked"] == 0
 
 
 def test_link_known_updates_state(inv):
@@ -188,8 +189,9 @@ def test_record_sale_idempotent_per_thread(inv):
     s1 = inv.record_sale(ad_id="100", price_eur=280, gmail_thread_id="t1")
     s2 = inv.record_sale(ad_id="100", price_eur=280, gmail_thread_id="t1")
     assert s1["created"] and not s2["created"] and s1["movement_id"] == s2["movement_id"]
-    assert inv.inv.stock_qty(r["product_id"]) == -1
-    assert s1["stock_tracked"] is False   # остаток не внесён — минус не значит «нет»
+    # учёт не начат — продажа в остаток не входит, остаток «неизвестен»
+    assert inv.inv.stock_qty(r["product_id"]) == 0
+    assert s1["stock_tracked"] is False
 
 
 def test_record_sale_unknown_product(inv):
@@ -342,7 +344,7 @@ def test_plan_and_apply_seed_idempotent(inv):
     plan = inv.plan_seed(ads)
     assert len(plan["groups"]) == 2 and len(plan["doubtful"]) == 1
     st = inv.apply_seed(plan)
-    assert st == {"products": 2, "listings": 3, "questions": 1, "skipped_known": 0}
+    assert (st["products"], st["listings"], st["questions"], st["skipped_known"]) == (2, 3, 1, 0)
     assert inv.inv.get_listing("1")["first_seen_at"].startswith("2026-05-01")
     st2 = inv.apply_seed(inv.plan_seed(inv.seed_ads_from_messages()))
     assert st2["products"] == 0 and st2["skipped_known"] == 3
@@ -360,3 +362,193 @@ def test_merge_products_moves_everything(inv):
     assert inv.ad_context("x")["product_id"] == a
     with pytest.raises(ValueError):
         inv.inv.merge_products(a, b)   # b в архиве
+
+
+# ─── после ревью: учёт с начала, FIFO, перенос продаж, синк ───────────────────
+
+def test_history_sales_do_not_drive_first_receipt_negative(inv):
+    r = inv.link_listing("100", title="Klapptisch Traveller", price=300)
+    pid = r["product_id"]
+    for i in range(3):
+        inv.record_sale(product_id=pid, price_eur=250, gmail_thread_id=f"old{i}",
+                        occurred_at=f"2026-0{i + 1}-10T12:00:00", source="thread")
+    inv.receive(pid, 2, 100.0)
+    ctx = inv.ad_context("100")
+    assert ctx["stock"] == "in_stock" and ctx["qty"] == 2
+    inv.record_sale(product_id=pid, price_eur=300, gmail_thread_id="new")
+    assert inv.ad_context("100")["qty"] == 1
+
+
+def test_backdated_receipt_counts_later_sales(inv):
+    pid = inv.inv.create_product(title="AHK")
+    inv.record_sale(product_id=pid, price_eur=200, gmail_thread_id="a", occurred_at="2026-08-01T00:00:00")
+    inv.receive(pid, 5, 100.0, occurred_at="2026-07-01T00:00:00")   # купили в июле — продажа в августе из неё
+    assert inv.inv.stock_qty(pid) == 4
+
+
+def test_fifo_cost_after_count_with_prior_sales(inv):
+    pid = inv.inv.create_product(title="Sitzbank", unit_cost_eur=100.0, list_price_eur=300.0)
+    for i in range(3):
+        inv.record_sale(product_id=pid, price_eur=250, gmail_thread_id=f"s{i}",
+                        occurred_at=f"2026-0{i + 1}-10T12:00:00")
+    inv.set_stock(pid, 5)
+    it = inv.report()["products"][0]
+    assert it["qty"] == 5 and it["stock_cost_eur"] == 500.0 and it["expected_profit_list"] == 1000.0
+
+
+def test_set_stock_zero_starts_tracking(inv):
+    r = inv.link_listing("100", title="Klapptisch Traveller", price=300)
+    inv.record_sale(product_id=r["product_id"], price_eur=250, gmail_thread_id="x",
+                    occurred_at="2026-01-01T00:00:00")
+    assert inv.set_stock(r["product_id"], 0) is not None
+    assert inv.ad_context("100")["stock"] == "out_of_stock"
+
+
+def test_negative_stock_is_unknown_not_out_of_stock(inv):
+    r = inv.link_listing("100", title="Klapptisch Traveller", price=300)
+    inv.receive(r["product_id"], 1, 10.0, occurred_at="2026-01-01T00:00:00")
+    inv.record_sale(product_id=r["product_id"], price_eur=20, gmail_thread_id="a")
+    inv.record_sale(product_id=r["product_id"], price_eur=20, gmail_thread_id="b")
+    ctx = inv.ad_context("100")
+    assert ctx["stock"] == "unknown" and ctx["negative_stock"] is True and ctx["qty"] == -1
+    assert inv.prompt_note("100") == ""
+
+
+def test_safe_error_makes_no_claims(inv, monkeypatch):
+    inv.link_listing("100", title="Gelöscht • Klapptisch Traveller", price=300)
+    monkeypatch.setattr(inv.inv, "get_listing", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    assert inv.ad_context_safe("100")["error"] is True
+    assert inv.effective_ad_state("100", "deleted") == "" and inv.prompt_note("100") == ""
+
+
+def test_reserved_kept_when_last_unit(inv):
+    r = inv.link_listing("100", title="Klapptisch Traveller", price=300)
+    inv.set_stock(r["product_id"], 1)
+    assert inv.effective_ad_state("100", "reserved") == "reserved"
+    inv.set_stock(r["product_id"], 3)
+    assert inv.effective_ad_state("100", "reserved") == ""
+
+
+def test_answer_same_moves_sales_of_that_ad(inv):
+    a = inv.link_listing("100", title="Peugeot Traveller Sitzbank", price=1299)
+    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank", price=1299)
+    inv.record_sale(ad_id="200", price_eur=1200, gmail_thread_id="t1", source="thread")
+    res = inv.answer_question(b["question_id"], same=True)
+    assert res["merged"] is True
+    assert inv.inv.sale_for_thread("t1")["product_id"] == a["product_id"]
+
+
+def test_sync_reprices_and_isolates_errors(inv, monkeypatch):
+    import database as db
+    _msg(db, ad_id="101", title="Klapptisch Opel Zafira Life", price="250 €", thread="t2",
+         status="skipped_sold", sold_price=230.0, sold_at="2026-10-01T12:00:00")
+    inv.sync_all()
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET sold_price_eur = 240 WHERE gmail_thread_id='t2'")
+    st = inv.sync_sales()
+    assert st["repriced"] == 1 and inv.inv.sale_for_thread("t2")["unit_price_eur"] == 240.0
+    # sync_listings падает целиком — продажи всё равно синхронизируются
+    monkeypatch.setattr(inv, "sync_listings", lambda **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = inv.sync_all()
+    assert out["listings"]["errors"] == 1 and out["sales"]["already"] == 1
+
+
+def test_sync_listings_one_bad_ad_does_not_stop_others(inv, monkeypatch):
+    import database as db
+    _msg(db, ad_id="1", title="Klapptisch Traveller", price="300 €")
+    _msg(db, ad_id="2", title="Anhängerkupplung Traveller", price="200 €")
+    real = inv.link_listing
+
+    def flaky(ad_id, **kw):
+        if ad_id == "1":
+            raise RuntimeError("bad")
+        return real(ad_id, **kw)
+    monkeypatch.setattr(inv, "link_listing", flaky)
+    st = inv.sync_listings()
+    assert st["errors"] == 1 and st["new"] == 1
+
+
+def test_void_logged_as_warning(inv, caplog):
+    import database as db
+    _msg(db, ad_id="101", title="Klapptisch Opel Zafira Life", price="250 €", thread="t2",
+         status="skipped_sold", sold_price=230.0, sold_at="2026-10-01T12:00:00")
+    inv.sync_all()
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET status='pending' WHERE gmail_thread_id='t2'")
+    with caplog.at_level("WARNING"):
+        assert inv.sync_sales()["voided"] == 1
+    assert any(r.levelname == "WARNING" and "отменена" in r.getMessage() for r in caplog.records)
+
+
+def test_apply_seed_joins_existing_product(inv):
+    import database as db
+    first = inv.link_listing("1", title="Peugeot Traveller Sitzbank", price=1299)
+    _msg(db, ad_id="1", title="Peugeot Traveller Sitzbank", price="1.299 €", created_at="2026-05-01T00:00:00")
+    _msg(db, ad_id="2", title="Peugeot Traveller  Sitzbank", price="1.300 €", created_at="2026-06-01T00:00:00")
+    st = inv.apply_seed(inv.plan_seed(inv.seed_ads_from_messages()))
+    assert st["products"] == 0 and st["joined_existing"] == 1
+    assert inv.inv.get_listing("2")["product_id"] == first["product_id"]
+
+
+# ─── отчёт за месяц, профиль, подсказка цены ─────────────────────────────────
+
+def test_monthly_report_lots_payback(inv):
+    pid = inv.inv.create_product(title="Sitzbank", list_price_eur=1300.0, min_price_eur=1000.0)
+    inv.receive(pid, 2, 500.0, occurred_at="2026-09-05T00:00:00")
+    inv.receive(pid, 2, 600.0, occurred_at="2026-10-02T00:00:00")
+    inv.record_sale(product_id=pid, price_eur=1200.0, gmail_thread_id="a", occurred_at="2026-09-20T00:00:00")
+    inv.record_sale(product_id=pid, price_eur=None, gmail_thread_id="b", occurred_at="2026-10-05T00:00:00")
+    inv.record_sale(product_id=pid, price_eur=1100.0, gmail_thread_id="c", occurred_at="2026-10-10T00:00:00")
+    sep = inv.monthly_report(2026, 9)
+    assert sep["invested"] == 1000.0 and sep["revenue"] == 1200.0 and sep["cogs"] == 500.0
+    assert sep["profit"] == 700.0 and sep["stock_end"]["qty"] == 1 and sep["stock_end"]["cost"] == 500.0
+    assert sep["stock_end"]["list_value"] == 1300.0
+    lot = sep["lots"][0]
+    assert lot["payback"] == "paid" and lot["payback_pct"] == 120.0 and lot["left"] == 1
+    octo = inv.monthly_report(2026, 10)
+    assert octo["invested"] == 1200.0 and octo["sales"] == 2 and octo["sales_without_price"] == 1
+    assert octo["revenue"] == 1100.0 and octo["cogs"] == 1100.0      # 500 (сент. партия) + 600
+    assert octo["profit"] == 500.0                                     # только продажа с ценой: 1100 − 600
+    assert [l["payback"] for l in octo["lots"]] == ["unknown", "not_yet"]
+    assert octo["stock_end"]["qty"] == 1 and octo["stock_end"]["cost"] == 600.0
+    with pytest.raises(ValueError):
+        inv.monthly_report(2026, 13)
+
+
+def test_product_profile_contract(inv):
+    import database as db
+    a = inv.link_listing("100", title="Peugeot Traveller Expert, Opel Zafira Life Leder Sitzbank", price=1299)
+    inv.link_listing("101", title="Peugeot Traveller Expert,  Opel Zafira Life Leder Sitzbank", price=1350)
+    _msg(db, ad_id="101", title="x", desc="Sehr guter Zustand")
+    inv.inv.update_product(a["product_id"], unit_cost_eur=400.0, min_price_eur=1100.0)
+    inv.receive(a["product_id"], 2, 500.0)
+    prof = inv.product_profile(a["product_id"])
+    assert prof["version"] == 1 and prof["category"] == "sitzbank"
+    assert prof["unit_cost_eur"] == 500.0 and prof["unit_cost_source"] == "lots"
+    assert prof["stock"] == {"tracked": True, "qty": 2}
+    assert {l["ad_id"] for l in prof["listings"]} == {"100", "101"}
+    assert "traveller" in prof["models"] and "sitzbank" in prof["core_tokens"] and "traveller" not in prof["core_tokens"]
+    assert prof["features"]["leder"] is True and prof["description"] == "Sehr guter Zustand"
+    assert prof["list_price_eur"] == 1350.0 and prof["min_price_eur"] == 1100.0
+    assert inv.product_profile(9999) is None
+    assert [p["product_id"] for p in inv.list_product_profiles()] == [a["product_id"]]
+
+
+def test_suggest_sale_price(inv):
+    import database as db
+    import json
+    _msg(db, ad_id="1", title="Klapptisch", price="400 €", thread="t1", created_at="2026-10-01T00:00:00")
+    assert inv.suggest_sale_price("t1")["source"] == "ad_price"
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET de_client = 'Würden Sie 320 € nehmen?' WHERE gmail_thread_id='t1'")
+    assert inv.suggest_sale_price("t1")["price_eur"] == 320.0
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET status='sent', de_answer='Für 350 Euro gerne.' WHERE gmail_thread_id='t1'")
+    assert inv.suggest_sale_price("t1")["source"] == "our_text"
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET deal_brief_json = ? WHERE gmail_thread_id='t1'",
+                     (json.dumps({"negotiated_price_eur": 340}),))
+    out = inv.suggest_sale_price("t1")
+    assert (out["price_eur"], out["source"]) == (340.0, "deal_brief")
+    assert [c["source"] for c in out["candidates"]] == ["deal_brief", "our_text", "buyer_text", "ad_price"]
+    assert inv.suggest_sale_price("nope") == {"price_eur": None, "source": None, "candidates": []}

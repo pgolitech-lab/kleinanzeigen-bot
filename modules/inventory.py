@@ -373,12 +373,20 @@ def link_listing(ad_id: str, *, title: Optional[str], price: Any = None,
         verdict = _judge(ct.title, price_eur, ad_id, description, decision.product,
                          judge or llm_same_product)
 
+    llm_error = decision.kind == "doubt" and use_llm and verdict is None
+
     question: Optional[tuple[int, float, str]] = None  # (suggested_product, score, reason)
     with transaction() as conn:
         # Пока думал Haiku, объявление мог завести параллельный вызов
         again = conn.execute("SELECT product_id FROM inv_listings WHERE ad_id = ?", (ad_id,)).fetchone()
         if again is not None:
             return {"ad_id": ad_id, "product_id": again["product_id"], "method": "known", "reason": ""}
+        if decision.kind != "exact":
+            # Параллельный вызов мог только что завести товар с тем же заголовком — перепроверка
+            # под блокировкой записи, чтобы не наплодить дублей
+            fresh = decide(ct.title, price_eur, _db_index())
+            if fresh.kind == "exact":
+                decision = fresh
         if decision.kind == "exact":
             product_id, method, reason = decision.product, "normalized", decision.reason
             if decision.others:
@@ -398,39 +406,57 @@ def link_listing(ad_id: str, *, title: Optional[str], price: Any = None,
         inv.upsert_listing(ad_id=ad_id, product_id=product_id, link_method=method, seen_at=seen_at,
                            account_id=account_id, title=ct.title, price_eur=price_eur, url=url,
                            state=ct.state, link_score=decision.score or None)
+        if method != "new" and price_eur is not None:
+            # Перепост с новой ценой — цена товара = цена самого свежего объявления
+            newest = conn.execute("SELECT ad_id FROM inv_listings WHERE product_id = ? "
+                                  "ORDER BY last_seen_at DESC LIMIT 1", (product_id,)).fetchone()
+            if newest is not None and newest["ad_id"] == ad_id:
+                inv.update_product(product_id, list_price_eur=price_eur)
         qid = None
         if question is not None:
             qid = inv.add_link_question(ad_id=ad_id, product_id=product_id, suggested_product_id=question[0],
                                         score=question[1], reason=question[2])
     logger.info("склад: объявление %s → товар %s (%s) %s", ad_id, product_id, method, reason)
-    return {"ad_id": ad_id, "product_id": product_id, "method": method, "question_id": qid, "reason": reason}
+    return {"ad_id": ad_id, "product_id": product_id, "method": method, "question_id": qid, "reason": reason,
+            "llm_error": llm_error}
 
 
 def answer_question(question_id: int, same: bool) -> dict[str, Any]:
     """Ответ оператора на «это тот же товар?».
 
-    same=True — объявление переезжает к предложенному товару; если у прежнего товара не осталось
-    ни объявлений, ни движений — он сливается (архивируется). same=False — вопрос закрыт.
+    same=True — объявление и его движения (продажи по этому ad_id) переезжают к предложенному
+    товару; если у прежнего товара не осталось ни объявлений, ни движений — он сливается
+    (архивируется). Всё одной транзакцией. same=False — вопрос закрыт.
     """
-    q = inv.get_question(question_id)
-    if q is None:
-        raise ValueError(f"вопрос {question_id} не найден")
-    if q["resolved_at"]:
-        raise ValueError(f"вопрос {question_id} уже закрыт")
-    if not same:
-        inv.close_question(question_id, "different")
-        return {"ad_id": q["ad_id"], "product_id": q["product_id"], "merged": False}
-    old, new = q["product_id"], q["suggested_product_id"]
     with transaction() as conn:
+        q = conn.execute("SELECT * FROM inv_link_questions WHERE id = ?", (int(question_id),)).fetchone()
+        if q is None:
+            raise ValueError(f"вопрос {question_id} не найден")
+        if q["resolved_at"]:
+            raise ValueError(f"вопрос {question_id} уже закрыт")
+        if not same:
+            inv.close_question(question_id, "different", conn=conn)
+            return {"ad_id": q["ad_id"], "product_id": q["product_id"], "merged": False}
+        cur = conn.execute("SELECT product_id FROM inv_listings WHERE ad_id = ?", (q["ad_id"],)).fetchone()
+        if cur is None:
+            raise ValueError(f"объявление {q['ad_id']} не найдено на складе")
+        old = cur["product_id"]
+        new = _follow_merge(q["suggested_product_id"])
+        target = conn.execute("SELECT archived_at FROM inv_products WHERE id = ?", (new,)).fetchone()
+        if target is None or target["archived_at"]:
+            raise ValueError(f"товар {new} в архиве — сначала верните его из архива")
         inv.relink_listing(q["ad_id"], new, "operator")
-        inv.close_question(question_id, "same", conn=conn)
+        conn.execute("UPDATE inv_movements SET product_id = ? WHERE product_id = ? AND ad_id = ?",
+                     (new, old, q["ad_id"]))
+        if not inv.close_question(question_id, "same", conn=conn):
+            raise ValueError(f"вопрос {question_id} уже закрыт")
         left = conn.execute(
             "SELECT (SELECT COUNT(*) FROM inv_listings WHERE product_id = ?) + "
             "(SELECT COUNT(*) FROM inv_movements WHERE product_id = ?) AS n", (old, old)).fetchone()["n"]
-    merged = False
-    if left == 0 and old != new:
-        inv.merge_products(old, new)
-        merged = True
+        merged = False
+        if left == 0 and old != new:
+            inv.merge_products(old, new)   # вложенная транзакция = SAVEPOINT
+            merged = True
     return {"ad_id": q["ad_id"], "product_id": new, "merged": merged}
 
 
@@ -495,19 +521,28 @@ def sync_listings(*, since: Optional[str] = None, use_llm: bool = False,
     """Завести на складе новые объявления из messages и обновить известные (заголовок, состояние,
     last_seen). Идемпотентно — можно гонять джобом. since — только строки новее (ISO)."""
     inv.ensure_schema()
-    stats = {"known": 0, "normalized": 0, "llm": 0, "new": 0, "questions": 0, "skipped": 0}
+    stats = {"known": 0, "normalized": 0, "llm": 0, "new": 0, "questions": 0, "skipped": 0,
+             "llm_errors": 0, "errors": 0}
     for a in collect_ads(_ad_rows(since)):
-        res = link_listing(a.ad_id, title=a.title, price=a.price, account_id=a.account_id, url=a.url,
-                           seen_at=a.last_seen, has_ad_data=True, state=a.state,
-                           use_llm=use_llm, judge=judge)
-        # first_seen для только что заведённого объявления — по первому письму, а не по последнему
-        if res["product_id"] is not None and a.first_seen:
-            with get_conn() as conn:
-                conn.execute("UPDATE inv_listings SET first_seen_at = MIN(first_seen_at, ?) WHERE ad_id = ?",
-                             (a.first_seen, a.ad_id))
+        # Одно «отравленное» объявление не должно останавливать остальные
+        try:
+            res = link_listing(a.ad_id, title=a.title, price=a.price, account_id=a.account_id, url=a.url,
+                               seen_at=a.last_seen, has_ad_data=True, state=a.state,
+                               use_llm=use_llm, judge=judge)
+            # first_seen для только что заведённого объявления — по первому письму, а не по последнему
+            if res["product_id"] is not None and a.first_seen:
+                with get_conn() as conn:
+                    conn.execute("UPDATE inv_listings SET first_seen_at = MIN(first_seen_at, ?) WHERE ad_id = ?",
+                                 (a.first_seen, a.ad_id))
+        except Exception:  # noqa: BLE001
+            logger.exception("склад: объявление %s («%s») не обработано", a.ad_id, a.title)
+            stats["errors"] += 1
+            continue
         stats[res["method"]] = stats.get(res["method"], 0) + 1
         if res.get("question_id"):
             stats["questions"] += 1
+        if res.get("llm_error"):
+            stats["llm_errors"] += 1
     return stats
 
 
@@ -519,7 +554,7 @@ def _sold_threads() -> list[dict[str, Any]]:
 def record_sale(*, price_eur: Optional[float], gmail_thread_id: Optional[str] = None,
                 ad_id: Optional[str] = None, product_id: Optional[int] = None, qty: int = 1,
                 occurred_at: Optional[str] = None, message_id: Optional[int] = None,
-                source: str = "thread", ad_title: Optional[str] = None,
+                source: str = "operator", ad_title: Optional[str] = None,
                 created_by: Optional[str] = None, log_missing: bool = True) -> dict[str, Any]:
     """Продажа = −qty к остатку товара. Товар ищется: product_id → объявление ad_id →
     нормализованный заголовок ad_title. Повторный вызов для того же треда не списывает второй раз.
@@ -590,44 +625,73 @@ def _follow_merge(product_id: int) -> int:
     return p["id"] if p is not None else product_id
 
 
+def _thread_still_sold(thread_id: str) -> bool:
+    rows = inv.iter_rows("SELECT 1 FROM messages WHERE gmail_thread_id = ? AND status = 'skipped_sold' "
+                         "AND sold_price_eur IS NOT NULL LIMIT 1", (thread_id,))
+    return bool(rows)
+
+
 def sync_sales() -> dict[str, Any]:
     """Перенести продажи из messages (status='skipped_sold' с ценой — «Продано» в MA, найденные,
-    ручные) в движения склада; отменённые продажи (тред больше не skipped_sold) — void.
-    Идемпотентно. Возвращает счётчики и список продаж, для которых товар не найден."""
+    ручные) в движения склада; обновить цену, если оператор её поправил; отменённые продажи
+    (тред больше не skipped_sold с ценой) — void. Идемпотентно.
+
+    Треды skipped_sold вовсе без цены — это «закрыт, потому что продали другому» (mark_thread_sold
+    с close_other_threads_for_ad) или старая отметка без цены: продажей не считаются, их число —
+    в stats["unpriced"].
+    """
     inv.ensure_schema()
     sold = _sold_threads()
     detected = {r["gmail_thread_id"] for r in inv.iter_rows(
         "SELECT gmail_thread_id FROM detected_sales WHERE applied_at IS NOT NULL")}
-    have = inv.thread_ids_with_sale()
-    stats: dict[str, Any] = {"recorded": 0, "already": 0, "voided": 0, "unmatched": []}
-    sold_ids = set()
+    stats: dict[str, Any] = {"recorded": 0, "already": 0, "repriced": 0, "voided": 0, "errors": 0,
+                             "unmatched": [], "unpriced": 0}
     for s in sold:
         tid = s["thread_id"]
         if not tid:
             continue
-        sold_ids.add(tid)
-        if tid in have:
-            stats["already"] += 1
+        try:
+            prev = inv.sale_for_thread(tid)
+            if prev is not None:
+                stats["already"] += 1
+                price = s["sold_price_eur"]
+                if price is not None and prev["unit_price_eur"] != price and prev["qty"] == -1:
+                    inv.update_sale_price(prev["id"], float(price))
+                    stats["repriced"] += 1
+                    logger.info("склад: цена продажи треда %s исправлена %s → %s", tid, prev["unit_price_eur"], price)
+                continue
+            source = "manual" if tid.startswith("manual-") else "detected" if tid in detected else "thread"
+            res = record_sale(price_eur=s["sold_price_eur"], gmail_thread_id=tid, ad_id=s["ad_id"],
+                              ad_title=s["ad_title"], occurred_at=s["sold_at"], source=source,
+                              log_missing=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("склад: продажа треда %s не перенесена", tid)
+            stats["errors"] += 1
             continue
-        source = "manual" if tid.startswith("manual-") else "detected" if tid in detected else "thread"
-        res = record_sale(price_eur=s["sold_price_eur"], gmail_thread_id=tid, ad_id=s["ad_id"],
-                          ad_title=s["ad_title"], occurred_at=s["sold_at"], source=source,
-                          log_missing=False)
         if res["product_id"] is None:
             stats["unmatched"].append({"thread_id": tid, "ad_id": s["ad_id"], "ad_title": s["ad_title"],
                                        "price": s["sold_price_eur"], "sold_at": s["sold_at"]})
         elif res["created"]:
             stats["recorded"] += 1
     # Продажу откатили (тред снова открыт / статус сменили) — движение больше не считаем.
-    # Только для источников, которые сами пришли из messages; source='operator' (продажа,
-    # внесённая на складе руками) не трогаем.
+    # Проверка по messages в момент отмены (а не по снимку выше): «Продано» могли отметить
+    # прямо во время прохода. Только источники из messages; source='operator' не трогаем.
     for r in inv.iter_rows("SELECT id, gmail_thread_id FROM inv_movements WHERE kind = 'sale' "
                            "AND voided_at IS NULL AND source IN ('thread', 'detected', 'manual') "
                            "AND gmail_thread_id IS NOT NULL"):
-        if r["gmail_thread_id"] not in sold_ids:
-            if inv.void_movement(r["id"], "тред больше не помечен проданным"):
+        try:
+            if not _thread_still_sold(r["gmail_thread_id"]) and \
+                    inv.void_movement(r["id"], "тред больше не помечен проданным"):
                 stats["voided"] += 1
-                logger.info("склад: продажа треда %s отменена — движение %s void", r["gmail_thread_id"], r["id"])
+                logger.warning("склад: продажа треда %s отменена (тред больше не «продано») — "
+                               "остаток +1, движение %s", r["gmail_thread_id"], r["id"])
+        except Exception:  # noqa: BLE001
+            logger.exception("склад: отмена продажи треда %s не удалась", r["gmail_thread_id"])
+            stats["errors"] += 1
+    stats["unpriced"] = inv.iter_rows("""
+        SELECT COUNT(*) AS n FROM (SELECT gmail_thread_id FROM messages WHERE status = 'skipped_sold'
+                                    AND gmail_thread_id IS NOT NULL GROUP BY gmail_thread_id
+                                   HAVING MAX(sold_price_eur) IS NULL)""")[0]["n"]
     return stats
 
 
@@ -635,17 +699,35 @@ _last_unmatched: set[str] = set()
 
 
 def sync_all(*, use_llm: bool = False) -> dict[str, Any]:
-    """Джоб склада: объявления + продажи. Для scheduler (раз в 30 мин).
-    Продажи без товара логируются WARNING только когда их список изменился (не каждые 30 мин)."""
+    """Джоб склада: объявления + продажи. Для scheduler (раз в 30 мин). Каждая половина
+    изолирована: падение объявлений не мешает продажам. Итог — INFO; ошибки — ERROR (их
+    подхватит monitor_errors). Продажи без товара — WARNING, когда их список изменился."""
     global _last_unmatched
-    listings = sync_listings(use_llm=use_llm)
-    sales = sync_sales()
+    out: dict[str, Any] = {}
+    try:
+        out["listings"] = sync_listings(use_llm=use_llm)
+    except Exception:  # noqa: BLE001
+        logger.exception("склад: sync_listings упал целиком")
+        out["listings"] = {"errors": 1}
+    try:
+        sales = sync_sales()
+    except Exception:  # noqa: BLE001
+        logger.exception("склад: sync_sales упал целиком")
+        sales = {"errors": 1, "unmatched": []}
     ids = {str(u["thread_id"]) for u in sales["unmatched"]}
     if ids - _last_unmatched:
         logger.warning("склад: %d продаж без товара (привязать на складе): %s", len(ids),
                        ", ".join(sorted(ids)[:5]))
     _last_unmatched = ids
-    return {"listings": listings, "sales": {**sales, "unmatched": len(sales["unmatched"])}}
+    out["sales"] = {**sales, "unmatched": len(sales["unmatched"])}
+    errors = out["listings"].get("errors", 0) + sales.get("errors", 0)
+    llm_err = out["listings"].get("llm_errors", 0)
+    logger.info("склад: sync %s", out)
+    if errors:
+        logger.error("склад: sync завершён с ошибками: %d (см. выше)", errors)
+    if llm_err and llm_err == out["listings"].get("questions", 0):
+        logger.error("склад: Haiku не ответил ни по одной сомнительной паре (%d) — вход в подписку?", llm_err)
+    return out
 
 
 # ─── операции оператора ───────────────────────────────────────────────────────
@@ -667,39 +749,43 @@ def write_off(product_id: int, qty: int, *, note: Optional[str] = None,
 
 def set_stock(product_id: int, qty: int, *, note: Optional[str] = None,
               created_by: Optional[str] = None) -> Optional[int]:
-    """Инвентаризация: «сейчас на складе qty шт.» — корректировка на разницу, учёт включается.
-    Возвращает id движения или None, если остаток уже такой и учёт уже включён."""
+    """Инвентаризация: «сейчас на складе qty шт.» — корректировка на разницу с остатком с начала
+    учёта. У товара без учёта она же начинает учёт (продажи из истории до неё не считаются).
+    Возвращает id движения или None, если остаток уже такой."""
     if qty < 0:
         raise ValueError("остаток не может быть отрицательным")
     with transaction() as conn:
-        cur = conn.execute("SELECT COALESCE(SUM(qty), 0) AS q FROM inv_movements "
-                           "WHERE product_id = ? AND voided_at IS NULL", (int(product_id),)).fetchone()["q"]
-        delta = int(qty) - int(cur)
-        if delta == 0:
-            p = conn.execute("SELECT stock_tracked FROM inv_products WHERE id = ?", (int(product_id),)).fetchone()
-            if p is None:
-                raise ValueError(f"товар {product_id} не найден")
-            if not p["stock_tracked"]:
-                conn.execute("UPDATE inv_products SET stock_tracked = 1, updated_at = ? WHERE id = ?",
-                             (datetime.utcnow().isoformat(), int(product_id)))
+        p = conn.execute("SELECT stock_tracked FROM inv_products WHERE id = ?", (int(product_id),)).fetchone()
+        if p is None:
+            raise ValueError(f"товар {product_id} не найден")
+        started = inv.tracked_since(product_id, conn=conn) is not None
+        delta = int(qty) - (inv.stock_qty(product_id, conn=conn) if started else 0)
+        if delta == 0 and started:
             return None
+        # delta == 0 у товара без учёта («0 шт.») — всё равно движение: оно отмечает начало учёта
         return inv.add_movement(product_id=product_id, kind="adjust", qty=delta,
                                 note=note or f"инвентаризация: {qty} шт.", created_by=created_by, conn=conn)
 
 
 # ─── правила для других модулей ───────────────────────────────────────────────
 
+def _empty_context() -> dict[str, Any]:
+    return {"known": False, "product_id": None, "product_title": None, "stock": "unknown",
+            "qty": None, "negative_stock": False, "list_price_eur": None, "min_price_eur": None,
+            "has_other_active_listing": False, "error": False}
+
+
 def ad_context(ad_id: Optional[str], *, now: Optional[datetime] = None) -> dict[str, Any]:
     """Что склад знает о товаре объявления.
 
-    stock: in_stock (учёт ведётся, остаток > 0) / out_of_stock (учёт ведётся, остаток ≤ 0) /
-    unknown (объявление не на складе или остаток не внесён — НЕ значит «нет в наличии»).
-    has_other_active_listing — у товара есть другое объявление, которое видели недавно и без
-    «Gelöscht» (перепостили).
+    stock: in_stock (учёт ведётся, остаток > 0) / out_of_stock (учёт ведётся, остаток ровно 0) /
+    unknown (объявление не на складе, остаток не внесён или ушёл в минус — НЕ значит «нет в
+    наличии»). negative_stock — учёт ведётся, а остаток < 0: оператору проверить приход.
+    has_other_active_listing — у товара есть другое объявление без «Gelöscht», по которому были
+    письма за последние ACTIVE_LISTING_DAYS дней (перепостили).
+    error — склад не ответил (см. ad_context_safe).
     """
-    out: dict[str, Any] = {"known": False, "product_id": None, "product_title": None, "stock": "unknown",
-                           "qty": None, "list_price_eur": None, "min_price_eur": None,
-                           "has_other_active_listing": False}
+    out = _empty_context()
     if not ad_id:
         return out
     inv.ensure_schema()
@@ -710,25 +796,32 @@ def ad_context(ad_id: Optional[str], *, now: Optional[datetime] = None) -> dict[
     p = inv.get_product(pid)
     if p is None:
         return out
+    tracked = bool(p["stock_tracked"])
     qty = inv.stock_qty(pid)
     cutoff = ((now or datetime.utcnow()) - timedelta(days=ACTIVE_LISTING_DAYS)).isoformat()
     other = inv.iter_rows("SELECT 1 FROM inv_listings WHERE product_id = ? AND ad_id != ? AND state = 'active' "
                           "AND last_seen_at >= ? LIMIT 1", (pid, str(ad_id), cutoff))
-    out.update(known=True, product_id=pid, product_title=p["title"],
-               stock=("in_stock" if qty > 0 else "out_of_stock") if p["stock_tracked"] else "unknown",
-               qty=qty if p["stock_tracked"] else None, list_price_eur=p["list_price_eur"],
-               min_price_eur=p["min_price_eur"], has_other_active_listing=bool(other))
+    if not tracked or qty < 0:
+        stock = "unknown"
+    else:
+        stock = "in_stock" if qty > 0 else "out_of_stock"
+    out.update(known=True, product_id=pid, product_title=p["title"], stock=stock,
+               qty=qty if tracked else None, negative_stock=tracked and qty < 0,
+               list_price_eur=p["list_price_eur"], min_price_eur=p["min_price_eur"],
+               has_other_active_listing=bool(other))
     return out
 
 
 def ad_context_safe(ad_id: Optional[str]) -> dict[str, Any]:
-    """ad_context без исключений: при ошибке БД — «неизвестно» (безопасно: «продано» не скажем)
-    и ERROR в лог (его подхватит monitor_errors)."""
+    """ad_context без исключений: при ошибке БД — «неизвестно» с error=True и ERROR в лог
+    (его подхватит monitor_errors). Вызывающий не должен делать выводов из сбойного ответа."""
     try:
         return ad_context(ad_id)
     except Exception:  # noqa: BLE001
         logger.exception("склад: ad_context(%s) упал — считаю остаток неизвестным", ad_id)
-        return ad_context(None)
+        out = _empty_context()
+        out["error"] = True
+        return out
 
 
 def effective_ad_state(ad_id: Optional[str], raw_state: str) -> str:
@@ -737,15 +830,19 @@ def effective_ad_state(ad_id: Optional[str], raw_state: str) -> str:
     raw_state — что видно по самому объявлению: '' / 'deleted' (Gelöscht) / 'reserved' /
     'sold' (старая отметка ad_briefs.sold_at). Результат:
       'out_of_stock' — учёт ведётся и остаток 0: не обещать наличие;
-      ''             — товар есть (остаток > 0) или его перепостили: Gelöscht/sold не упоминать;
+      'reserved'     — объявление зарезервировано, а в наличии ≤ 1 шт. (её, видимо, и держат);
+      ''             — товар есть или его перепостили: Gelöscht/sold не упоминать;
+                       так же при сбое склада — ничего не утверждать;
       raw_state      — склад ничего не знает: прежнее поведение, кроме 'sold' (отметка объявления,
                        а не товара) — она превращается в 'deleted' без слова «продано».
     """
     ctx = ad_context_safe(ad_id)
+    if ctx["error"]:
+        return ""
     if ctx["stock"] == "out_of_stock":
         return "out_of_stock"
     if ctx["stock"] == "in_stock":
-        return ""
+        return "reserved" if raw_state == "reserved" and (ctx["qty"] or 0) <= 1 else ""
     if raw_state in ("deleted", "sold") and ctx["has_other_active_listing"]:
         return ""
     if raw_state == "sold":
@@ -754,11 +851,13 @@ def effective_ad_state(ad_id: Optional[str], raw_state: str) -> str:
 
 
 def prompt_note(ad_id: Optional[str]) -> str:
-    """Строка о наличии для системного промпта LLM ('' — сказать нечего)."""
+    """Строка о наличии для системного промпта LLM ('' — сказать нечего, в т. ч. при сбое склада)."""
     ctx = ad_context_safe(ad_id)
+    if ctx["error"]:
+        return ""
     if ctx["stock"] == "in_stock":
         return (f"Склад: товар в наличии ({ctx['qty']} шт.). Не говори, что он продан или его нет, "
-                f"даже если объявление удалено или зарезервировано.")
+                f"даже если объявление удалено.")
     if ctx["stock"] == "out_of_stock":
         return ("Склад: по учёту товара сейчас нет (остаток 0). Не обещай наличие и сроки — "
                 "скажи, что уточнишь, и не подтверждай продажу.")
@@ -775,49 +874,86 @@ def _dt(s: Optional[str]) -> Optional[datetime]:
     try:
         d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except ValueError:
+        logger.warning("склад: нераспознанная дата %r", s)
         return None
     return d.replace(tzinfo=None) if d.tzinfo else d
 
 
-def _fifo(movements: list[Any], default_cost: Optional[float]) -> tuple[list[list], list[dict]]:
-    """Прогнать движения товара по FIFO. Возвращает (остаток партиями [дата, шт, цена_ед],
-    продажи [{movement, occurred, qty, revenue, cogs, days}]). cogs/days = None, если не известны
-    (нет себестоимости или продали больше, чем было внесено)."""
-    lots: deque[list] = deque()
+def _fifo(movements: list[Any], default_cost: Optional[float],
+          since: Optional[str]) -> tuple[list[dict], list[dict]]:
+    """Прогнать движения товара по FIFO.
+
+    since — начало учёта (inv.tracked_since). Движения раньше него — история до учёта: продажи
+    берут себестоимость по оценке товара (default_cost) и в партии не залезают.
+    Возвращает (партии, продажи):
+      партия  {movement_id, date, qty_in, cost, left, sold, revenue} — sold/revenue: сколько штук
+              партии продано и на какую выручку (для окупаемости), left — осталось;
+      продажа {movement_id, occurred_at, qty, revenue, cogs, days, pre_tracking, gmail_thread_id}.
+    cogs/days = None, если не известны (нет себестоимости, продали больше, чем было внесено).
+    """
+    lots: list[dict] = []
+    queue: deque[dict] = deque()
     sales: list[dict] = []
     for m in movements:
         when = _dt(m["occurred_at"])
         q = int(m["qty"])
-        if q > 0:
+        pre = since is None or (m["occurred_at"] or "") < since
+        if q > 0 and not pre:
             cost = m["unit_cost_eur"] if m["kind"] == "receipt" and m["unit_cost_eur"] is not None else default_cost
-            lots.append([when, q, cost])
+            lot = {"movement_id": m["id"], "kind": m["kind"], "date": when, "occurred_at": m["occurred_at"],
+                   "qty_in": q, "cost": cost, "left": q, "sold": 0, "revenue": 0.0, "unpriced_sold": 0}
+            lots.append(lot)
+            queue.append(lot)
+            continue
+        if q >= 0:
             continue
         need = -q
+        unit_price = m["unit_price_eur"] if m["kind"] == "sale" else None
         cogs: Optional[float] = 0.0
         days_sum, days_n = 0.0, 0
-        while need and lots:
-            lot = lots[0]
-            take = min(need, lot[1])
+        while need and queue and not pre:
+            lot = queue[0]
+            take = min(need, lot["left"])
             if cogs is not None:
-                cogs = None if lot[2] is None else cogs + take * lot[2]
-            if when and lot[0]:
-                days_sum += take * max(0.0, (when - lot[0]).total_seconds() / 86400)
+                cogs = None if lot["cost"] is None else cogs + take * lot["cost"]
+            if when and lot["date"]:
+                days_sum += take * max(0.0, (when - lot["date"]).total_seconds() / 86400)
                 days_n += take
-            lot[1] -= take
+            if m["kind"] == "sale":
+                lot["sold"] += take
+                if unit_price is None:
+                    lot["unpriced_sold"] += take
+                else:
+                    lot["revenue"] += take * unit_price
+            lot["left"] -= take
             need -= take
-            if lot[1] == 0:
-                lots.popleft()
-        if need:   # продали больше, чем внесено приходом — себестоимость по оценке товара
+            if lot["left"] == 0:
+                queue.popleft()
+        if need:   # до начала учёта или больше, чем внесено, — себестоимость по оценке товара
             cogs = None if (cogs is None or default_cost is None) else cogs + need * default_cost
         if m["kind"] == "sale":
-            price = m["unit_price_eur"]
             sales.append({
                 "movement_id": m["id"], "occurred_at": m["occurred_at"], "qty": -q,
-                "revenue": None if price is None else price * -q,
+                "revenue": None if unit_price is None else unit_price * -q,
                 "cogs": cogs, "days": (days_sum / days_n) if days_n and not need else None,
-                "gmail_thread_id": m["gmail_thread_id"],
+                "pre_tracking": pre, "gmail_thread_id": m["gmail_thread_id"],
             })
-    return list(lots), sales
+    return lots, sales
+
+
+def _in_period(iso: Optional[str], pf: Optional[datetime], pt: Optional[datetime], now: datetime) -> bool:
+    d = _dt(iso)
+    if d is None:
+        # Без распознаваемой даты в период не попадает (иначе «прилипала» бы к любому периоду)
+        return pf is None and pt is None
+    return (pf is None or d >= pf) and (pt is None or d < pt)
+
+
+def _product_moves() -> dict[int, list]:
+    moves: dict[int, list] = {}
+    for m in inv.list_movements():
+        moves.setdefault(m["product_id"], []).append(m)
+    return moves
 
 
 def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *,
@@ -828,30 +964,30 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
     unit_cost_eur), ожидаемая выручка и прибыль по цене объявления и по минимальной, продажи за
     период (шт., выручка, себестоимость, прибыль), средний срок до продажи, возраст старейшей
     единицы / сколько висит объявление. Итоги — в totals. Неизвестные суммы — None, а не 0,
-    с подсчётом «без себестоимости», чтобы не рисовать ложную прибыль.
+    с подсчётом «без себестоимости / без цены», чтобы не рисовать ложную прибыль.
     """
     inv.ensure_schema()
     now = now or datetime.utcnow()
     pf, pt = _dt(period_from), _dt(period_to)
     products = inv.list_products(include_archived=True)
-    moves: dict[int, list] = {}
-    for m in inv.list_movements():
-        moves.setdefault(m["product_id"], []).append(m)
+    moves = _product_moves()
 
     items: list[dict[str, Any]] = []
     T: dict[str, Any] = {"products": 0, "tracked": 0, "qty": 0, "stock_cost": 0.0, "units_without_cost": 0,
                          "expected_revenue_list": 0.0, "expected_revenue_min": 0.0,
                          "units_without_list_price": 0, "units_without_min_price": 0,
                          "sales": 0, "sold_qty": 0, "revenue": 0.0, "cogs": 0.0, "profit": 0.0,
-                         "sales_without_cost": 0, "sales_without_price": 0, "negative_stock": 0,
-                         "stale": 0, "untracked_listed": 0, "open_questions": len(inv.list_open_questions())}
+                         "sales_without_cost": 0, "sales_without_price": 0, "sales_with_profit": 0,
+                         "negative_stock": 0, "stale": 0, "untracked_listed": 0,
+                         "open_questions": len(inv.list_open_questions())}
     days_all: list[tuple[float, int]] = []
 
     for p in products:
         mv = moves.get(p["id"], [])
         if p["archived_at"] and not mv:
             continue
-        lots, sales = _fifo(mv, p["unit_cost_eur"])
+        since = inv.tracked_since(p["id"])
+        lots, sales = _fifo(mv, p["unit_cost_eur"], since)
         tracked = bool(p["stock_tracked"])
         qty = int(p["qty"]) if tracked else None
         on_hand = max(0, qty or 0)
@@ -859,10 +995,11 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         no_cost = 0
         oldest_days: Optional[float] = None
         if tracked and on_hand:
-            lot_units = sum(l[1] for l in lots)
-            stock_cost = sum(l[1] * l[2] for l in lots if l[2] is not None)
-            no_cost = sum(l[1] for l in lots if l[2] is None) + max(0, on_hand - lot_units)
-            ages = [(now - l[0]).total_seconds() / 86400 for l in lots if l[0]]
+            open_lots = [l for l in lots if l["left"] > 0]
+            costed = [l for l in open_lots if l["cost"] is not None]
+            no_cost = sum(l["left"] for l in open_lots if l["cost"] is None)
+            stock_cost = sum(l["left"] * l["cost"] for l in costed) if costed else None
+            ages = [(now - l["date"]).total_seconds() / 86400 for l in open_lots if l["date"]]
             oldest_days = round(max(ages), 1) if ages else None
         listed = _dt(p["first_listed_at"])
         listed_days = round((now - listed).total_seconds() / 86400, 1) if listed else None
@@ -871,29 +1008,32 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         exp_min = on_hand * p["min_price_eur"] if on_hand and p["min_price_eur"] else None
         full_cost = stock_cost if (on_hand and no_cost == 0) else None
 
-        in_period = [s for s in sales if (not pf or (_dt(s["occurred_at"]) or now) >= pf)
-                     and (not pt or (_dt(s["occurred_at"]) or now) < pt)]
-        p_rev = sum(s["revenue"] for s in in_period if s["revenue"] is not None)
-        p_cogs = sum(s["cogs"] for s in in_period if s["cogs"] is not None)
-        p_profit = sum(s["revenue"] - s["cogs"] for s in in_period
-                       if s["revenue"] is not None and s["cogs"] is not None)
-        with_cost = [s for s in in_period if s["revenue"] is not None and s["cogs"] is not None]
-        known_days = [(s["days"], s["qty"]) for s in in_period if s["days"] is not None]
+        in_period = [x for x in sales if _in_period(x["occurred_at"], pf, pt, now)]
+        priced = [x for x in in_period if x["revenue"] is not None]
+        costed_sales = [x for x in in_period if x["cogs"] is not None]
+        with_profit = [x for x in priced if x["cogs"] is not None]
+        p_rev = sum(x["revenue"] for x in priced)
+        p_cogs = sum(x["cogs"] for x in costed_sales)
+        p_profit = sum(x["revenue"] - x["cogs"] for x in with_profit)
+        known_days = [(x["days"], x["qty"]) for x in in_period if x["days"] is not None]
         days_all.extend(known_days)
 
         item = {
             "product_id": p["id"], "title": p["title"], "category": p["category"], "condition": p["condition"],
-            "archived": bool(p["archived_at"]), "stock_tracked": tracked, "qty": qty,
+            "archived": bool(p["archived_at"]), "stock_tracked": tracked, "tracked_since": since, "qty": qty,
             "unit_cost_eur": p["unit_cost_eur"], "list_price_eur": p["list_price_eur"],
             "min_price_eur": p["min_price_eur"], "listings": p["listings"],
-            "stock_cost_eur": _r(stock_cost) if on_hand else None, "units_without_cost": no_cost,
+            "stock_cost_eur": _r(stock_cost), "units_without_cost": no_cost,
             "expected_revenue_list": _r(exp_list), "expected_revenue_min": _r(exp_min),
             "expected_profit_list": _r(exp_list - full_cost) if exp_list is not None and full_cost is not None else None,
             "expected_profit_min": _r(exp_min - full_cost) if exp_min is not None and full_cost is not None else None,
-            "sold_qty": sum(s["qty"] for s in in_period), "revenue": _r(p_rev), "cogs": _r(p_cogs),
-            # Прибыль только по продажам с известной себестоимостью; ни одной — None, а не 0
-            "profit": _r(p_profit) if with_cost else None,
-            "sales_without_cost": sum(1 for s in in_period if s["cogs"] is None),
+            "sold_qty": sum(x["qty"] for x in in_period),
+            # Неизвестное — None, а не 0: продажи были, но без цены / без себестоимости
+            "revenue": _r(p_rev) if priced or not in_period else None,
+            "cogs": _r(p_cogs) if costed_sales or not in_period else None,
+            "profit": _r(p_profit) if with_profit else (0.0 if not in_period else None),
+            "sales_without_cost": sum(1 for x in in_period if x["cogs"] is None),
+            "sales_without_price": len(in_period) - len(priced),
             "avg_days_to_sell": _r(_wavg(known_days)), "oldest_unit_days": oldest_days,
             "listed_days": listed_days,
             "stale": bool(tracked and on_hand and oldest_days is not None and oldest_days > stale_days),
@@ -915,29 +1055,148 @@ def report(period_from: Optional[str] = None, period_to: Optional[str] = None, *
         T["revenue"] += p_rev
         T["cogs"] += p_cogs
         T["profit"] += p_profit
+        T["sales_with_profit"] += len(with_profit)
         T["sales_without_cost"] += item["sales_without_cost"]
-        T["sales_without_price"] += sum(1 for s in in_period if s["revenue"] is None)
+        T["sales_without_price"] += item["sales_without_price"]
         T["negative_stock"] += 1 if item["negative_stock"] else 0
         T["stale"] += 1 if item["stale"] else 0
         T["untracked_listed"] += 1 if (not tracked and not p["archived_at"]) else 0
 
     for k in ("stock_cost", "expected_revenue_list", "expected_revenue_min", "revenue", "cogs", "profit"):
         T[k] = _r(T[k])
-    if T["sales"] and T["sales_without_cost"] == T["sales"]:
+    if T["sales"] and not T["sales_with_profit"]:
         T["profit"] = None
+    if T["sales"] and T["sales_without_price"] == T["sales"]:
+        T["revenue"] = None
+    if T["sales"] and T["sales_without_cost"] == T["sales"]:
+        T["cogs"] = None
     if not T["tracked"]:
         # Остатки ещё не внесены — денежные суммы склада неизвестны, а не нулевые
         T["stock_cost"] = T["expected_revenue_list"] = T["expected_revenue_min"] = None
-    T["unlinked_sales"] = len(unlinked_sales())
-    # Ожидаемая прибыль по всему складу — только если себестоимость известна у всех единиц
+    # Ожидаемая прибыль по всему складу — только если себестоимость и цены известны у всех единиц
     T["expected_profit_list"] = _r(T["expected_revenue_list"] - T["stock_cost"]) \
         if T["tracked"] and T["units_without_cost"] == 0 and T["units_without_list_price"] == 0 else None
     T["expected_profit_min"] = _r(T["expected_revenue_min"] - T["stock_cost"]) \
         if T["tracked"] and T["units_without_cost"] == 0 and T["units_without_min_price"] == 0 else None
     T["avg_days_to_sell"] = _r(_wavg(days_all))
+    T["unlinked_sales"] = len(unlinked_sales())
     items.sort(key=lambda i: (i["archived"], not i["stale"], -(i["qty"] or 0), i["title"]))
     return {"period_from": period_from, "period_to": period_to, "generated_at": now.isoformat(),
             "totals": T, "products": items}
+
+
+def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    """Отчёт прибыли за месяц (даты UTC; граница месяца — 1-е число 00:00).
+
+    Возвращает:
+      invested       — вложено: сумма приходов месяца (шт. × цена закупки; без цены — в invested_unknown_qty)
+      revenue        — выручка продаж месяца (без цены — sales_without_price)
+      cogs           — себестоимость проданного по FIFO-партиям (до начала учёта — по оценке товара)
+      profit         — revenue − cogs по продажам, где известно и то и другое (None — ни одной такой)
+      stock_end      — остаток на конец месяца: шт., по себестоимости, по цене объявления, по минимуму
+      lots           — партии (приходы), купленные до конца месяца, с окупаемостью на конец месяца:
+                       {product_id, title, movement_id, date, qty_in, unit_cost, invested, sold,
+                        left, revenue, payback: 'paid' | 'not_yet' | 'unknown', payback_pct}
+      products       — по товару: продано шт., выручка, себестоимость, прибыль за месяц
+    Остаток «на конец месяца» считается по движениям до границы (поздние не учитываются).
+    """
+    if not (1 <= int(month) <= 12):
+        raise ValueError("месяц 1..12")
+    start = datetime(int(year), int(month), 1)
+    end = datetime(int(year) + (month == 12), 1 if month == 12 else int(month) + 1, 1)
+    s_iso, e_iso = start.isoformat(), end.isoformat()
+    inv.ensure_schema()
+    products = {p["id"]: p for p in inv.list_products(include_archived=True)}
+    moves = _product_moves()
+    out: dict[str, Any] = {"year": int(year), "month": int(month), "from": s_iso, "to": e_iso,
+                           "invested": 0.0, "invested_unknown_qty": 0, "received_qty": 0,
+                           "revenue": 0.0, "cogs": 0.0, "profit": 0.0, "sales": 0, "sold_qty": 0,
+                           "sales_without_price": 0, "sales_without_cost": 0, "sales_with_profit": 0,
+                           "stock_end": {"qty": 0, "cost": 0.0, "units_without_cost": 0,
+                                         "list_value": 0.0, "min_value": 0.0, "tracked_products": 0},
+                           "lots": [], "products": []}
+    for pid, mv_all in moves.items():
+        p = products.get(pid)
+        if p is None:
+            continue
+        mv = [m for m in mv_all if (m["occurred_at"] or "") < e_iso]
+        if not mv:
+            continue
+        since = min((m["occurred_at"] for m in mv if m["kind"] in ("receipt", "adjust")), default=None)
+        lots, sales = _fifo(mv, p["unit_cost_eur"], since)
+        month_sales = [x for x in sales if s_iso <= (x["occurred_at"] or "") < e_iso]
+        priced = [x for x in month_sales if x["revenue"] is not None]
+        with_profit = [x for x in priced if x["cogs"] is not None]
+        rev = sum(x["revenue"] for x in priced)
+        cogs = sum(x["cogs"] for x in month_sales if x["cogs"] is not None)
+        prof = sum(x["revenue"] - x["cogs"] for x in with_profit)
+        if month_sales:
+            out["products"].append({
+                "product_id": pid, "title": p["title"], "sold_qty": sum(x["qty"] for x in month_sales),
+                "revenue": _r(rev) if priced else None,
+                "cogs": _r(cogs) if any(x["cogs"] is not None for x in month_sales) else None,
+                "profit": _r(prof) if with_profit else None,
+                "sales_without_price": len(month_sales) - len(priced),
+                "sales_without_cost": sum(1 for x in month_sales if x["cogs"] is None)})
+        out["sales"] += len(month_sales)
+        out["sold_qty"] += sum(x["qty"] for x in month_sales)
+        out["revenue"] += rev
+        out["cogs"] += cogs
+        out["profit"] += prof
+        out["sales_with_profit"] += len(with_profit)
+        out["sales_without_price"] += len(month_sales) - len(priced)
+        out["sales_without_cost"] += sum(1 for x in month_sales if x["cogs"] is None)
+
+        for l in lots:
+            if l["kind"] != "receipt":
+                continue
+            in_month = s_iso <= (l["occurred_at"] or "") < e_iso
+            invested = l["qty_in"] * l["cost"] if l["cost"] is not None else None
+            if in_month:
+                out["received_qty"] += l["qty_in"]
+                if invested is None:
+                    out["invested_unknown_qty"] += l["qty_in"]
+                else:
+                    out["invested"] += invested
+            if invested is None or l["unpriced_sold"]:
+                payback, pct = "unknown", None
+            else:
+                pct = round(100 * l["revenue"] / invested, 1) if invested else None
+                payback = "paid" if l["revenue"] >= invested else "not_yet"
+            out["lots"].append({
+                "product_id": pid, "title": p["title"], "movement_id": l["movement_id"],
+                "date": l["occurred_at"], "qty_in": l["qty_in"], "unit_cost": l["cost"],
+                "invested": _r(invested), "sold": l["sold"], "left": l["left"], "revenue": _r(l["revenue"]),
+                "payback": payback, "payback_pct": pct, "bought_this_month": in_month})
+
+        if since is not None and p["stock_tracked"]:
+            qty_end = sum(int(m["qty"]) for m in mv if m["voided_at"] is None and (m["occurred_at"] or "") >= since)
+            se = out["stock_end"]
+            se["tracked_products"] += 1
+            if qty_end > 0:
+                se["qty"] += qty_end
+                for l in lots:
+                    if l["left"]:
+                        if l["cost"] is None:
+                            se["units_without_cost"] += l["left"]
+                        else:
+                            se["cost"] += l["left"] * l["cost"]
+                se["list_value"] += qty_end * (p["list_price_eur"] or 0)
+                se["min_value"] += qty_end * (p["min_price_eur"] or 0)
+    for k in ("invested", "revenue", "cogs", "profit"):
+        out[k] = _r(out[k])
+    if out["sales"] and not out["sales_with_profit"]:
+        out["profit"] = None
+    if out["sales"] and out["sales_without_price"] == out["sales"]:
+        out["revenue"] = None
+    if out["sales"] and out["sales_without_cost"] == out["sales"]:
+        out["cogs"] = None
+    se = out["stock_end"]
+    for k in ("cost", "list_value", "min_value"):
+        se[k] = _r(se[k]) if se["tracked_products"] else None
+    out["lots"].sort(key=lambda l: (l["date"] or "", l["movement_id"]))
+    out["products"].sort(key=lambda x: -(x["revenue"] or 0))
+    return out
 
 
 def _wavg(pairs: list[tuple[float, int]]) -> Optional[float]:
@@ -967,16 +1226,20 @@ def summary_text(rep: Optional[dict[str, Any]] = None) -> str:
         lines = [f"Склад: {t['qty']} шт. в учёте ({t['tracked']} из {t['products']} товаров), "
                  f"себестоимость {_eur(t['stock_cost'])}"
                  + (f" (+{t['units_without_cost']} шт. без цены закупки)" if t["units_without_cost"] else "")]
-        lines.append(f"Ожидаемая выручка: {_eur(t['expected_revenue_list'])} по объявлениям, "
-                     f"{_eur(t['expected_revenue_min'])} по минимуму")
+        no_price = (f" (+{t['units_without_list_price']} шт. без цены)"
+                    if t["units_without_list_price"] else "")
+        no_min = (f" (+{t['units_without_min_price']} шт. без минимума)"
+                  if t["units_without_min_price"] else "")
+        lines.append(f"Ожидаемая выручка: {_eur(t['expected_revenue_list'])} по объявлениям{no_price}, "
+                     f"{_eur(t['expected_revenue_min'])} по минимуму{no_min}")
     else:
         lines = [f"Склад: остатки не внесены ({t['products']} товаров из объявлений)"]
     if t["sold_qty"]:
         if t["profit"] is None:
             prof = "неизвестна (нет себестоимости)"
         else:
-            prof = _eur(t["profit"]) + (f" (без {t['sales_without_cost']} продаж без себестоимости)"
-                                        if t["sales_without_cost"] else "")
+            prof = _eur(t["profit"]) + (f" (по {t['sales_with_profit']} из {t['sales']} продаж)"
+                                        if t["sales_with_profit"] < t["sales"] else "")
         lines.append(f"Продано: {t['sold_qty']} шт. на {_eur(t['revenue'])}, прибыль {prof}")
     if t["stale"]:
         lines.append(f"Залежалось > {STALE_DAYS} дн.: {t['stale']} товаров")
@@ -1047,24 +1310,33 @@ def plan_seed(ads: list[AdInfo], *, judge: Optional[Callable[[dict, dict], dict]
 
 
 def apply_seed(plan: dict[str, Any]) -> dict[str, int]:
-    """Записать план в БД одной транзакцией. Объявления, уже заведённые на складе, пропускаются
-    (повторный запуск безопасен). Сомнительные пары → вопросы оператору."""
+    """Записать план в БД одной транзакцией. Объявления, уже заведённые на складе, пропускаются;
+    новые объявления группы, часть которой уже на складе, идут к товару известной части (без
+    дублей товаров). Сомнительные пары → вопросы оператору."""
     inv.ensure_schema()
-    known = inv.known_ad_ids()
     gid2pid: dict[int, int] = {}
-    stats = {"products": 0, "listings": 0, "questions": 0, "skipped_known": 0}
+    stats = {"products": 0, "listings": 0, "questions": 0, "skipped_known": 0,
+             "joined_existing": 0, "doubts_skipped": 0}
     with transaction():
         for g in plan["groups"]:
-            fresh = [a for a in g.ads if a.ad_id not in known]
+            known = [inv.get_listing(a.ad_id) for a in g.ads]
+            known_pids = [_follow_merge(l["product_id"]) for l in known if l is not None]
+            fresh = [a for a, l in zip(g.ads, known) if l is None]
             stats["skipped_known"] += len(g.ads) - len(fresh)
+            if known_pids:
+                gid2pid[g.gid] = known_pids[-1]
             if not fresh:
                 continue
-            lt = g.latest
-            pid = inv.create_product(title=lt.title, category=detect_category(lt.title),
-                                     condition=detect_condition(lt.title), list_price_eur=lt.price,
-                                     match_key=match_key(lt.title))
-            gid2pid[g.gid] = pid
-            stats["products"] += 1
+            if known_pids:
+                pid = known_pids[-1]
+                stats["joined_existing"] += len(fresh)
+            else:
+                lt = g.latest
+                pid = inv.create_product(title=lt.title, category=detect_category(lt.title),
+                                         condition=detect_condition(lt.title), list_price_eur=lt.price,
+                                         match_key=match_key(lt.title))
+                gid2pid[g.gid] = pid
+                stats["products"] += 1
             for a in fresh:
                 inv.upsert_listing(ad_id=a.ad_id, product_id=pid, link_method="seed", seen_at=a.last_seen,
                                    account_id=a.account_id, title=a.title, price_eur=a.price, url=a.url,
@@ -1075,13 +1347,166 @@ def apply_seed(plan: dict[str, Any]) -> dict[str, int]:
                 stats["listings"] += 1
         for d in plan["doubtful"]:
             pid, spid = gid2pid.get(d["gid"]), gid2pid.get(d["suggested_gid"])
-            if pid and spid and pid != spid:
-                if inv.add_link_question(ad_id=d["ad"].ad_id, product_id=pid, suggested_product_id=spid,
-                                         score=d["score"], reason=d["reason"]):
-                    stats["questions"] += 1
+            if not (pid and spid) or pid == spid:
+                stats["doubts_skipped"] += 1   # обе стороны уже один товар / нечего спрашивать
+                continue
+            if inv.add_link_question(ad_id=d["ad"].ad_id, product_id=pid, suggested_product_id=spid,
+                                     score=d["score"], reason=d["reason"]):
+                stats["questions"] += 1
+            else:
+                stats["doubts_skipped"] += 1   # такой вопрос уже открыт
     return stats
 
 
 def seed_ads_from_messages() -> list[AdInfo]:
     """Объявления из всей истории messages (для scripts/inventory_seed.py)."""
     return collect_ads(_ad_rows())
+
+
+# ─── профиль товара (стабильный контракт для kab-market) ──────────────────────
+
+PROFILE_VERSION = 1
+
+
+def product_profile(product_id: int) -> Optional[dict[str, Any]]:
+    """Товар → всё, что нужно для сравнения с рынком. Стабильный контракт (PROFILE_VERSION):
+    новые ключи могут добавляться, существующие не переименовываются и не меняют смысл.
+
+    {
+      "version": 1, "product_id", "title", "category", "condition" (neu/gebraucht/defekt/None),
+      "archived": bool, "match_key": str, "core_tokens": [str] (заголовок без моделей авто и стоп-слов),
+      "models": [str] (упомянутые модели/марки авто: traveller, proace, zafira, …),
+      "features": {"defekt", "neu", "vip", "leder": bool},
+      "list_price_eur", "min_price_eur": float|None,
+      "unit_cost_eur": float|None — средняя себестоимость единицы на складе (FIFO-партии),
+                       иначе оценка товара; "unit_cost_source": "lots" | "estimate" | None,
+      "stock": {"tracked": bool, "qty": int|None},
+      "listings": [{"ad_id", "title", "price_eur", "url", "state", "account_id",
+                    "first_seen_at", "last_seen_at"}] — от свежих к старым,
+      "titles": [str] — все разные заголовки объявлений,
+      "description": str — самое свежее описание объявления из писем ('' если нет)
+    }
+    None — товара нет. Слитый товар (merged_into) разворачивается в итоговый.
+    """
+    inv.ensure_schema()
+    p = inv.get_product(_follow_merge(int(product_id)))
+    if p is None:
+        return None
+    pid = p["id"]
+    listings = sorted(inv.list_listings(pid), key=lambda l: l["last_seen_at"] or "", reverse=True)
+    titles: list[str] = []
+    for t in [p["title"]] + [l["title"] for l in listings]:
+        if t and t not in titles:
+            titles.append(t)
+    all_tokens = set()
+    for t in titles:
+        all_tokens |= set(tokens(t))
+    since = inv.tracked_since(pid)
+    lots, _ = _fifo(inv.list_movements(pid), p["unit_cost_eur"], since)
+    open_lots = [l for l in lots if l["left"] > 0 and l["cost"] is not None]
+    if open_lots:
+        units = sum(l["left"] for l in open_lots)
+        unit_cost, cost_src = round(sum(l["left"] * l["cost"] for l in open_lots) / units, 2), "lots"
+    elif p["unit_cost_eur"] is not None:
+        unit_cost, cost_src = p["unit_cost_eur"], "estimate"
+    else:
+        unit_cost, cost_src = None, None
+    tracked = bool(p["stock_tracked"])
+    desc = ""
+    for l in listings:
+        desc = _ad_description(l["ad_id"])
+        if desc:
+            break
+    return {
+        "version": PROFILE_VERSION, "product_id": pid, "title": p["title"], "category": p["category"],
+        "condition": p["condition"], "archived": bool(p["archived_at"]), "match_key": p["match_key"] or match_key(p["title"]),
+        "core_tokens": sorted(_core(" ".join(titles))), "models": sorted(all_tokens & _MODELS),
+        "features": features(" ".join(titles)),
+        "list_price_eur": p["list_price_eur"], "min_price_eur": p["min_price_eur"],
+        "unit_cost_eur": unit_cost, "unit_cost_source": cost_src,
+        "stock": {"tracked": tracked, "qty": inv.stock_qty(pid) if tracked else None},
+        "listings": [{k: l[k] for k in ("ad_id", "title", "price_eur", "url", "state", "account_id",
+                                        "first_seen_at", "last_seen_at")} for l in listings],
+        "titles": titles, "description": desc or "",
+    }
+
+
+def list_product_profiles(include_archived: bool = False) -> list[dict[str, Any]]:
+    """product_profile для всех (неархивных) товаров."""
+    out = []
+    for p in inv.list_products(include_archived=include_archived):
+        prof = product_profile(p["id"])
+        if prof is not None and (include_archived or not prof["archived"]):
+            out.append(prof)
+    return out
+
+
+# ─── подсказка цены продажи ───────────────────────────────────────────────────
+
+_TEXT_PRICE_RE = re.compile(r'(\d{1,3}(?:[.\s]\d{3})+|\d{2,6})\s*(?:,-|,00)?\s*(?:€|eur\b|euro\b)', re.IGNORECASE)
+
+
+def _prices_in(text: Optional[str]) -> list[float]:
+    out = []
+    for m in _TEXT_PRICE_RE.finditer(text or ""):
+        v = float(re.sub(r'[.\s]', "", m.group(1)))
+        if v > 0:
+            out.append(v)
+    return out
+
+
+def suggest_sale_price(gmail_thread_id: str) -> dict[str, Any]:
+    """Подсказка цены для «Продано» (цена обязательна — оператору показать предзаполненной).
+
+    Кандидаты по убыванию доверия:
+      negotiation_our / negotiation_buyer — negotiation_state треда (наша / покупателя последняя цена);
+      deal_brief  — negotiated_price_eur из самого свежего deal_brief_json треда;
+      our_text    — последняя цена в нашем последнем отправленном ответе;
+      buyer_text  — последняя цена в последнем письме покупателя;
+      ad_price    — цена объявления (из письма, иначе товара на складе).
+    Возвращает {"price_eur": float|None, "source": str|None, "candidates": [{"source", "price_eur"}]}.
+    """
+    from database import SENT_STATUSES_SQL
+    import json
+    cands: list[dict[str, Any]] = []
+
+    def add(src: str, val: Any) -> None:
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return
+        if v > 0 and not any(c["source"] == src for c in cands):
+            cands.append({"source": src, "price_eur": round(v, 2)})
+
+    tid = str(gmail_thread_id)
+    ns = inv.iter_rows("SELECT our_last_offer_eur, buyer_last_offer_eur FROM negotiation_state "
+                       "WHERE gmail_thread_id = ?", (tid,))
+    if ns:
+        add("negotiation_our", ns[0]["our_last_offer_eur"])
+        add("negotiation_buyer", ns[0]["buyer_last_offer_eur"])
+    for r in inv.iter_rows("SELECT deal_brief_json FROM messages WHERE gmail_thread_id = ? "
+                           "AND deal_brief_json IS NOT NULL ORDER BY created_at DESC, id DESC", (tid,)):
+        try:
+            brief = json.loads(r["deal_brief_json"] or "{}")
+        except (TypeError, ValueError):
+            logger.warning("склад: битый deal_brief_json в треде %s", tid)
+            continue
+        if isinstance(brief, dict) and brief.get("negotiated_price_eur"):
+            add("deal_brief", brief["negotiated_price_eur"])
+            break
+    ours = inv.iter_rows(f"SELECT de_answer FROM messages WHERE gmail_thread_id = ? AND status IN {SENT_STATUSES_SQL} "
+                         "AND de_answer IS NOT NULL ORDER BY COALESCE(sent_at, created_at) DESC, id DESC LIMIT 1",
+                         (tid,))
+    if ours and _prices_in(ours[0]["de_answer"]):
+        add("our_text", _prices_in(ours[0]["de_answer"])[-1])
+    theirs = inv.iter_rows("SELECT de_client FROM messages WHERE gmail_thread_id = ? AND direction = 'in' "
+                           "AND de_client IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1", (tid,))
+    if theirs and _prices_in(theirs[0]["de_client"]):
+        add("buyer_text", _prices_in(theirs[0]["de_client"])[-1])
+    ad = inv.iter_rows("SELECT ad_id, ad_price FROM messages WHERE gmail_thread_id = ? AND ad_id IS NOT NULL "
+                       "ORDER BY created_at DESC, id DESC LIMIT 1", (tid,))
+    if ad:
+        add("ad_price", parse_price(ad[0]["ad_price"]) or ad_context(ad[0]["ad_id"])["list_price_eur"])
+    best = cands[0] if cands else None
+    return {"price_eur": best["price_eur"] if best else None, "source": best["source"] if best else None,
+            "candidates": cands}

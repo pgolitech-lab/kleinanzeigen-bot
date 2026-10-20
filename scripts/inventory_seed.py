@@ -7,18 +7,20 @@
     python3 scripts/inventory_seed.py                       # dry-run по прод-БД, отчёт в stdout
     python3 scripts/inventory_seed.py --out seed.md         # отчёт в файл
     python3 scripts/inventory_seed.py --llm                 # сомнительные пары сначала спросить у Haiku
-    python3 scripts/inventory_seed.py --db /tmp/copy.db --apply   # записать товары + продажи
+    python3 scripts/inventory_seed.py --db kleinanzeigen.db --apply   # записать (рядом — бэкап)
 
---apply пишет в указанную БД (таблицы inv_*: товары, объявления, вопросы, продажи как движения).
+--apply требует явный --db, делает копию БД рядом (*.bak-inventory-<время>) и пишет (таблицы inv_*: товары, объявления, вопросы, продажи как движения).
 Остатки и себестоимость не выдумываются — их вносит оператор (stock_tracked=0 до инвентаризации).
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -89,18 +91,41 @@ def render(plan: dict, ads_total: int, skipped: list[str]) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--db", type=Path, default=database.DB_PATH, help="путь к БД (по умолчанию прод)")
-    ap.add_argument("--apply", action="store_true", help="записать в --db (без флага — dry-run на копии)")
+    ap.add_argument("--db", type=Path, help="путь к БД (по умолчанию прод — только для dry-run)")
+    ap.add_argument("--apply", action="store_true",
+                    help="записать в --db (обязателен явный --db; перед записью делается копия рядом)")
     ap.add_argument("--llm", action="store_true", help="сомнительные пары спросить у Haiku")
     ap.add_argument("--out", type=Path, help="куда записать отчёт (markdown)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
-    if not args.db.exists():
-        print(f"БД не найдена: {args.db}", file=sys.stderr)
+    if args.apply and args.db is None:
+        print("--apply пишет в БД: укажите её явно через --db (бот при этом лучше остановить)", file=sys.stderr)
         return 2
-    database.DB_PATH = args.db if args.apply else _copy_db(args.db)
+    src = args.db or database.DB_PATH
+    if not src.exists():
+        print(f"БД не найдена: {src}", file=sys.stderr)
+        return 2
+    tmp_copy: Path | None = None
+    if args.apply:
+        backup = src.with_name(f"{src.name}.bak-inventory-{datetime.now():%Y%m%d-%H%M%S}")
+        with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as s, sqlite3.connect(backup) as d:
+            s.backup(d)
+        print(f"бэкап перед записью: {backup}")
+        database.DB_PATH = src
+    else:
+        tmp_copy = _copy_db(src)
+        database.DB_PATH = tmp_copy
+    try:
+        return _run(args, src)
+    finally:
+        if tmp_copy is not None:
+            # Копия содержит письма покупателей и пароли — не оставляем её во /tmp
+            database.close_thread_conn()
+            shutil.rmtree(tmp_copy.parent, ignore_errors=True)
 
+
+def _run(args: argparse.Namespace, src: Path) -> int:
     ads = inventory.seed_ads_from_messages()
     with database.get_conn() as conn:
         all_ids = {r["ad_id"] for r in conn.execute(
@@ -113,18 +138,25 @@ def main() -> int:
         print(f"отчёт: {args.out}")
     else:
         print(text)
+    if not args.apply:
+        return 0
 
-    if args.apply:
-        database.init_db()
-        from modules import db_inventory
-        db_inventory.ensure_schema()
-        stats = inventory.apply_seed(plan)
+    database.init_db()
+    from modules import db_inventory
+    db_inventory.ensure_schema()
+    stats = inventory.apply_seed(plan)
+    print(f"товары/объявления/вопросы записаны в {src}: {stats}")
+    try:
         sales = inventory.sync_sales()
-        print(f"записано: {stats}; продажи: recorded={sales['recorded']} already={sales['already']} "
-              f"voided={sales['voided']} без товара={len(sales['unmatched'])}")
-        for u in sales["unmatched"]:
-            print(f"  продажа без товара: {u}")
-    return 0
+    except Exception as e:  # noqa: BLE001
+        print(f"ОШИБКА переноса продаж (товары уже записаны, продажи догонит джоб sync_all): {e!r}",
+              file=sys.stderr)
+        return 1
+    print(f"продажи: recorded={sales['recorded']} already={sales['already']} voided={sales['voided']} "
+          f"errors={sales['errors']} без товара={len(sales['unmatched'])} без цены={sales['unpriced']}")
+    for u in sales["unmatched"]:
+        print(f"  продажа без товара (привязать на складе): {u}")
+    return 1 if sales["errors"] else 0
 
 
 if __name__ == "__main__":

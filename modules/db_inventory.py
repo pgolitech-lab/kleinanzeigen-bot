@@ -6,7 +6,10 @@
 #   inv_movements       — движения: приход (+N), продажа (−N), списание (−N), корректировка (±N)
 #   inv_link_questions  — сомнительные привязки «это тот же товар?» для оператора
 #
-# Остаток НЕ хранится колонкой — это SUM(qty) по невоидированным движениям (один источник правды).
+# Остаток НЕ хранится колонкой — это SUM(qty) по невоидированным движениям (один источник правды),
+# но только С НАЧАЛА УЧЁТА: начало = самый ранний приход/корректировка товара. Продажи из истории
+# до этого момента (перенесённые из messages) в остаток не входят — иначе первый приход «2 шт.»
+# после трёх старых продаж дал бы −1 и бот сказал бы клиенту «нет в наличии».
 # Пока по товару не внесён ни приход, ни инвентаризация (stock_tracked=0), остаток «неизвестен»:
 # другие модули НЕ должны из этого делать вывод «нет в наличии».
 
@@ -125,6 +128,26 @@ def _now() -> str:
 
 # ─── товары ───────────────────────────────────────────────────────────────────
 
+def _qty_sql(pid_expr: str) -> str:
+    """SQL-выражение остатка товара pid_expr с начала учёта (0, если учёт не начат)."""
+    return f"""COALESCE((SELECT SUM(m.qty) FROM inv_movements m
+                 WHERE m.product_id = {pid_expr} AND m.voided_at IS NULL
+                   AND m.occurred_at >= (SELECT MIN(r.occurred_at) FROM inv_movements r
+                                          WHERE r.product_id = {pid_expr} AND r.voided_at IS NULL
+                                            AND r.kind IN ('receipt', 'adjust'))), 0)"""
+
+
+def tracked_since(product_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[str]:
+    """Начало учёта остатка товара (ISO) или None — остаток не внесён."""
+    sql = ("SELECT MIN(occurred_at) AS t FROM inv_movements WHERE product_id = ? AND voided_at IS NULL "
+           "AND kind IN ('receipt', 'adjust')")
+    if conn is not None:
+        return conn.execute(sql, (int(product_id),)).fetchone()["t"]
+    ensure_schema()
+    with get_conn() as c:
+        return c.execute(sql, (int(product_id),)).fetchone()["t"]
+
+
 _PRODUCT_FIELDS = ("title", "category", "condition", "unit_cost_eur", "list_price_eur",
                    "min_price_eur", "note", "match_key")
 
@@ -177,8 +200,7 @@ def list_products(include_archived: bool = False) -> list[sqlite3.Row]:
     with get_conn() as conn:
         return conn.execute(f"""
             SELECT p.*,
-                   COALESCE((SELECT SUM(qty) FROM inv_movements m
-                              WHERE m.product_id = p.id AND m.voided_at IS NULL), 0) AS qty,
+                   {_qty_sql("p.id")} AS qty,
                    (SELECT COUNT(*) FROM inv_listings l WHERE l.product_id = p.id) AS listings,
                    (SELECT MIN(first_seen_at) FROM inv_listings l WHERE l.product_id = p.id) AS first_listed_at,
                    (SELECT MAX(last_seen_at) FROM inv_listings l WHERE l.product_id = p.id) AS last_listed_at
@@ -196,14 +218,14 @@ def products_by_key(match_key: str) -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def stock_qty(product_id: int) -> int:
+def stock_qty(product_id: int, conn: Optional[sqlite3.Connection] = None) -> int:
+    """Остаток с начала учёта (0, если учёт не начат — смотрите stock_tracked)."""
+    sql = f"SELECT {_qty_sql('?1')} AS q"
+    if conn is not None:
+        return int(conn.execute(sql, (int(product_id),)).fetchone()["q"])
     ensure_schema()
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(qty), 0) AS q FROM inv_movements WHERE product_id = ? AND voided_at IS NULL",
-            (int(product_id),),
-        ).fetchone()
-    return int(row["q"])
+    with get_conn() as c:
+        return int(c.execute(sql, (int(product_id),)).fetchone()["q"])
 
 
 # ─── объявления ───────────────────────────────────────────────────────────────
@@ -275,7 +297,7 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
                  note: Optional[str] = None, created_by: Optional[str] = None,
                  conn: Optional[sqlite3.Connection] = None) -> int:
     """Записать движение. Знак qty проверяется по виду: приход > 0, продажа/списание < 0,
-    корректировка ≠ 0. Приход и корректировка включают учёт остатка (stock_tracked=1)."""
+    корректировка — любая. Приход и корректировка включают учёт остатка (stock_tracked=1)."""
     ensure_schema()
     if kind not in MOVEMENT_KINDS:
         raise ValueError(f"неизвестный вид движения: {kind}")
@@ -284,8 +306,7 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
         raise ValueError("приход должен быть > 0")
     if kind in ("sale", "writeoff") and qty >= 0:
         raise ValueError(f"{kind}: количество должно быть < 0")
-    if kind == "adjust" and qty == 0:
-        raise ValueError("корректировка на 0 не имеет смысла")
+    # adjust с qty=0 допустим: инвентаризация «0 шт.» у товара без учёта — отметка начала учёта
     now = _now()
 
     def _write(c: sqlite3.Connection) -> int:
@@ -316,6 +337,13 @@ def sale_for_thread(gmail_thread_id: str) -> Optional[sqlite3.Row]:
             "SELECT * FROM inv_movements WHERE kind = 'sale' AND gmail_thread_id = ? AND voided_at IS NULL",
             (gmail_thread_id,),
         ).fetchone()
+
+
+def update_sale_price(movement_id: int, price_eur: Optional[float]) -> None:
+    ensure_schema()
+    with get_conn() as conn:
+        conn.execute("UPDATE inv_movements SET unit_price_eur = ? WHERE id = ? AND kind = 'sale'",
+                     (price_eur, int(movement_id)))
 
 
 def void_movement(movement_id: int, reason: str) -> bool:
@@ -463,5 +491,6 @@ def thread_ids_with_sale() -> set[str]:
 
 def iter_rows(sql: str, args: Iterable[Any] = ()) -> list[sqlite3.Row]:
     """Произвольный SELECT (для отчётов inventory.py)."""
+    ensure_schema()
     with get_conn() as conn:
         return conn.execute(sql, list(args)).fetchall()
