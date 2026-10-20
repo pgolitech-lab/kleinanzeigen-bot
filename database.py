@@ -1,27 +1,97 @@
 # Модуль работы с SQLite. Содержит схему таблиц и базовые CRUD функции.
 # Используется stdlib sqlite3 (синхронный) — этого достаточно для масштабов проекта.
 
+import logging
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+logger = logging.getLogger(__name__)
+
 # Путь к файлу БД рядом с проектом
 DB_PATH = Path(__file__).parent / "kleinanzeigen.db"
+
+# Одно соединение на поток (APScheduler-воркеры, threadpool FastAPI). Раньше на
+# каждый вызов открывалось новое соединение + PRAGMA journal_mode — ~2 мс на
+# простейший SELECT. Ключ — путь к БД: тесты подменяют DB_PATH на временный файл.
+_local = threading.local()
+
+
+def _thread_conn() -> sqlite3.Connection:
+    """Соединение текущего потока для текущего DB_PATH (создаётся лениво)."""
+    path = str(DB_PATH)
+    conns: dict[str, sqlite3.Connection] = getattr(_local, "conns", None)
+    if conns is None:
+        conns = _local.conns = {}
+    conn = conns.get(path)
+    if conn is None:
+        conn = sqlite3.connect(path, timeout=30, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        # В WAL безопасно и заметно быстрее FULL: при сбое питания теряется лишь
+        # последняя транзакция, целостность файла сохраняется.
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conns[path] = conn
+    return conn
 
 
 @contextmanager
 def get_conn() -> Iterator[sqlite3.Connection]:
-    """Контекст-менеджер соединения с БД. Возвращает строки как dict-like (Row)."""
-    conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    """Соединение с БД (строки как sqlite3.Row), autocommit.
+
+    Соединение переиспользуется в пределах потока — НЕ закрывать его вручную.
+    Вложенные `with get_conn()` получают то же соединение. Если внешний блок
+    падает посреди явной транзакции — откатываем, чтобы соединение потока не
+    осталось с висящей блокировкой записи.
+    """
+    conn = _thread_conn()
+    depth = getattr(_local, "depth", 0)
+    _local.depth = depth + 1
     try:
         yield conn
     finally:
-        conn.close()
+        _local.depth = depth
+        if depth == 0 and conn.in_transaction:
+            # Сюда попадаем только если транзакцию открыли вручную и не закрыли
+            # (ошибка внутри блока или баг). Откат громкий — данные не записаны.
+            logger.error("get_conn: незавершённая транзакция — ROLLBACK")
+            conn.rollback()
+
+
+@contextmanager
+def transaction() -> Iterator[sqlite3.Connection]:
+    """Атомарный блок записи: BEGIN IMMEDIATE … COMMIT, при исключении ROLLBACK.
+
+    IMMEDIATE берёт блокировку записи сразу — никакой другой писатель не вклинится
+    между SELECT и UPDATE внутри блока. Вложенный вызов присоединяется к внешней
+    транзакции (коммит/откат делает внешний).
+    """
+    with get_conn() as conn:
+        if conn.in_transaction:
+            yield conn
+            return
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
+
+
+def close_thread_conn() -> None:
+    """Закрыть соединения текущего потока (для тестов / завершения потока)."""
+    conns = getattr(_local, "conns", None) or {}
+    for conn in conns.values():
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+    conns.clear()
 
 
 def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
@@ -34,6 +104,8 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
 def init_db() -> None:
     """Создаёт таблицы при первом запуске. Идемпотентна."""
     with get_conn() as conn:
+        # WAL хранится в файле БД — достаточно выставить один раз при старте.
+        conn.execute("PRAGMA journal_mode = WAL")
         # Аккаунты Kleinanzeigen + связанный Gmail
         conn.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
@@ -120,10 +192,21 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_account ON messages(account_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(gmail_thread_id)")
+        # Дедуп входящих (find_by_gmail_message_id на каждое письмо), orphan-скан
+        # (known_message_ids_since по created_at), хронология треда, CRM по клиенту,
+        # треды по объявлению (mark_thread_sold close_other_threads_for_ad).
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_gmail_msg ON messages(gmail_message_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_thread_dir_created "
+            "ON messages(gmail_thread_id, direction, created_at)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_buyer ON messages(buyer_name)")
 
         # Миграции существующих БД
         _add_column_if_missing(conn, "messages", "email_subject", "TEXT")
         _add_column_if_missing(conn, "messages", "ad_id", "TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_ad ON messages(ad_id)")
         _add_column_if_missing(conn, "messages", "client_lang", "TEXT")
         _add_column_if_missing(conn, "messages", "answer_lang", "TEXT")
         _add_column_if_missing(conn, "messages", "tokens_in", "INTEGER")
@@ -573,12 +656,10 @@ def increment_autopilot_messages(thread_id: str) -> int:
     if not thread_id:
         return 0
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE thread_autopilot SET messages_sent = messages_sent + 1 WHERE gmail_thread_id = ?",
-            (thread_id,),
-        )
+        # RETURNING — инкремент и чтение одним атомарным оператором.
         row = conn.execute(
-            "SELECT messages_sent FROM thread_autopilot WHERE gmail_thread_id = ?",
+            "UPDATE thread_autopilot SET messages_sent = messages_sent + 1 "
+            "WHERE gmail_thread_id = ? RETURNING messages_sent",
             (thread_id,),
         ).fetchone()
     return row["messages_sent"] if row else 0
@@ -645,31 +726,68 @@ def list_thread_dispatches(gmail_thread_id: str) -> list[sqlite3.Row]:
 
 # --- SETTINGS ---
 
+# Кэш таблицы settings: config.* дёргается десятки раз за проход опроса.
+# TTL — чтобы правки из другого процесса (скрипты) подхватывались; свои записи
+# через set_setting сбрасывают кэш сразу. Ключ — путь к БД (тесты меняют DB_PATH).
+SETTINGS_CACHE_TTL_SEC = 5.0
+_settings_cache: dict[str, tuple[float, dict[str, str]]] = {}
+_settings_gen = 0
+_settings_lock = threading.Lock()
+
+
+def _load_settings() -> dict[str, str]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {row["key"]: row["value"] for row in rows}
+
+
+def _settings_snapshot() -> dict[str, str]:
+    """Настройки из кэша (перечитывает БД по истечении TTL)."""
+    path = str(DB_PATH)
+    hit = _settings_cache.get(path)
+    now = time.monotonic()
+    if hit and now - hit[0] < SETTINGS_CACHE_TTL_SEC:
+        return hit[1]
+    gen = _settings_gen
+    data = _load_settings()
+    with _settings_lock:
+        # Не кладём в кэш снимок, если пока читали — кто-то записал настройку.
+        if gen == _settings_gen:
+            _settings_cache[path] = (now, data)
+    return data
+
+
+def invalidate_settings_cache() -> None:
+    global _settings_gen
+    with _settings_lock:
+        _settings_gen += 1
+        _settings_cache.clear()
+
+
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
     """Прочитать значение настройки. Возвращает default если ключ не найден."""
-    with get_conn() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else default
+    return _settings_snapshot().get(key, default)
 
 
 def set_setting(key: str, value: Optional[str]) -> None:
     """Записать значение настройки (UPSERT)."""
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value,
-                                           updated_at = excluded.updated_at
-            """,
-            (key, value, datetime.utcnow().isoformat()),
-        )
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                                               updated_at = excluded.updated_at
+                """,
+                (key, value, datetime.utcnow().isoformat()),
+            )
+    finally:
+        invalidate_settings_cache()
 
 
 def all_settings() -> dict[str, str]:
-    """Все настройки как словарь."""
-    with get_conn() as conn:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        return {row["key"]: row["value"] for row in rows}
+    """Все настройки как словарь (всегда свежее чтение из БД)."""
+    return _load_settings()
 
 
 # --- AD BRIEFS ---

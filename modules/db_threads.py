@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn
+from database import DB_PATH, get_conn, transaction
 
 # --- CLOSED THREADS ---
 
@@ -154,23 +154,17 @@ def upsert_negotiation_state(gmail_thread_id: str, **fields: Any) -> None:
         return
     known = {k: v for k, v in fields.items() if k in _NEG_STATE_COLS}
     now = datetime.utcnow().isoformat()
+    # Один атомарный UPSERT вместо INSERT OR IGNORE + UPDATE на каждую колонку.
+    cols = list(known)
+    insert_cols = ", ".join(["gmail_thread_id", "updated_at", *cols])
+    placeholders = ", ".join("?" * (2 + len(cols)))
+    set_sql = ", ".join([*(f"{c} = excluded.{c}" for c in cols), "updated_at = excluded.updated_at"])
     with get_conn() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO negotiation_state (gmail_thread_id, updated_at) "
-            "VALUES (?, ?)",
-            (gmail_thread_id, now),
+            f"INSERT INTO negotiation_state ({insert_cols}) VALUES ({placeholders}) "
+            f"ON CONFLICT(gmail_thread_id) DO UPDATE SET {set_sql}",
+            (gmail_thread_id, now, *known.values()),
         )
-        for col, val in known.items():
-            conn.execute(
-                f"UPDATE negotiation_state SET {col} = ?, updated_at = ? "
-                "WHERE gmail_thread_id = ?",
-                (val, now, gmail_thread_id),
-            )
-        if not known:
-            conn.execute(
-                "UPDATE negotiation_state SET updated_at = ? WHERE gmail_thread_id = ?",
-                (now, gmail_thread_id),
-            )
 
 
 def record_our_offer(gmail_thread_id: str, offer_eur: float) -> None:
@@ -203,22 +197,23 @@ def set_thread_flags(
     """Upsert флаги треда. Передавай только те поля, что нужно изменить."""
     if not gmail_thread_id:
         return
+    fields: dict[str, Any] = {}
+    if is_pinned is not None:
+        fields["is_pinned"] = is_pinned
+    if operator_unread is not None:
+        fields["operator_unread"] = operator_unread
     now = datetime.utcnow().isoformat()
+    # Один атомарный UPSERT: новые строки получают DEFAULT 0 для непереданных флагов.
+    cols = list(fields)
+    insert_cols = ", ".join(["gmail_thread_id", "updated_at", *cols])
+    placeholders = ", ".join("?" * (2 + len(cols)))
+    set_sql = ", ".join([*(f"{c} = excluded.{c}" for c in cols), "updated_at = excluded.updated_at"])
     with get_conn() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO thread_flags (gmail_thread_id, updated_at) VALUES (?, ?)",
-            (gmail_thread_id, now),
+            f"INSERT INTO thread_flags ({insert_cols}) VALUES ({placeholders}) "
+            f"ON CONFLICT(gmail_thread_id) DO UPDATE SET {set_sql}",
+            (gmail_thread_id, now, *fields.values()),
         )
-        if is_pinned is not None:
-            conn.execute(
-                "UPDATE thread_flags SET is_pinned=?, updated_at=? WHERE gmail_thread_id=?",
-                (is_pinned, now, gmail_thread_id),
-            )
-        if operator_unread is not None:
-            conn.execute(
-                "UPDATE thread_flags SET operator_unread=?, updated_at=? WHERE gmail_thread_id=?",
-                (operator_unread, now, gmail_thread_id),
-            )
 
 
 # --- PROCESSED MESSAGES (orphan-recovery support) ---
@@ -283,7 +278,8 @@ def append_extra_note(message_id: int, note: str) -> None:
         return
     timestamp = datetime.utcnow().strftime("%H:%M")
     new_line = f"{timestamp} {note}"
-    with get_conn() as conn:
+    # Read-modify-write под блокировкой записи — параллельная заметка не потеряется.
+    with transaction() as conn:
         row = conn.execute(
             "SELECT extra_notes FROM messages WHERE id = ?", (message_id,),
         ).fetchone()
