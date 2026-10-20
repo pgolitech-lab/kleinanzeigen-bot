@@ -92,7 +92,8 @@ export function openSoldSheet(opts) {
       let tail = "";
       if (st && (st.product_id ?? res.product_id) === null) tail = " · товар не найден на складе — привяжите в «Склад»";
       else if (st?.stock_tracked && st.qty_after != null) tail = ` · на складе осталось ${st.qty_after}`;
-      toast(`✅ Продажа ${price.toLocaleString("de-DE")} € записана${tail}`, { ms: tail ? 6000 : 3200 });
+      if (res?.already) toast("Продажа уже записана", { ms: 3200 });
+      else toast(`✅ Продажа ${price.toLocaleString("de-DE")} € записана${tail}`, { ms: tail ? 6000 : 3200 });
       opts.onDone?.(price);
     } catch (err) {
       errEl.textContent = err.message ?? String(err);
