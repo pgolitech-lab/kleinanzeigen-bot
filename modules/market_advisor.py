@@ -1728,6 +1728,14 @@ def _search_row(m: dict[str, Any], ours: bool, now: datetime, source: str) -> di
             "active": bool(m.get("active", 1)), "ours": ours, "source": source}
 
 
+def _live_error_ru(raw: str) -> str:
+    """Причина сбоя живой выдачи человеческим языком (без байт и playwright). Детали — в лог."""
+    logger.warning("market: живая выдача недоступна: %s", raw[:300])
+    if raw.startswith("http error") or "timeout" in raw.lower():
+        return "Нет связи с Kleinanzeigen — проверьте сеть и повторите позже"
+    return "Kleinanzeigen не отдал выдачу (похоже на блокировку или окно согласия) — попробуйте позже"
+
+
 def _live_search(query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
     """Публичная выдача по фразе (без логина, ≤ 2 страниц, кэш 6 ч). -> (rows, error)."""
     key = "psearch:" + db_market.text_hash(" ".join(tokens(query)))
@@ -1736,16 +1744,24 @@ def _live_search(query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
         return cached.get("rows", []), None
     from modules import scout
     import httpx
+    slug = scout.slugify(query)
     rows: list[dict[str, Any]] = []
     browser = scout._BrowserFallback()
     try:
         with httpx.Client(headers=scout._HEADERS, timeout=30.0, follow_redirects=True) as client:
             for pnum in range(1, SEARCH_LIVE_PAGES + 1):
+                # Общий поиск без категории: /s-<слово>/k0 (вариант /s/<слово>/k0 отдаёт страницу без карточек)
+                url = (f"{scout.BASE}/s-{slug}/k0" if pnum == 1 else f"{scout.BASE}/s-seite:{pnum}/{slug}/k0")
                 try:
-                    html = scout.fetch_search_page(client, scout.build_search_url(query, "", pnum), browser)
-                except Exception as e:  # noqa: BLE001
+                    html = scout.fetch_search_page(client, url, browser)
+                except scout.ScoutFetchError as e:
                     if pnum == 1:
-                        return [], f"выдача Kleinanzeigen недоступна: {e}"[:300]
+                        return [], _live_error_ru(str(e))
+                    break
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("market: живой поиск «%s»: %s", query, e)
+                    if pnum == 1:
+                        return [], _live_error_ru(f"http error: {e}")
                     break
                 page_rows = scout.parse_search_html(html, "part", 0)
                 if not page_rows:
@@ -1756,11 +1772,20 @@ def _live_search(query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
     finally:
         browser.close()
     if not rows:
-        return [], "выдача пуста или не распознана"
+        return [], None  # выдача нормальная, но товара нет — это «пусто», не ошибка
     keep = [{k: r.get(k) for k in ("ad_id", "title", "url", "price_eur", "city", "plz", "posted_raw")}
             for r in rows]
     db_market.cache_set(key, "psearch", {"rows": keep})
     return keep, None
+
+
+def _clean_prices(prices: list[float]) -> list[float]:
+    """Без мусорных цен (0, 99999999 и т. п.): ≥ 20 €, < 1 млн и в пределах ×10 от медианы."""
+    ps = [p for p in prices if p and 20 <= p < 1_000_000]
+    if len(ps) >= 5:
+        med = statistics.median(ps)
+        ps = [p for p in ps if med / 10 <= p <= med * 10]
+    return ps
 
 
 def _price_stats(prices: list[float]) -> dict[str, Any]:
@@ -1838,7 +1863,7 @@ def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTI
                 lr = {**lr, "first_seen_at": None, "active": 1}
                 rows.append(_search_row(lr, ctx.is_ours(lr["ad_id"]), ctx.now, "live"))
     market = [r for r in rows if not r["ours"]]
-    priced = [r["price_eur"] for r in market if r["price_eur"] and r["price_eur"] >= 20]
+    priced = _clean_prices([r["price_eur"] for r in market if r["price_eur"]])
     res["total"], res["n_active"] = len(market), sum(1 for r in market if r["active"])
     res["price"] = _price_stats(priced)
     # разрез «где продаётся»
@@ -1851,7 +1876,7 @@ def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTI
             by_reg.setdefault(r["plz"][:2], []).append(r)
 
     def agg(g: list) -> tuple[int, Optional[int]]:
-        ps = [x["price_eur"] for x in g if x["price_eur"] and x["price_eur"] >= 20]
+        ps = _clean_prices([x["price_eur"] for x in g if x["price_eur"]])
         return len(g), (round(statistics.median(ps)) if ps else None)
     res["cities"] = sorted(({"city": k[0], "plz_area": k[1] or None, "count": agg(g)[0], "median_eur": agg(g)[1]}
                             for k, g in by_city.items()), key=lambda x: -x["count"])[:10]

@@ -687,3 +687,37 @@ def test_product_search_live_merges_without_db_write(env, monkeypatch):
     assert r["total"] == 3 and r["sources"]["live"] == 2 and any(x["source"] == "live" for x in r["listings"])
     with db_mod.get_conn() as conn:
         assert conn.execute("SELECT COUNT(*) FROM scout_listings WHERE ad_id='8600000001'").fetchone()[0] == 0
+
+
+def test_product_search_ignores_garbage_prices(env):
+    db_mod, _dbm, ma, now = env
+    _wb(db_mod, now, n=4)
+    add_market(db_mod, ad_id="8500000090", title="Werkbank Müll", price=99999999, first=_iso(now, 1), last=_iso(now, 0))
+    add_market(db_mod, ad_id="8500000091", title="Werkbank Null", price=0, first=_iso(now, 1), last=_iso(now, 0))
+    r = ma.product_search("werkbank")
+    assert r["price"]["max"] == 250 and r["price"]["min"] == 100 and r["total"] == 6
+
+
+def test_live_error_text_is_human():
+    from modules import market_advisor as ma
+    for raw in ("http 200, 180843 байт, карточек нет; playwright: тоже без карточек", "http error: timed out"):
+        t = ma._live_error_ru(raw)
+        assert "байт" not in t and "playwright" not in t.lower() and "Kleinanzeigen" in t
+    assert "сеть" in ma._live_error_ru("http error: boom")
+
+
+def test_live_search_url_and_empty_is_not_error(env, monkeypatch):
+    _db, _dbm, ma, _now = env
+    from modules import scout
+    seen = []
+    monkeypatch.setattr(ma.time, "sleep", lambda s: None)
+    monkeypatch.setattr(scout, "fetch_search_page", lambda c, u, b=None: seen.append(u) or "<html/>")
+    monkeypatch.setattr(scout, "parse_search_html", lambda h, k, q: [])
+    rows, err = ma._live_search("Hobelbank")
+    assert rows == [] and err is None and seen == ["https://www.kleinanzeigen.de/s-hobelbank/k0"]
+
+    def blocked(c, u, b=None):
+        raise scout.ScoutFetchError("http 200, 1 байт, карточек нет")
+    monkeypatch.setattr(scout, "fetch_search_page", blocked)
+    rows, err = ma._live_search("Zwingenxyz")
+    assert rows == [] and "не отдал выдачу" in err
