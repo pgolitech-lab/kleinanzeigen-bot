@@ -518,6 +518,7 @@ def find_related_inquiries(
     *,
     display_name: Optional[str] = None,
     account_id: Optional[int] = None,
+    include_maybe: bool = False,
 ) -> list[sqlite3.Row]:
     """Найти ДРУГИЕ треды того же клиента.
 
@@ -529,6 +530,8 @@ def find_related_inquiries(
     (norm_name) в ТОМ ЖЕ аккаунте. Это догадка — UI должен показывать её как
     «возможно тот же клиент».
 
+    Уровень 2 включается ТОЛЬКО с include_maybe=True — вызывающий обязан показать
+    maybe_same оператору (иначе догадка выглядит как факт и возвращается Bug 8).
     display_name / account_id берутся из аргументов, а если не заданы — из
     последнего входящего треда exclude_thread_id.
 
@@ -539,7 +542,7 @@ def find_related_inquiries(
         return []
     email = buyer_email.strip()
     with get_conn() as conn:
-        if exclude_thread_id and (display_name is None or account_id is None):
+        if include_maybe and exclude_thread_id and (display_name is None or account_id is None):
             cur = conn.execute(
                 "SELECT buyer_display_name, account_id FROM messages "
                 "WHERE gmail_thread_id = ? AND direction = 'in' "
@@ -551,14 +554,24 @@ def find_related_inquiries(
                     display_name = cur["buyer_display_name"]
                 if account_id is None:
                     account_id = cur["account_id"]
-        name_key = norm_name(display_name) if account_id is not None else None
+        name_key = (norm_name(display_name)
+                    if include_maybe and account_id is not None else None)
+        # Сначала кандидатные треды (по индексам buyer_name / account_id), и только
+        # по ним — последний входящий, а не ROW_NUMBER по всей таблице.
         sql = """
-        WITH last_ids AS (
-            SELECT id, ROW_NUMBER() OVER (
-                       PARTITION BY gmail_thread_id ORDER BY id DESC) AS rn
-              FROM messages
+        WITH cand AS (
+            SELECT DISTINCT gmail_thread_id FROM messages
              WHERE direction = 'in'
                AND gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
+               AND (buyer_name = ?
+                    OR (? IS NOT NULL AND account_id = ?
+                        AND norm_name(buyer_display_name) = ?))
+        ),
+        last_ids AS (
+            SELECT m.id, ROW_NUMBER() OVER (
+                       PARTITION BY m.gmail_thread_id ORDER BY m.id DESC) AS rn
+              FROM messages m JOIN cand c ON c.gmail_thread_id = m.gmail_thread_id
+             WHERE m.direction = 'in'
         )
         SELECT m.*,
                CASE WHEN m.buyer_name = ? THEN 0 ELSE 1 END AS maybe_same
@@ -568,7 +581,8 @@ def find_related_inquiries(
                 OR (? IS NOT NULL AND m.account_id = ?
                     AND norm_name(m.buyer_display_name) = ?))
         """
-        params: list[Any] = [email, email, name_key, account_id, name_key]
+        params: list[Any] = [email, name_key, account_id, name_key,
+                             email, email, name_key, account_id, name_key]
         if exclude_thread_id:
             sql += " AND m.gmail_thread_id != ?"
             params.append(exclude_thread_id)

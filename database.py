@@ -44,6 +44,8 @@ def _thread_conn() -> sqlite3.Connection:
         # В WAL безопасно и заметно быстрее FULL: при сбое питания теряется лишь
         # последняя транзакция, целостность файла сохраняется.
         conn.execute("PRAGMA synchronous = NORMAL")
+        # Соединения живут долго — без лимита WAL-файл не усекается после пиков.
+        conn.execute("PRAGMA journal_size_limit = 67108864")
         conn.create_function("norm_name", 1, norm_name, deterministic=True)
         conns[path] = conn
     return conn
@@ -90,8 +92,14 @@ def transaction() -> Iterator[sqlite3.Connection]:
                 yield conn
                 conn.execute(f"RELEASE {name}")
             except BaseException:
-                conn.execute(f"ROLLBACK TO {name}")
-                conn.execute(f"RELEASE {name}")
+                # Если SQLite уже откатил всю транзакцию (IOERR/FULL), savepoint'а
+                # нет — не подменяем исходное исключение ошибкой «no such savepoint».
+                if conn.in_transaction:
+                    try:
+                        conn.execute(f"ROLLBACK TO {name}")
+                        conn.execute(f"RELEASE {name}")
+                    except sqlite3.Error:
+                        logger.exception("transaction: откат savepoint %s не удался", name)
                 raise
             finally:
                 _local.sp = depth - 1
@@ -106,7 +114,9 @@ def transaction() -> Iterator[sqlite3.Connection]:
         finally:
             # set_setting внутри транзакции сбросил кэш ДО коммита — сбрасываем
             # ещё раз, чтобы старые значения, прочитанные в окне, не осели в кэше.
-            invalidate_settings_cache()
+            if getattr(_local, "settings_dirty", False):
+                _local.settings_dirty = False
+                invalidate_settings_cache()
 
 
 def close_thread_conn() -> None:
@@ -826,6 +836,8 @@ def set_setting(key: str, value: Optional[str]) -> None:
                 """,
                 (key, value, datetime.utcnow().isoformat()),
             )
+            if conn.in_transaction:
+                _local.settings_dirty = True
     finally:
         invalidate_settings_cache()
 

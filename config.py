@@ -34,8 +34,6 @@ DEFAULTS: dict[str, str] = {
     # из них вместо одного `telegram_chat_id`. Локи (5 мин на оператора) применяются.
     # Пустое = старое поведение (один `telegram_chat_id`, обычно группа).
     "telegram_operator_dm_ids": "",
-    "google_drive_credentials_json": "",
-    "google_drive_folder_id": "",
     "gmail_poll_interval_sec": "60",
     # IMAP-фильтр FROM. Substring-match по заголовку отправителя.
     # "kleinanzeigen.de" покрывает @kleinanzeigen.de и @*.kleinanzeigen.de.
@@ -105,6 +103,20 @@ def bootstrap() -> None:
     for key, value in DEFAULTS.items():
         if key not in existing:
             db.set_setting(key, value)
+    _migrate_settings(existing)
+
+
+def _migrate_settings(existing: dict) -> None:
+    """Разовые правки значений в settings. Каждая — один раз (маркер migr_*),
+    чтобы не перетирать то, что оператор потом выставит сам."""
+    # 2026-10-20: inquiry_max_age_days на проде стоял 1 → письма старше суток
+    # (выходные, орфан-recovery) терялись. Решение владельца — 7, но только если
+    # там именно 1.
+    marker = "migr_inquiry_max_age_7"
+    if existing.get(marker) != "1":
+        if (existing.get("inquiry_max_age_days") or "").strip() == "1":
+            db.set_setting("inquiry_max_age_days", "7")
+        db.set_setting(marker, "1")
 
 
 # --- Геттеры с приведением типов ---
@@ -183,14 +195,6 @@ def telegram_authorized_ids() -> "set[str]":
     if extra:
         ids.update(x.strip() for x in extra.split(",") if x.strip())
     return ids
-
-
-def google_drive_credentials_json() -> str:
-    return get("google_drive_credentials_json") or ""
-
-
-def google_drive_folder_id() -> str:
-    return get("google_drive_folder_id") or ""
 
 
 def gmail_poll_interval_sec() -> int:

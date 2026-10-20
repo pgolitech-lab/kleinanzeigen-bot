@@ -557,3 +557,22 @@ def test_add_lesson_without_source_still_appends(tmp_db):
     tmp_db.add_lesson(ad_id="ad2", good_answer_ru="x")
     tmp_db.add_lesson(ad_id="ad2", good_answer_ru="x")
     assert len(tmp_db.list_lessons_for_ad("ad2")) == 2
+
+
+# --- Миграции настроек ----------------------------------------------------------------
+
+def test_inquiry_max_age_migrated_once(tmp_db):
+    import config
+    tmp_db.set_setting("inquiry_max_age_days", "1")
+    config.bootstrap()
+    assert config.inquiry_max_age_days() == 7
+    tmp_db.set_setting("inquiry_max_age_days", "1")  # оператор осознанно вернул 1
+    config.bootstrap()
+    assert config.inquiry_max_age_days() == 1
+
+
+def test_inquiry_max_age_other_value_untouched(tmp_db):
+    import config
+    tmp_db.set_setting("inquiry_max_age_days", "3")
+    config.bootstrap()
+    assert config.inquiry_max_age_days() == 3
