@@ -1103,3 +1103,74 @@ em.good { color: var(--good); }
   .btn-send { padding: 6px 10px; justify-content: center; }
   .btn-send .bs-t { align-items: center; }
 }
+
+/* ============================================================
+   Разбор (концепция B) — он же Flex Window
+   ============================================================ */
+.tri-btn { color: var(--link); text-decoration: none; }
+.triage { display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
+.tr-prog { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tr-prog b { font-size: 1.15rem; }
+.tr-prog span { margin-left: auto; color: var(--hint); font-size: .84rem; }
+.tr-bar { flex-basis: 100%; height: 4px; border-radius: 4px; background: var(--tonal); overflow: hidden; }
+.tr-bar i { display: block; height: 100%; background: var(--grad); border-radius: 4px; transition: width .3s; }
+.tcard3 {
+  position: relative; display: flex; flex-direction: column; gap: 10px;
+  padding: 14px; border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line);
+  box-shadow: var(--shadow); touch-action: pan-y; transition: transform .26s ease, opacity .26s ease;
+  -webkit-user-select: none; user-select: none;
+}
+.tcard3.drag { transition: none; }
+.tcard3.fly-r { transform: translateX(120%) rotate(12deg); opacity: 0; }
+.tcard3.fly-l { transform: translateX(-120%) rotate(-12deg); opacity: 0; }
+.tcard3[data-dir="r"] { box-shadow: 0 0 0 3px var(--good), var(--shadow); }
+.tcard3[data-dir="l"] { box-shadow: 0 0 0 3px var(--warn), var(--shadow); }
+.t3-head { display: flex; align-items: center; gap: 10px; cursor: grab; }
+.t3-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.t3-who b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t3-who small { color: var(--hint); font-size: .76rem; }
+.t3-time { color: var(--hint); font-size: .76rem; }
+.t3-ad { font-weight: 650; color: var(--sub); font-size: .9rem; }
+.t3-l { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--hint); margin-bottom: 4px; }
+.t3-msg, .t3-ans { padding: 10px 12px; border-radius: 14px; background: var(--tonal); }
+.t3-ans { background: color-mix(in srgb, var(--accent) 9%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.t3-ru, .t3-de { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.t3-mirror { margin-top: 6px; font-size: .8rem; color: var(--hint); white-space: pre-wrap; }
+.t3-orig { border: 0; background: none; color: var(--link); font: inherit; font-size: .8rem; font-weight: 700; padding: 6px 0 0; cursor: pointer; }
+.tr-hint { text-align: center; font-size: .74rem; color: var(--hint); }
+.tr-acts { position: sticky; bottom: 6px; display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 8px; }
+.tr-acts button {
+  min-height: 56px; border: 0; border-radius: 18px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  font: inherit; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm);
+}
+.ta-later { background: color-mix(in srgb, var(--warn) 18%, var(--card)); color: var(--warn); }
+.ta-edit { background: var(--card); color: var(--text); border: 1px solid var(--line) !important; }
+.ta-send { background: var(--grad); color: var(--on-accent); }
+.ta-send.warn { background: color-mix(in srgb, var(--danger) 20%, var(--card)); color: var(--danger); }
+.tr-done { min-height: 60%; display: grid; place-content: center; text-align: center; gap: 10px; padding: 24px; }
+.tr-done .td-ic { display: grid; place-items: center; }
+.tr-done .td-ic .ic { width: 64px; height: 64px; color: var(--good); }
+.tr-done h2 { margin: 0; font-size: 1.4rem; }
+.tr-done .td-s { margin: 0; color: var(--sub); }
+.tr-done .td-acts { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+.tr-done .btn { min-height: 48px; padding: 0 18px; text-decoration: none; display: inline-flex; align-items: center; }
+
+@media (max-width: 340px) {
+  .tr-acts { grid-template-columns: 1fr 1fr 1.3fr; gap: 6px; }
+  .tr-acts button { min-height: 52px; font-size: .84rem; gap: 4px; }
+  .tr-acts .ic { width: 18px; height: 18px; }
+}
+/* Flex Window: только суть — кто, что пишет, что ответим, две кнопки */
+:root[data-layout="flex"] .tr-prog .tr-bar,
+:root[data-layout="flex"] .tr-hint,
+:root[data-layout="flex"] .t3-ad,
+:root[data-layout="flex"] .t3-deal,
+:root[data-layout="flex"] .t3-mirror,
+:root[data-layout="flex"] .t3-l,
+:root[data-layout="flex"] .ta-edit { display: none; }
+:root[data-layout="flex"] .tcard3 { padding: 8px 10px; gap: 6px; }
+:root[data-layout="flex"] .t3-msg, :root[data-layout="flex"] .t3-ans { padding: 6px 8px; }
+:root[data-layout="flex"] .t3-ru, :root[data-layout="flex"] .t3-de { font-size: .86rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-layout="flex"] .tr-acts { grid-template-columns: 1fr 1.5fr; }
+:root[data-layout="flex"] .tr-prog b { font-size: .9rem; }
+:root[data-layout="flex"] .t3-head .av { --s: 32px; }

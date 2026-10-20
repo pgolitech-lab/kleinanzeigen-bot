@@ -8,7 +8,7 @@ import * as clients from "./screens/clients.js";
 import { setError, setLoading } from "./utils.js";
 import { hideBack, showBack, setTitle } from "./components/backbar.js";
 import { closeSheet, isSheetOpen, requestCloseSheet } from "./components/sheet.js";
-import { isSplit, onLayoutChange } from "./layout.js";
+import { isSplit, layout, onLayoutChange } from "./layout.js";
 
 // Редкие экраны грузятся лениво — при первом заходе, а не при старте MA.
 const client   = () => import("./screens/client.js");
@@ -18,14 +18,17 @@ const detected = () => import("./screens/detected.js");
 const scout    = () => import("./screens/scout.js");
 
 const more     = () => import("./screens/more.js");
+const triage   = () => import("./screens/triage.js");
 
 // root: true — корневой экран вкладки (без кнопки «Назад»).
 // list — на широком экране (Fold внутренний) слева держится этот список,
 //        а экран маршрута открывается справа; key(params) — какой элемент
 //        списка подсветить. На телефоне list игнорируется.
 const ROUTES = [
-  { pattern: /^#?\/?$/,                   screen: pipeline, root: true, list: "pipeline", title: "Входящие", params: () => ({}) },
-  { pattern: /^#\/pipeline\/?$/,          screen: pipeline, root: true, list: "pipeline", title: "Входящие", params: () => ({}) },
+  // flex — экран для Flip Flex Window («карман»): вместо списка — Разбор
+  { pattern: /^#?\/?$/,                   screen: pipeline, root: true, list: "pipeline", flex: triage, title: "Входящие", params: () => ({}) },
+  { pattern: /^#\/pipeline\/?$/,          screen: pipeline, root: true, list: "pipeline", flex: triage, title: "Входящие", params: () => ({}) },
+  { pattern: /^#\/triage\/?$/,            screen: triage, title: "Разбор", params: () => ({}) },
   { pattern: /^#\/dashboard\/?$/,         screen: dashboard, title: "Обзор", params: () => ({}) },
   { pattern: /^#\/clients\/?$/,           screen: clients,  root: true, list: "clients", title: "Клиенты", params: () => ({}) },
   { pattern: /^#\/sales\/?$/,             screen: sales,    root: true, title: "Продажи", params: () => ({}) },
@@ -172,7 +175,9 @@ export function start(app) {
       screenMount.appendChild(emptyDetail(r.list));
       return;
     }
-    renderInto(screenMount, r.screen, routeParams);
+    const flex = layout() === "flex" && r.flex;
+    if (flex) setTitle("Разбор");
+    renderInto(screenMount, flex ? r.flex : r.screen, routeParams);
   }
 
   // «Назад» в шапке: на корневых вкладках нет; на широком экране не нужен,
@@ -185,6 +190,8 @@ export function start(app) {
   // Сложили/разложили Fold, повернули: перестраиваем панели БЕЗ перерисовки
   // открытого экрана — набранный текст и прокрутка треда сохраняются.
   onLayoutChange((next, prev) => {
+    // вошли в Flex Window / вышли из него — у маршрута свой экран для «кармана»
+    if (route?.flex && (next === "flex" || prev === "flex")) { dispatch(); return; }
     const wasSplit = prev === "split2" || prev === "split3";
     const nowSplit = isSplit();
     if (route && route.list && route.screen === LISTS[route.list] && wasSplit !== nowSplit) {

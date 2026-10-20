@@ -121,6 +121,9 @@ function toolbar(data, mount, counts) {
     chips.appendChild(ac);
   }
   const right = bar.querySelector(".tbar-r");
+  const triBtn = el(`<a class="ibtn tri-btn" href="#/triage" aria-label="Разбор по одной карточке"></a>`);
+  triBtn.appendChild(icon("cards"));
+  right.appendChild(triBtn);
   const selBtn = el(`<button class="ibtn" aria-label="Выбрать несколько"></button>`);
   selBtn.appendChild(icon("sel"));
   selBtn.addEventListener("click", () => { sel.active = true; sel.ids.clear(); renderWith(mount, data); });
