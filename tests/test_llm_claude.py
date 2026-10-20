@@ -312,3 +312,23 @@ def test_translate_accepts_text_already_in_target_and_names(fake_llm):
     # Обратный перевод на RU для «имён/моделей/цен» законно остаётся латиницей
     fake_llm.response = _resp({"translation": "Peugeot Expert 1200 €"})
     assert claude.translate_only("Peugeot Expert 1200 €", target_lang="ru", source_lang="de")
+
+
+@pytest.mark.parametrize("state,title", [("sold", "Sitzbank"), ("deleted", "Gelöscht • Sitzbank"),
+                                         ("reserved", "Reserviert • Sitzbank"), ("", "Gelöscht • Sitzbank")])
+def test_ad_status_never_tells_model_item_is_gone(fake_llm, state, title):
+    # Товар обычно не кончается: статус объявления — не повод писать «продано/нет в наличии»
+    fake_llm.response = _resp(DRAFT)
+    claude.generate_draft("Noch da?", ad_title=title, ad_state=state)
+    user = fake_llm.calls[-1]["messages"][0]["content"]
+    assert "НЕ значит, что товара нет" in user and "НЕ пиши клиенту, что товар продан" in user
+    for bad in ("ТОВАР УЖЕ ПРОДАН", "не продаётся", "Сообщи клиенту что товар зарезервирован",
+                "объясни клиенту что объявление снято"):
+        assert bad not in user
+
+
+def test_autopilot_prompt_status_neutral(fake_llm):
+    fake_llm.response = _resp({**DRAFT, "ru_client": "x", "should_stop": False, "stop_reason": "",
+                               "client_pressing_below_floor": False})
+    claude.generate_autopilot_reply("Noch da?", ad_title="Gelöscht • Sitzbank", floor_eur=100)
+    assert "НЕ значит, что товара нет" in fake_llm.calls[-1]["messages"][0]["content"]
