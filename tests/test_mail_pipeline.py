@@ -229,6 +229,9 @@ def inc(tmp_db, monkeypatch):
     monkeypatch.setattr(incoming.telegram_bot, "send_autopilot_stop_notification",
                         lambda mid, reason: calls["stop"].append(reason))
     monkeypatch.setattr(incoming.telegram_bot, "send_autopilot_progress", lambda *a: None)
+    calls["notify"] = []
+    monkeypatch.setattr(incoming.telegram_bot, "notify",
+                        lambda text, *a, **kw: calls["notify"].append(text))
     monkeypatch.setattr(incoming.telegram_bot, "thread_is_busy", lambda tid: False)
     monkeypatch.setattr(incoming.parser, "parse_ad", lambda url: calls["parse_ad"].append(url) or {
         "title": "Sitzbank", "price": "100 €", "description": "gut", "seller_name": "S"})
@@ -339,48 +342,43 @@ def _ap_msg(tmp_db, floor: float = 100) -> tuple[int, Any]:
     return mid, tmp_db.get_thread_autopilot("T1")
 
 
-def test_autopilot_shadow_does_not_send(inc, tmp_db):
-    mid, ap = _ap_msg(tmp_db)  # autopilot_shadow_mode по умолчанию = 1
-    inc._autopilot_dispatch(mid, ap, _reply())
-    assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
-    assert tmp_db.get_thread_autopilot("T1")["active"] == 1
-
-
-def test_autopilot_sends_when_shadow_off(inc, tmp_db):
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
+def test_autopilot_sends_when_enabled(inc, tmp_db):
+    """Включён на треде → отправляет сам; старое autopilot_shadow_mode=1 не мешает."""
+    tmp_db.set_setting("autopilot_shadow_mode", "1")
     mid, ap = _ap_msg(tmp_db)
     inc._autopilot_dispatch(mid, ap, _reply())
-    assert inc._calls["send"] == [mid]
+    assert inc._calls["send"] == [mid] and inc._calls["review"] == []
     assert tmp_db.get_thread_autopilot("T1")["messages_sent"] == 1
 
 
 def test_autopilot_cap_from_settings(inc, tmp_db):
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
     tmp_db.set_setting("autopilot_message_cap", "0")
     mid, ap = _ap_msg(tmp_db)
     inc._autopilot_dispatch(mid, ap, _reply())
     assert inc._calls["send"] == [] and inc._calls["stop"] == ["limit"]
 
 
-@pytest.mark.parametrize("reply,reason", [
-    (_reply(de_answer="Да, ещё есть"), "guard_language"),
-    (_reply(deal_brief={"negotiated_price_eur": 50}), "guard_floor"),
+@pytest.mark.parametrize("reply,reason,why", [
+    (_reply(de_answer="Да, ещё есть"), "guard_language", "не на языке клиента"),
+    (_reply(deal_brief={"negotiated_price_eur": 50}), "guard_floor", "ниже минимума"),
 ])
-def test_autopilot_guards_block_send(inc, tmp_db, reply, reason):
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
+def test_autopilot_guards_hold_reply_keep_active(inc, tmp_db, reply, reason, why):
+    """Guard задерживает только этот ответ: карточка + уведомление с причиной,
+    автопилот на треде остаётся включённым."""
     mid, ap = _ap_msg(tmp_db, floor=100)
     inc._autopilot_dispatch(mid, ap, reply)
-    assert inc._calls["send"] == []
-    assert inc._calls["stop"] == [reason] and inc._calls["review"] == [mid]
-    assert tmp_db.get_thread_autopilot("T1")["active"] == 0
+    assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
+    assert inc._calls["stop"] == []
+    assert len(inc._calls["notify"]) == 1 and why in inc._calls["notify"][0]
+    assert tmp_db.get_thread_autopilot("T1")["active"] == 1
 
 
 def test_autopilot_floor_checks_price_in_text(inc, tmp_db):
     """Бриф говорит 120, а в тексте клиенту 80 € — guard_floor по тексту."""
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
     mid, ap = _ap_msg(tmp_db, floor=100)
     inc._autopilot_dispatch(mid, ap, _reply(de_answer="Für 80 € gebe ich es ab. Viele Grüße"))
-    assert inc._calls["send"] == [] and inc._calls["stop"] == ["guard_floor"]
+    assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
+    assert "ниже минимума" in inc._calls["notify"][0]
 
 
 def test_prices_in_text():
@@ -394,23 +392,21 @@ def inc_prices(t):
 
 def test_autopilot_language_vs_thread_lang(inc, tmp_db):
     """Модель заявила 'en', а клиент треда пишет по-немецки — стоп, не шлём."""
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
     tmp_db.add_message(account_id=1, direction="in", gmail_thread_id="T1", de_client="Hallo",
                        client_lang="de", status="sent")
     mid, ap = _ap_msg(tmp_db)
     inc._autopilot_dispatch(mid, ap, _reply(client_lang="en", de_answer="Yes, still there."))
-    assert inc._calls["send"] == [] and inc._calls["stop"] == ["guard_language"]
+    assert inc._calls["send"] == [] and inc._calls["review"] == [mid]
+    assert tmp_db.get_thread_autopilot("T1")["active"] == 1
 
 
 def test_autopilot_ukrainian_client_cyrillic_ok(inc, tmp_db):
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
     mid, ap = _ap_msg(tmp_db)
     inc._autopilot_dispatch(mid, ap, _reply(client_lang="uk", de_answer="Так, ще є."))
     assert inc._calls["send"] == [mid]
 
 
 def test_autopilot_threat_smtp_failure_goes_to_review(inc, tmp_db, monkeypatch):
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
     mid, ap = _ap_msg(tmp_db)
     monkeypatch.setattr(inc, "_send_reply", lambda row: {"kind": "error", "message": "smtp"})
     inc._autopilot_dispatch(mid, ap, _reply(should_stop=True, stop_reason="threat",
@@ -420,15 +416,40 @@ def test_autopilot_threat_smtp_failure_goes_to_review(inc, tmp_db, monkeypatch):
 
 
 def test_autopilot_review_undelivered_raises(inc, tmp_db, monkeypatch):
-    """Shadow-черновик, а карточка не дошла — исключение, а не тихий return."""
+    """Ответ задержан guard'ом, а карточка не дошла — исключение, а не тихий return."""
     mid, ap = _ap_msg(tmp_db)
     monkeypatch.setattr(inc.telegram_bot, "send_for_review", lambda m: None)
     with pytest.raises(RuntimeError):
-        inc._autopilot_dispatch(mid, ap, _reply())
+        inc._autopilot_dispatch(mid, ap, _reply(de_answer="Да, ещё есть"))
+
+
+def test_history_excludes_current_by_id_not_text(inc, tmp_db, monkeypatch):
+    """Одинаковое короткое «Ok» в прошлом письме не выпадает из истории."""
+    seen: dict = {}
+    body = "Ok https://www.kleinanzeigen.de/s-anzeige/sitzbank/123456789-223-1"
+    same = inc.parser.clean_email_body(body)  # прошлое письмо с тем же текстом
+    tmp_db.add_message(account_id=1, direction="in", gmail_thread_id="T1", de_client=same,
+                       status="sent", ad_id="123456789", ad_title="Sitzbank")
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+
+    def gen(**kw):
+        seen["history"] = kw["history"]
+        return _reply()
+
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply", gen)
+    inc._process_incoming(ACC, _email(body=body))
+    assert [h["de_client"] for h in seen["history"]] == [same]
+
+
+def test_last_poll_ok_at(monkeypatch):
+    import scheduler
+    monkeypatch.setitem(scheduler.POLL_STATE, "last_ok_ts", None)
+    assert scheduler.last_poll_ok_at() is None
+    monkeypatch.setitem(scheduler.POLL_STATE, "last_ok_ts", 123.0)
+    assert scheduler.last_poll_ok_at() == 123.0
 
 
 def test_autopilot_smtp_failure_goes_to_review(inc, tmp_db, monkeypatch):
-    tmp_db.set_setting("autopilot_shadow_mode", "0")
     mid, ap = _ap_msg(tmp_db)
     monkeypatch.setattr(inc, "_send_reply", lambda row: {"kind": "error", "message": "smtp"})
     inc._autopilot_dispatch(mid, ap, _reply())

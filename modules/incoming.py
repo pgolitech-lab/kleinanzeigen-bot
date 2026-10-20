@@ -259,6 +259,27 @@ def _autopilot_guard_reason(reply: dict[str, Any], autopilot_row: Any,
     return None
 
 
+# Почему guard задержал конкретный ответ — коротко для оператора.
+_GUARD_HELD_TEXT = {
+    "guard_language": "ответ не на языке клиента",
+    "guard_floor": "цена ниже минимума",
+}
+
+
+def _autopilot_held_notification(msg_id: int, thread_id: str, guard: str, floor: Any) -> None:
+    """Уведомление: этот ответ автопилота задержан guard'ом, автопилот на треде включён."""
+    why = _GUARD_HELD_TEXT.get(guard, guard)
+    if guard == "guard_floor" and floor:
+        why += f" ({floor:g} €)" if isinstance(floor, (int, float)) else f" ({floor} €)"
+    text = (f"⏸ <b>Автопилот: ответ задержан</b> · #{msg_id}\n"
+            f"Причина: {telegram_bot._html(why)}\n"
+            f"Ответ не отправлен — проверьте карточку. Автопилот на треде остаётся включённым.")
+    try:
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+    except Exception:
+        logger.exception("autopilot held notification fail msg=%s", msg_id)
+
+
 def _autopilot_to_review(msg_id: int, thread_id: str, stop_reason: Optional[str]) -> None:
     """Отдать черновик автопилота оператору на ревью; с stop_reason — ещё и
     выключить автопилот треда и прислать уведомление об остановке."""
@@ -283,15 +304,16 @@ def _autopilot_to_review(msg_id: int, thread_id: str, stop_reason: Optional[str]
 def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) -> None:
     """Обработать reply в автопилот-режиме.
 
+    Автопилот, включённый на треде, отвечает клиенту сам (решение владельца).
     Порядок: stop-причины от модели и лимит (`autopilot_message_cap`) → guard'ы
-    языка и floor (`guardrails`) → shadow-режим (`autopilot_shadow_mode`: только
-    черновик оператору, без отправки) → авто-отправка + counter + уведомление.
+    языка и floor (`guardrails`) → авто-отправка + counter + уведомление.
+    Guard задерживает только этот конкретный ответ: карточка оператору +
+    уведомление, автопилот на треде остаётся включённым.
     """
     thread_id = autopilot_row["gmail_thread_id"]
     notify_mode = autopilot_row["notify_mode"]
     current_count = autopilot_row["messages_sent"] or 0
     cap = config.autopilot_message_cap()
-    shadow = config.autopilot_shadow_mode()
 
     stop_reason: Optional[str] = None
     if reply.get("should_stop"):
@@ -309,17 +331,11 @@ def _autopilot_dispatch(msg_id: int, autopilot_row: Any, reply: dict[str, Any]) 
     if stop_reason == "threat" and guard == "guard_floor":
         guard = None  # в предупреждении об угрозе цены нет — floor неприменим
     if guard:
-        logger.warning("autopilot guard %s: msg=%s thread=%s — не отправляем, стоп + ревью",
-                       guard, msg_id, thread_id)
-        _autopilot_to_review(msg_id, thread_id, guard)
-        return
-
-    if shadow:
-        # Shadow: ответ сгенерён и сохранён в row как черновик, но не уходит
-        # клиенту. Автопилот остаётся активным, counter не растёт.
-        logger.info("autopilot SHADOW: msg=%s thread=%s stop=%s — черновик оператору, не отправлен",
-                    msg_id, thread_id, stop_reason or "-")
+        logger.warning("autopilot guard %s: msg=%s thread=%s — ответ задержан, карточка оператору, "
+                       "автопилот остаётся active", guard, msg_id, thread_id)
+        # При угрозе предупреждение не ушло — автопилот всё равно стоп (stop-причина).
         _autopilot_to_review(msg_id, thread_id, "threat" if stop_reason == "threat" else None)
+        _autopilot_held_notification(msg_id, thread_id, guard, autopilot_row["floor_price_eur"])
         return
 
     db.update_message(msg_id, status="approved", is_autopilot_reply=1)
@@ -878,10 +894,12 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             except Exception as e:
                 logger.warning("Не удалось сгенерить бриф для ad_id=%s: %s", ad_id, e)
 
-    # История треда из БД (без только что вставленного письма)
+    # История треда из БД без только что вставленного письма — отсекаем по id
+    # строки, а не по тексту (одинаковые короткие «Ok»/«Danke» иначе выпадали).
     history = [
-        h for h in claude.history_for(email.get("gmail_thread_id") or "")
-        if h.get("de_client") != body
+        {"direction": r["direction"], "de_client": r["de_client"], "de_answer": r["de_answer"]}
+        for r in db.thread_history(email.get("gmail_thread_id") or "")
+        if r["id"] != inserted_id
     ]
 
     # Релевантные уроки от оператора — топ-5
@@ -948,10 +966,6 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             logger.exception("autopilot dispatch упал для msg=%s", inserted_id)
             # Карточка оператору; не дошла — пробрасываем, очередь повторит письмо.
             _deliver_review(inserted_id)
-        try:
-            telegram_bot.refresh_pipeline_for_active_chats()
-        except Exception:
-            logger.exception("refresh_pipeline after autopilot-incoming fail")
         return
 
     # ───── Manual flow: дешёвый Haiku-перевод incoming → ru_client (для оператора).
@@ -987,18 +1001,6 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         # (status='new' без telegram_message_id) пойдёт веткой «довести до карточки» выше.
         logger.exception("Не удалось послать оператору msg=%s: %s", inserted_id, e)
         raise
-
-    try:
-        # Обновить thread-state на всех ранее отправленных мини-карточках треда
-        if thread_id:
-            telegram_bot.broadcast_thread_state(thread_id)
-    except Exception:
-        logger.exception("broadcast_thread_state after incoming fail")
-
-    try:
-        telegram_bot.refresh_pipeline_for_active_chats()
-    except Exception:
-        logger.exception("refresh_pipeline after incoming fail")
 
 
 # Публичный алиас для импорта из scheduler.py

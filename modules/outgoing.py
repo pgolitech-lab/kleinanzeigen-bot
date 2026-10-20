@@ -62,10 +62,6 @@ def drain_deferred_thread(thread_id: str) -> int:
             "drain_deferred: подняли %d отложенных карточек в треде %s",
             raised, thread_id,
         )
-        try:
-            telegram_bot.refresh_pipeline_for_active_chats()
-        except Exception:
-            logger.exception("refresh_pipeline after drain_deferred fail")
     return raised
 
 
@@ -266,16 +262,6 @@ def _send_reply(msg: Any) -> dict[str, Any]:
             f"📝 Тема: {actual_subject}\n"
             f"🕒 {sent_at}"
         )
-    try:
-        # Thread-state обновление: все мини-карточки треда покажут «мы ответили at HH:MM»
-        if send_thread_id:
-            telegram_bot.broadcast_thread_state(send_thread_id)
-    except Exception:
-        logger.exception("broadcast_thread_state after send_reply fail")
-    try:
-        telegram_bot.refresh_pipeline_for_active_chats()
-    except Exception:
-        logger.exception("refresh_pipeline after send_reply fail")
     return {
         "kind": "sent", "mode": mode,
         "to": actual_to, "real_to": to_email,

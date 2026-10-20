@@ -74,7 +74,8 @@ _POLLING: set[int] = set()
 _POLLING_LOCK = threading.Lock()
 # last_ok_at — последний проход, где реально опрошен хотя бы один аккаунт.
 # accounts[id] — {last_ok_at, fails_in_row, skipped_busy} для поиска «тихо сломанного» ящика.
-POLL_STATE: dict[str, Any] = {"last_ok_at": None, "last_pass_sec": None, "last_errors": 0, "accounts": {}}
+POLL_STATE: dict[str, Any] = {"last_ok_at": None, "last_ok_ts": None, "last_pass_sec": None,
+                              "last_errors": 0, "accounts": {}}
 # Порог подряд идущих неудач опроса аккаунта (≈5 мин при 15 с), после которого ERROR
 # (его подберёт monitor_errors_job и пришлёт в Telegram). Повторяется раз в ACCOUNT_FAIL_REPEAT.
 ACCOUNT_FAIL_ALERT = 20
@@ -184,12 +185,19 @@ def poll_all_accounts() -> str:
     POLL_STATE["last_errors"] = counts["fail"] + counts["busy"]
     if counts["ok"]:
         POLL_STATE["last_ok_at"] = datetime.utcnow().isoformat()
+        POLL_STATE["last_ok_ts"] = time.time()
     q = mail_queue.status()
     return (
         f"Аккаунтов: {len(accounts)}, новых писем: {total_new}, в очереди: {q['queue_len']}"
         + (f", IMAP-ошибок: {counts['fail']}" if counts["fail"] else "")
         + (f", не опрошено (висит прошлый опрос): {counts['busy']}" if counts["busy"] else "")
     )
+
+
+def last_poll_ok_at() -> float | None:
+    """Unix ts последнего прохода poll_all_accounts, где хотя бы один аккаунт
+    опрошен без ошибки (None — с запуска ещё ни разу). Для /health → poll_age_sec."""
+    return POLL_STATE.get("last_ok_ts")
 
 
 def poll_status() -> dict[str, Any]:
@@ -502,6 +510,22 @@ def build_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    # Проверка входа в подписку Claude (LLM) — раз в 30 мин, алерт оператору.
+    # Функция живёт в ветке opt/api: через getattr, чтобы ветки сливались в любом порядке.
+    llm_login_job = getattr(telegram_bot, "check_llm_login_job", None)
+    if llm_login_job is not None:
+        sched.add_job(
+            llm_login_job,
+            trigger="interval",
+            minutes=30,
+            id="check_llm_login",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        logger.warning("telegram_bot.check_llm_login_job нет — проверка входа в LLM не зарегистрирована")
 
     return sched
 
