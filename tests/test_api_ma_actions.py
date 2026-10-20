@@ -656,3 +656,17 @@ def test_send_reports_kind_and_send_mode(client):
     msched.send_one.return_value = {"kind": "skipped", "mode": "disabled", "message": "выключено"}
     body = c.post("/api/ma/messages/123/send", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()
     assert body["kind"] == "skipped" and body["mode"] == "disabled"  # utils.sendOutcome читает res.mode
+
+
+def test_price_llm_down_falls_back_to_template(client):
+    """Чип цены не зависит от LLM: при отказе — шаблон на языке клиента с этой ценой, не 500."""
+    c, mdb, mtb, msched, mclaude = client
+    msched.regenerate_draft_with_price.return_value = {"kind": "error", "message": "❌ Перегенерация упала: x"}
+    with patch("web.api_ma._client_lang", return_value="de"):
+        res = c.post("/api/ma/messages/123/price", json={"eur": 430}, headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 200 and res.json()["fallback"] is True
+    kw = mdb.update_message.call_args.kwargs
+    assert "430 €" in kw["de_answer"] and kw["de_answer"].rstrip().endswith("Viele Grüße")
+    with patch("web.api_ma._client_lang", return_value="tr"):  # шаблона на турецком нет — не шлём не на его языке
+        res = c.post("/api/ma/messages/123/price", json={"eur": 430}, headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 502

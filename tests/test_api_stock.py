@@ -125,3 +125,15 @@ def test_receipt_parse_matches_known_products_only(c):
         assert c.post("/api/ma/stock/receipt/parse", json={"text": "x"}, headers=H()).status_code == 503
     with patch("modules.claude_utils.call_json", return_value=({"items": [], "total_cost_eur": None}, {})):
         assert c.post("/api/ma/stock/receipt/parse", json={"text": "x"}, headers=H()).status_code == 422
+
+
+def test_kit_get_and_hidden_list(c):
+    a, kit = _mk(c, "Sitzbank"), _mk(c, "Komplett")
+    assert c.get(f"/api/ma/stock/products/{kit}/kit", headers=H()).json()["components"] == []
+    c.put(f"/api/ma/stock/products/{kit}/kit", json={"components": [{"product_id": a, "qty": 2}]}, headers=H())
+    j = c.get(f"/api/ma/stock/products/{kit}/kit", headers=H()).json()
+    assert j["components"] == [{"product_id": a, "title": "Sitzbank", "qty": 2}] and j["stock"]["kit"]
+    assert c.get("/api/ma/stock/products/9999/kit", headers=H()).status_code == 404
+    assert c.get("/api/ma/stock/hidden", headers=H()).json()["count"] == 0
+    c.post(f"/api/ma/stock/products/{a}/non-stock", json={}, headers=H())
+    assert [i["id"] for i in c.get("/api/ma/stock/hidden", headers=H()).json()["items"]] == [a]
