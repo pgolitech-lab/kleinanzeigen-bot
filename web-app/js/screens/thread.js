@@ -318,6 +318,16 @@ function renderThread(mount, params, data, opts = {}) {
   if (chips) main.appendChild(chips);
   const strip = dealStrip(data);
   if (strip) main.appendChild(strip);
+  // рынок под объявление: одна строка у полосы сделки, без LLM; ошибка — строка просто не появится
+  if (strip && params.thread_id) {
+    const mk = el(`<div class="mk-line small" hidden></div>`);
+    strip.after(mk);
+    api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/market`).then(r => {
+      if (!mk.isConnected || !r?.text) return;
+      mk.textContent = `📈 ${r.text}`;
+      mk.hidden = false;
+    }).catch(() => {});
+  }
 
   if (opts.conflictText) {
     const b = el(`<div class="alert alert-warning small py-2"><div class="t"></div>
@@ -532,7 +542,13 @@ function renderThread(mount, params, data, opts = {}) {
     try {
       r = await api(`/api/ma/messages/${msgId}/variants`, { method: "POST", body: {}, timeoutMs: LLM_TIMEOUT_MS });
     } catch (e) {
-      if (box.isConnected) box.innerHTML = "", box.appendChild(el(`<div class="text-danger small"></div>`)).textContent = e.message ?? String(e);
+      if (box.isConnected) {
+        // 5xx/таймаут = ИИ недоступен: не показываем сырой «HTTP 500»
+        const m = String(e.message ?? e);
+        const down = /HTTP 5\d\d|timeout|таймаут|Failed to fetch|Network/i.test(m);
+        box.replaceChildren(el(`<div class="var-down small"></div>`));
+        box.firstChild.textContent = down ? "ИИ сейчас недоступен — возьмите чип «−5 %» или напишите ответ сами." : m;
+      }
       return;
     }
     if (!box.isConnected) return;

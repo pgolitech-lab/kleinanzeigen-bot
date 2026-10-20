@@ -8,7 +8,7 @@
 import { api } from "../api.js";
 import { el, setLoading, setError, soldToday } from "../utils.js";
 import { confirmSheet, menuSheet } from "../components/sheet.js";
-import { threadRow, dealOf } from "../components/thread-row.js";
+import { threadRow, dealOf, shortTime } from "../components/thread-row.js";
 import { icon, toast } from "../components/kit.js";
 import { openSoldSheet } from "../components/sold-sheet.js";
 import { setTabBadge } from "../components/tabbar.js";
@@ -73,6 +73,18 @@ function summaryStrip(data, mount) {
   if (s.sold_today_count != null) soldCell(s.sold_today_count, s.sold_today_eur);
   else if (_soldToday) soldCell(_soldToday.count, _soldToday.eur);
   return strip;
+}
+
+// «Что сделать сейчас»: сколько ждут и кто дольше всех
+function nextUp(data) {
+  const waiting = [...(data.pinned ?? []).filter(t => t.last_event_kind === "in"), ...(data.red ?? [])];
+  if (!waiting.length) return null;
+  const oldest = waiting.reduce((a, b) => ((b.last_event_at || "") < (a.last_event_at || "") ? b : a));
+  const b = el(`<button class="nextup" type="button"><span class="nu-t"></span><span class="nu-go">Открыть ›</span></button>`);
+  const when = shortTime(oldest.last_event_at);
+  b.querySelector(".nu-t").textContent = `${waiting.length} ждут ответа · самое старое — ${oldest.buyer_display_name || "покупатель"}${when ? `, ${when}` : ""}`;
+  b.addEventListener("click", () => openThread(oldest));
+  return b;
 }
 
 function detectedBanner(n) {
@@ -203,6 +215,8 @@ function renderWith(mount, data) {
   if (sel.active) {
     container.appendChild(selBar(data, mount));
   } else {
+    const nu = nextUp(data);
+    if (nu) container.appendChild(nu);
     container.appendChild(summaryStrip(data, mount));
     if (_detected.n) container.appendChild(detectedBanner(_detected.n));
     container.appendChild(toolbar(data, mount, counts));
