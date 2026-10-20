@@ -18,6 +18,9 @@ OUT = Path(sys.argv[1])
 API_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8798
 STATIC = f"http://127.0.0.1:{int(sys.argv[3]) if len(sys.argv) > 3 else 8799}"
 ONLY = sys.argv[4].split(",") if len(sys.argv) > 4 and sys.argv[4] != "all" else None
+import os  # noqa: E402
+POST_PASS = os.environ.get("QA_POST_PASS") == "1"
+THEME = os.environ.get("QA_THEME", "dark")  # dark | light
 
 # Размеры: CSS-пиксели вьюпорта Mini App (экран / DPR минус статус-бар и шапка Telegram).
 DEVICES = {
@@ -41,8 +44,9 @@ TG_STUB = """
   const noopObj = new Proxy({}, { get: (t, p) => (...a) => { log('noop.' + String(p), a); return noopObj; } });
   const base = {
     initData: %INITDATA%, initDataUnsafe: { user: %USER%, start_param: null },
-    version: '8.0', platform: 'android', colorScheme: 'dark', themeParams: {}, isExpanded: true,
-    viewportHeight: innerHeight, viewportStableHeight: innerHeight,
+    version: '8.0', platform: 'android', colorScheme: '%SCHEME%', themeParams: %THEMEPARAMS%, isExpanded: true,
+    get viewportHeight() { return innerHeight; }, get viewportStableHeight() { return innerHeight; },
+    isVersionAtLeast() { return true; },
     ready() {}, expand() {}, close() { log('close'); },
     BackButton, MainButton: noopObj, SecondaryButton: noopObj, SettingsButton: noopObj,
     HapticFeedback: noopObj, CloudStorage: noopObj,
@@ -93,6 +97,19 @@ DEEP_SCREENS = [("thread-draft", "#/thread/qa-t1"), ("thread-long", "#/thread/qa
                 ("thread-new", "#/thread/qa-t6"), ("thread-answered", "#/thread/qa-t4"), ("client", "#/client/klausm.%40example.invalid"), ("review", "#/review/1")]
 
 
+THEME_PARAMS = {
+    "dark": {"bg_color": "#212d3b", "text_color": "#ffffff", "hint_color": "#7d8b99", "link_color": "#5eabe1",
+             "button_color": "#5288c1", "button_text_color": "#ffffff", "secondary_bg_color": "#151e27"},
+    "light": {"bg_color": "#ffffff", "text_color": "#000000", "hint_color": "#999999", "link_color": "#2481cc",
+              "button_color": "#2481cc", "button_text_color": "#ffffff", "secondary_bg_color": "#efeff3"},
+}
+
+
+def stub_js():
+    return (TG_STUB.replace("%INITDATA%", json.dumps(initdata.make())).replace("%USER%", json.dumps(initdata.USER))
+            .replace("%SCHEME%", THEME).replace("%THEMEPARAMS%", json.dumps(THEME_PARAMS[THEME])))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     results = {}
@@ -113,9 +130,9 @@ def run_device(browser, dev, d):
     shots.mkdir(parents=True, exist_ok=True)
     ctx = browser.new_context(viewport={"width": d["w"], "height": d["h"]}, device_scale_factor=1,
                               is_mobile=True, has_touch=True, locale="ru-RU", timezone_id="Europe/Berlin",
-                              color_scheme="dark")
+                              color_scheme=THEME)
     ev = {"errors": [], "http": [], "nonget": [], "dialogs": []}
-    stub = TG_STUB.replace("%INITDATA%", json.dumps(initdata.make())).replace("%USER%", json.dumps(initdata.USER))
+    stub = stub_js()
     ctx.route("https://telegram.org/js/telegram-web-app.js*",
               lambda r: r.fulfill(status=200, content_type="application/javascript", body=stub))
     cors = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "*"}
@@ -127,13 +144,22 @@ def run_device(browser, dev, d):
             return route.fulfill(status=204, headers=cors)
         if req.method != "GET":
             ev["nonget"].append({"method": req.method, "path": path, "body": (req.post_data or "")[:300], "screen": cur["s"]})
-            return route.fulfill(status=200, headers=cors, content_type="application/json", body='{"ok":true}')
-        r = urllib.request.Request(f"http://127.0.0.1:{API_PORT}{path}", headers={"X-Telegram-Init-Data": initdata.make()})
+            # QA_POST_PASS=1: не-GET идут в СИНТЕТИЧЕСКИЙ бэкенд (выдуманная БД, send_mode=disabled, SMTP/IMAP/Telegram
+            # заглушены в serve.py) — кроме scout (живой скрапинг сайта); иначе фейк 200.
+            if not (POST_PASS and "/scout/" not in path):
+                return route.fulfill(status=200, headers=cors, content_type="application/json", body='{"ok":true}')
+        r = urllib.request.Request(f"http://127.0.0.1:{API_PORT}{path}", method=req.method,
+                                   data=req.post_data_buffer if req.method != "GET" else None,
+                                   headers={"X-Telegram-Init-Data": initdata.make(),
+                                            "Content-Type": req.headers.get("content-type", "application/json")})
         try:
             with urllib.request.urlopen(r, timeout=20) as resp:
                 body, status = resp.read(), resp.status
         except urllib.error.HTTPError as e:
             body, status = e.read(), e.code
+        if req.method != "GET":
+            ev["nonget"][-1]["status"] = status
+            ev["nonget"][-1]["resp"] = body[:200].decode("utf-8", "replace")
         if status >= 400:
             ev["http"].append({"status": status, "path": path, "body": body[:200].decode("utf-8", "replace"), "screen": cur["s"]})
         route.fulfill(status=status, headers=cors, content_type="application/json", body=body)

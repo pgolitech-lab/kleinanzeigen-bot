@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
 import initdata  # noqa: E402
-from run import TG_STUB  # noqa: E402
+from run import stub_js  # noqa: E402
 
 STATIC, API_PORT = sys.argv[1].rstrip("/"), int(sys.argv[2])
 ALLOWED = ("127.0.0.1", "cdn.jsdelivr.net", "telegram.org", "fonts.googleapis.com", "fonts.gstatic.com",
@@ -34,7 +34,7 @@ def main():
     with sync_playwright() as p:
         br = p.chromium.launch(headless=True, args=["--disable-dev-shm-usage"])
         ctx = br.new_context(viewport={"width": 412, "height": 860}, is_mobile=True, has_touch=True)
-        stub = TG_STUB.replace("%INITDATA%", json.dumps(initdata.make())).replace("%USER%", json.dumps(initdata.USER))
+        stub = stub_js()
         ctx.route("https://telegram.org/js/telegram-web-app.js*",
                   lambda r: r.fulfill(status=200, content_type="application/javascript", body=stub))
         log = {"hosts": [], "blocked": [], "console": []}
