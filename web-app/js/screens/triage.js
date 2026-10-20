@@ -85,7 +85,7 @@ export async function render(mount) {
   function progress() {
     const p = el(`<div class="tr-prog"><b></b><span></span><div class="tr-bar"><i></i></div></div>`);
     const doneN = total - queue.length;
-    p.querySelector("b").textContent = `${queue.length} ждут ответа`;
+    p.querySelector("b").textContent = `${queue.length} с готовым черновиком`;
     p.querySelector("span").textContent = `${Math.min(doneN + 1, total)} из ${total}`;
     p.querySelector("i").style.width = `${total ? (doneN / total) * 100 : 100}%`;
     return p;

@@ -387,6 +387,23 @@ function renderThread(mount, params, data, opts = {}) {
     const de = card.querySelector(".d2-de"), ru = card.querySelector(".d2-ru");
     de.value = lastDe;
     ru.value = lastRu;
+    // «Назад» не должно терять набранное: правка живёт в sessionStorage, пока черновик на сервере тот же
+    const DKEY = `kab:draft:${msgId}`;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(DKEY) ?? "null");
+      if (saved && saved.baseDe === lastDe && saved.baseRu === lastRu && (saved.de !== lastDe || saved.ru !== lastRu)) {
+        de.value = saved.de; ru.value = saved.ru;
+        toast("Вернул вашу несохранённую правку");
+      }
+    } catch (e) { /* хранилище недоступно — без автосохранения */ }
+    const keep = () => {
+      try {
+        if (de.value === lastDe && ru.value === lastRu) sessionStorage.removeItem(DKEY);
+        else sessionStorage.setItem(DKEY, JSON.stringify({ de: de.value, ru: ru.value, baseDe: lastDe, baseRu: lastRu }));
+      } catch (e) { /* ignore */ }
+    };
+    de.addEventListener("input", keep);
+    ru.addEventListener("input", keep);
     const badgeSlot = card.querySelector(".d2-badge");
     const paintBadge = () => {
       const bad = wrongLangForClient(de.value, clientLang);
@@ -443,6 +460,7 @@ function renderThread(mount, params, data, opts = {}) {
     review.draft = fresh.draft;
     lastDe = fresh.draft.de_answer ?? "";
     lastRu = fresh.draft.ru_answer ?? "";
+    try { sessionStorage.removeItem(`kab:draft:${msgId}`); } catch (e) { /* ignore */ }
     if (draftBox) {
       const de = draftBox.querySelector(".d2-de"), ru = draftBox.querySelector(".d2-ru");
       de.value = lastDe;
@@ -741,6 +759,7 @@ function renderThread(mount, params, data, opts = {}) {
         const res = await postSend(msgId, {force: blocked && allowCb.checked === true});
         closeSheet();
         announceSend(res, msgId, () => { if (mount.isConnected) render(mount, {...params, focus_msg_id: null}); });
+        try { sessionStorage.removeItem(`kab:draft:${msgId}`); } catch (e) { /* ignore */ }
         render(mount, {...params, focus_msg_id: null}, {sendResult: res ?? {}});
       } catch (e) {
         if (e.status === 409 && /уже отправлено/i.test(e.message)) {

@@ -1,7 +1,7 @@
 // Отправка с окном «Отменить» (5 с). Сервер ставит письмо в очередь (delay_sec),
 // отмена — POST /send/{id}/cancel; поздно — 409 «уже отправляется».
 import { api } from "../api.js";
-import { sendOutcome } from "../utils.js";
+import { el, sendOutcome } from "../utils.js";
 import { toast } from "./kit.js";
 
 export const UNDO_SEC = 5;
@@ -19,20 +19,30 @@ export function announceSend(res, msgId, onCancelled) {
     toast(o.text, { level: o.level === "bad" ? "bad" : "", ms: 4500 });
     return o;
   }
-  toast(`⏳ Уйдёт клиенту через ${UNDO_SEC} с`, {
-    ms: UNDO_SEC * 1000,
-    action: {
-      label: "Отменить",
-      onClick: async () => {
-        try {
-          await api(`/api/ma/send/${res.job_id ?? msgId}/cancel`, { method: "POST" });
-          toast("↩ Отменено — черновик вернулся", { ms: 3500 });
-          onCancelled?.();
-        } catch (e) {
-          toast(e.message ?? "Не удалось отменить — письмо уже ушло", { level: "bad", ms: 5000 });
-        }
-      },
-    },
+  // отдельная полоса сверху: обычные тосты («Черновик изменился», ошибки) её не гасят
+  document.querySelectorAll(".undo-bar").forEach(x => x.remove());
+  const bar = el(`<div class="undo-bar" role="status"><span class="ub-t"></span><button type="button" class="ta">Отменить</button></div>`);
+  const label = bar.querySelector(".ub-t");
+  let left = UNDO_SEC;
+  const paint = () => { label.textContent = `⏳ Уйдёт клиенту через ${left} с`; };
+  paint();
+  const timer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) { clearInterval(timer); bar.remove(); } else paint();
+  }, 1000);
+  bar.querySelector(".ta").addEventListener("click", async ev => {
+    ev.currentTarget.disabled = true;
+    clearInterval(timer);
+    try {
+      await api(`/api/ma/send/${res.job_id ?? msgId}/cancel`, { method: "POST" });
+      bar.remove();
+      toast("↩ Отменено — черновик вернулся", { ms: 3500 });
+      onCancelled?.();
+    } catch (e) {
+      bar.remove();
+      toast(e.message ?? "Не удалось отменить — письмо уже ушло", { level: "bad", ms: 5000 });
+    }
   });
+  (document.getElementById("shell") ?? document.body).appendChild(bar);
   return sendOutcome(res);
 }

@@ -20,7 +20,7 @@ const GROUPS = [
     ["debug_email", "Тестовый адрес (для режима «на тестовый адрес»)", "text"],
   ]],
   ["Почта", [
-    ["polling_paused", "Пауза приёма писем", "check"],
+    ["polling_paused", "Принимать письма", "check-inv"],
     ["gmail_poll_interval_sec", "Проверять почту каждые, сек", "number"],
     ["inquiry_max_age_days", "Не отвечать на письма старше, дней", "number"],
     ["gmail_from_filter", "Фильтр отправителя (служебное)", "text"],
@@ -88,12 +88,13 @@ export async function render(mount) {
         sec.appendChild(box);
         return;
       }
-      if (kind === "check") {
+      if (kind === "check" || kind === "check-inv") {
+        const inv = kind === "check-inv";   // ключ хранит «пауза»: тумблер «принимать» = наоборот
         const t = el(`<label class="tgl"><span class="tgl-l"></span><input type="checkbox" role="switch"><span class="tgl-s"></span></label>`);
         t.querySelector(".tgl-l").textContent = label;
         const cb = t.querySelector("input");
-        cb.checked = raw === "1";
-        cb.addEventListener("change", () => set(key, cb.checked ? "1" : "0"));
+        cb.checked = inv ? raw !== "1" : raw === "1";
+        cb.addEventListener("change", () => set(key, (inv ? !cb.checked : cb.checked) ? "1" : "0"));
         sec.appendChild(t);
         return;
       }
