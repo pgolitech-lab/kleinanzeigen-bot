@@ -1,6 +1,7 @@
 # Продажи, детекции, уроки оператора.
 # Выделено из database.py.
 
+import logging
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -8,6 +9,8 @@ from typing import Any, Optional
 
 from database import DB_PATH, get_conn, get_thread_autopilot, stop_thread_autopilot, transaction
 from modules.db_threads import close_thread
+
+logger = logging.getLogger(__name__)
 
 
 def mark_ad_sold(ad_id: str, sold: bool = True) -> None:
@@ -380,6 +383,15 @@ def accept_detected_bulk(min_confidence: str = "high") -> dict[str, Any]:
     return {"applied": applied, "skipped": skipped}
 
 
+def _close_sold_threads(conn: sqlite3.Connection, thread_ids: list[str]) -> None:
+    """Остановить автопилот и закрыть треды как проданные (в транзакции вызывающего)."""
+    for t in thread_ids:
+        ap = get_thread_autopilot(t)
+        if ap and ap["active"]:
+            stop_thread_autopilot(t, "sold")
+        close_thread(t, closed_by="sold")
+
+
 def mark_thread_sold(
     msg_id: int,
     sold_price_eur: float,
@@ -388,17 +400,20 @@ def mark_thread_sold(
     """Зафиксировать продажу и свернуть тред.
 
     Поведение:
-      - msg_id → status='skipped_sold', sold_price_eur=<price>.
+      - msg_id → status='skipped_sold', sold_price_eur=<price>, sold_at=now.
       - Все pending in-rows этого же gmail_thread_id → status='skipped_sold' (без цены).
-      - Если автопилот треда активен → stop_thread_autopilot(reason='sold').
-      - close_other_threads_for_ad=True → то же самое (без цены) для ВСЕХ других
-        тредов с тем же ad_id, у которых есть pending in-rows.
-      - mark_ad_sold НЕ зовётся — товар может быть продан повторно следующему клиенту.
+      - Если автопилот треда активен → stop_thread_autopilot(reason='sold'); тред закрыт.
+      - Найденная продажа по треду, ждущая ревью, снимается.
+      - Склад: inventory.record_sale(source='thread') — после транзакции; ошибка склада
+        продажу НЕ откатывает (logger.exception, джоб inventory_sync догонит).
+      - close_other_threads_for_ad=True → другие треды с тем же ad_id (pending) тоже
+        сворачиваются, но ТОЛЬКО если склад говорит «нет в наличии» (out_of_stock):
+        иначе товар ещё есть и другим покупателям можно продавать.
+      - mark_ad_sold НЕ зовётся — ad_briefs.sold_at больше не источник правды.
 
-    Возвращает {"thread_id": ..., "ad_id": ..., "closed_other_threads": [thread_ids]}.
-
-    Всё — одна транзакция (BEGIN IMMEDIATE): при сбое посередине не остаётся
-    «продано, но тред открыт / автопилот работает».
+    Возвращает {"thread_id", "ad_id", "closed_other_threads": [...], "stock": {...}|None}.
+    stock — {qty_after, stock_tracked, product_id} от склада или None, если склад
+    недоступен/товар не найден.
     """
     with transaction() as conn:
         src = conn.execute(
@@ -420,45 +435,59 @@ def mark_thread_sold(
                 "WHERE gmail_thread_id=? AND direction='in' AND status='pending'",
                 (thread_id,),
             )
-
-        closed_other: list[str] = []
-        if close_other_threads_for_ad and ad_id:
-            other = conn.execute(
-                "SELECT DISTINCT gmail_thread_id FROM messages "
-                "WHERE ad_id=? AND direction='in' AND status='pending' "
-                "AND gmail_thread_id != ?",
-                (ad_id, thread_id),
-            ).fetchall()
-            closed_other = [r["gmail_thread_id"] for r in other if r["gmail_thread_id"]]
-            for other_thread in closed_other:
-                conn.execute(
-                    "UPDATE messages SET status='skipped_sold' "
-                    "WHERE gmail_thread_id=? AND direction='in' AND status='pending'",
-                    (other_thread,),
-                )
-
-        # Найденная продажа по этому треду, ещё ждущая ревью, — уже не нужна:
-        # продажа зафиксирована оператором (иначе висела бы в списке «найденных»).
-        # rejected_at, а не applied_at: applied_at означает «продажа пришла из
-        # детекции» (source='detected' в list_sales), а здесь её поставил оператор.
-        if thread_id:
+            # Найденная продажа по этому треду, ещё ждущая ревью, — уже не нужна.
+            # rejected_at, а не applied_at: applied_at означает «продажа пришла из
+            # детекции» (source='detected' в list_sales), а здесь её поставил оператор.
             conn.execute(
                 "UPDATE detected_sales SET rejected_at = ? "
                 "WHERE gmail_thread_id = ? AND applied_at IS NULL AND rejected_at IS NULL",
                 (now_iso, thread_id),
             )
+            _close_sold_threads(conn, [thread_id])
 
-        # Остановить автопилоты + закрыть треды — в той же транзакции.
-        for t in ([thread_id] if thread_id else []) + closed_other:
-            ap = get_thread_autopilot(t)
-            if ap and ap["active"]:
-                stop_thread_autopilot(t, "sold")
-            close_thread(t, closed_by="sold")
+    # Склад — после коммита продажи: его сбой не должен её откатить.
+    stock: Optional[dict[str, Any]] = None
+    try:
+        from modules import inventory
+        res = inventory.record_sale(
+            price_eur=float(sold_price_eur), gmail_thread_id=thread_id or None,
+            ad_id=ad_id or None, message_id=msg_id, source="thread",
+        )
+        if res.get("product_id") is not None:
+            stock = {"product_id": res["product_id"], "qty_after": res.get("qty_after"),
+                     "stock_tracked": res.get("stock_tracked")}
+    except Exception:
+        logger.exception("mark_thread_sold: склад не записал продажу msg=%s (догонит sync)", msg_id)
+
+    closed_other: list[str] = []
+    if close_other_threads_for_ad and ad_id:
+        from modules import inventory
+        ctx = inventory.ad_context_safe(ad_id)
+        if ctx.get("stock") == "out_of_stock":
+            with transaction() as conn:
+                other = conn.execute(
+                    "SELECT DISTINCT gmail_thread_id FROM messages "
+                    "WHERE ad_id=? AND direction='in' AND status='pending' "
+                    "AND gmail_thread_id != ?",
+                    (ad_id, thread_id),
+                ).fetchall()
+                closed_other = [r["gmail_thread_id"] for r in other if r["gmail_thread_id"]]
+                for other_thread in closed_other:
+                    conn.execute(
+                        "UPDATE messages SET status='skipped_sold' "
+                        "WHERE gmail_thread_id=? AND direction='in' AND status='pending'",
+                        (other_thread,),
+                    )
+                _close_sold_threads(conn, closed_other)
+        else:
+            logger.info("mark_thread_sold: другие треды по %s не закрыты — склад: %s",
+                        ad_id, "ошибка" if ctx.get("error") else ctx.get("stock"))
 
     return {
         "thread_id": thread_id,
         "ad_id": ad_id,
         "closed_other_threads": closed_other,
+        "stock": stock,
     }
 
 
