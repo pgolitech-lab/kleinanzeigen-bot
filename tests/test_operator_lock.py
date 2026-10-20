@@ -102,3 +102,13 @@ def test_try_acquire_refreshes_own_lock():
     assert operator_lock.try_acquire(778, "@a") is None
     assert operator_lock.try_acquire(778, "@b") == "@a"
     operator_lock.forget(778)
+
+
+def test_forget_if_owner_keeps_foreign_lock():
+    operator_lock.forget(779)
+    operator_lock.remember(779, "@a")
+    assert operator_lock.forget_if_owner(779, "@b") is False
+    assert operator_lock.state(779)[0] == "@a"
+    assert operator_lock.forget_if_owner(779, "@a") is True
+    assert operator_lock.state(779) is None
+    assert operator_lock.forget_if_owner(779, "@b") is True  # лока нет — снимать нечего

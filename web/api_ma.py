@@ -37,6 +37,7 @@ router = APIRouter(prefix="/api/ma", tags=["Mini App"])
 logger = logging.getLogger(__name__)
 
 _CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
+_SENT_STATUSES = frozenset(db.SENT_STATUSES)  # ушло клиенту (в т.ч. sent_external — с сайта)
 # Строка уже отвечена/закрыта: перезапись черновика затёрла бы отправленный клиенту текст
 # (инцидент аудита №45: «Предложить» переводил sent → edited и затирал de_answer).
 _ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "skipped_sold", "archived"}
@@ -251,7 +252,10 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
         "account_email": account["gmail_email"] if account is not None else None,
         "is_autopilot": is_autopilot,
     }
-    events = [_event_to_api(e) for e in db.thread_events(thread_id)]
+    # В ленте — только реально ушедшее; черновик показывается в своей карточке, а не
+    # зелёным «нашим ответом» (QA B-02: db.thread_events отдаёт и pending/edited как out)
+    events = [ev for ev in (_event_to_api(e) for e in db.thread_events(thread_id))
+              if ev["kind"] != "out" or ev["status"] in _SENT_STATUSES]
     related = _related(
         last_in["buyer_name"] if "buyer_name" in last_in.keys() else None,
         last_in["buyer_display_name"], exclude_thread_id=thread_id,
@@ -575,11 +579,12 @@ def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> 
 
 @router.post("/messages/{msg_id}/lock/release", status_code=204)
 def ma_lock_release(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> None:
-    """Release lock. Permissive — does not check holder."""
+    """Снять СВОЙ лок. Лок другого оператора не трогаем (204 всё равно — экран просто уходит)."""
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
-    telegram_bot._release_lock(msg_id)
+    if not telegram_bot._release_lock(msg_id, actor_from_user(user)):
+        logger.info("lock/release msg=%s: лок держит другой оператор — не снимаем", msg_id)
     return None
 
 
@@ -596,8 +601,9 @@ async def ma_lock_release_beacon(msg_id: int, request: Request) -> None:
     """
     raw = (await request.body()).decode("utf-8", "replace").strip()
     # HMAC + чтение настроек и БД — не в event loop
-    await run_in_threadpool(verify_init_data, raw)  # 401/403 если протух/чужой — ответ beacon клиент игнорит
-    await run_in_threadpool(telegram_bot._release_lock, msg_id)
+    user = await run_in_threadpool(verify_init_data, raw)  # 401/403 если протух/чужой — ответ beacon клиент игнорит
+    # Только свой лок: закрытие MA у одного оператора не снимает лок другого
+    await run_in_threadpool(telegram_bot._release_lock, msg_id, actor_from_user(user))
     return None
 
 
@@ -1483,7 +1489,7 @@ ALLOWED_SETTING_KEYS = {
     "inquiry_max_age_days",
     "reminders_enabled", "reminder_after_days",
     "polling_paused",
-    "telegram_authorized", "telegram_operator_dm_ids",
+    "telegram_authorized", "telegram_operator_dm_ids", "telegram_admin_chat_id",
     "max_discount_percent",
     "claude_model", "system_prompt",
     "chat_font_em", "chat_padding_v_rem", "chat_padding_h_rem",
@@ -1595,6 +1601,11 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
             "SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
             "AND date(COALESCE(sent_at, created_at))=date('now')"
         ).fetchone()["c"]
+        # Реплики продавца, написанные на сайте Kleinanzeigen (импорт) — не «отправил бот»
+        sent_external_today = conn.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE status='sent_external' "
+            "AND date(COALESCE(sent_at, created_at))=date('now')"
+        ).fetchone()["c"]
         sold_today = conn.execute(
             "SELECT COUNT(*) AS c FROM ad_briefs WHERE sold_at IS NOT NULL "
             "AND date(sold_at)=date('now')"
@@ -1641,7 +1652,8 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     return {
         "pipeline": {"red": red, "green": green, "drafts": drafts,
                      "autopilot_active": ap_active},
-        "today": {"new": new_today, "sent": sent_today, "sold": sold_today},
+        "today": {"new": new_today, "sent": sent_today, "sent_external": sent_external_today,
+                  "sold": sold_today},
         "api_balance": {"snapshot_usd": snapshot_usd, "remaining_usd": remaining,
                         "burn_per_day_usd": burn_per_day, "days_remaining": days_remaining},
         "sales_7d": _sales_window(7),
