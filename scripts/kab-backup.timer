@@ -1,0 +1,11 @@
+[Unit]
+Description=Run kleinanzeigen-bot DB backup nightly at 03:30
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# NUC был выключен в 03:30 — догнать при включении
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

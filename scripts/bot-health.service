@@ -7,3 +7,5 @@ Type=oneshot
 User=pg
 WorkingDirectory=/home/pg/kleinanzeigen-bot
 ExecStart=/home/pg/kleinanzeigen-bot/scripts/bot_health.sh
+# 3 попытки /health по 10 с + рестарт + self-heal туннеля (до ~6 мин в худшем случае)
+TimeoutStartSec=600

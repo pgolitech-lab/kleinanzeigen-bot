@@ -32,6 +32,21 @@ SyslogIdentifier=kleinanzeigen-bot
 
 # Не буферизовать stdout/stderr — логи появляются в journalctl сразу
 Environment=PYTHONUNBUFFERED=1
+# LLM идёт через подписку: бот запускает Claude Code CLI (~/.local/bin/claude).
+# У системных юнитов PATH без ~/.local/bin (modules/llm.py имеет запасной путь, но PATH
+# нужен и самому claude CLI для его дочерних процессов). Остальное — дефолтный PATH systemd.
+Environment=HOME=/home/pg
+Environment=PATH=/home/pg/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Лимит памяти на весь cgroup: сам бот (~60–200 МБ) + Chromium Playwright (scout,
+# parse_ad: 300–600 МБ) + процессы claude CLI (~300 МБ каждый, бывают параллельно).
+# MemoryHigh — мягкий порог: ядро начинает поджимать память (тормозит, но не убивает);
+# держим его близко к Max, чтобы «душение» не делало /health медленным → рестарт watchdog'ом.
+# MemoryMax — жёсткий: OOM-killer внутри cgroup, а не по всему NUC (туннель, ssh живы);
+# дальше OOMPolicy=continue + Restart=always поднимут бота. Пик за неделю — см.
+# `systemctl show kleinanzeigen-bot -p MemoryPeak` (на 2026-10-20: 186 МБ).
+MemoryHigh=2800M
+MemoryMax=3G
 
 [Install]
 WantedBy=multi-user.target
