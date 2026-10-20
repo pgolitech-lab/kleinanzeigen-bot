@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
@@ -244,6 +244,10 @@ def waiting_threads(threads: Optional[list] = None) -> list:
     return [t for t in rows if _safe(t, "last_event_kind") == "in"]
 
 
+def _short_name(msg: Any, limit: int = 10) -> str:
+    return _oneline(_safe(msg, "buyer_display_name") or _safe(msg, "buyer_name") or "клиент", limit)
+
+
 def _review_kb(msg: Any) -> dict:
     """Карточка письма: ответить (MA сразу на черновике) · пропустить (одним тапом, с возвратом) ·
     переписка · напомнить/продано (экран треда). Подписи короткие — влезают на внешний экран."""
@@ -252,7 +256,7 @@ def _review_kb(msg: Any) -> dict:
     thread_link = _ma_deep_link(f"thread_{thread_id}" if thread_id else "pipeline")
     return {"inline_keyboard": [
         [{"text": "✅ Ответить", "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
-         {"text": "⏭ Пропустить", "callback_data": f"skip:{mid}"}],
+         {"text": f"⏭ {_short_name(msg)}", "callback_data": f"skip:{mid}"}],
         [{"text": "💰 Продано", "web_app": {"url": thread_link}},
          {"text": "⏰ Напомнить", "web_app": {"url": thread_link}}],
         [{"text": "💬 Переписка", "web_app": {"url": thread_link}}],
@@ -262,6 +266,36 @@ def _review_kb(msg: Any) -> dict:
 def _oneline(text: Optional[str], limit: int) -> str:
     t = " ".join((text or "").split())
     return t if len(t) <= limit else t[:limit - 1].rstrip() + "…"
+
+
+def _gist(text: Optional[str], limit: int = 200) -> str:
+    """Суть письма: целые предложения до limit символов (вторая часть вопроса часто про цену);
+    первое предложение длиннее лимита — режем по слову."""
+    t = " ".join((text or "").split())
+    if len(t) <= limit:
+        return t
+    out = ""
+    for part in re.split(r"(?<=[.!?…])\s+", t):
+        cand = (out + " " + part).strip()
+        if len(cand) > limit:
+            break
+        out = cand
+    return out or _oneline(t, limit)
+
+
+_AMOUNT_RE = re.compile(r"(\d[\d.,]*)\s*(?:€|eur\b|euro\b|евро)|(?:€)\s*(\d[\d.,]*)", re.IGNORECASE)
+
+
+def _offered_price(letter: Optional[str], ad_price: Any) -> Optional[str]:
+    """Сумма из письма покупателя («за 300 €»), если это не цена самого объявления."""
+    ad_num = re.sub(r"\D", "", str(ad_price or "").split(",")[0].split(".")[0])
+    for m in _AMOUNT_RE.finditer(letter or ""):
+        raw = (m.group(1) or m.group(2)).rstrip(".,")
+        num = re.sub(r"[.,]\d{1,2}$", "", raw)  # копейки/центы отбрасываем
+        digits = re.sub(r"\D", "", num)
+        if digits and digits != ad_num and 0 < int(digits) < 1_000_000:
+            return f"{int(digits)} €"
+    return None
 
 
 def _build_review_text(msg: Any) -> str:
@@ -282,8 +316,11 @@ def _build_review_text(msg: Any) -> str:
     price = _safe(msg, "ad_price")
     ad_line = "🏷 " + _html(_oneline(_safe(msg, "ad_title") or "—", 40)) + (f" · {_html(str(price))}" if price else "")
     # По-русски: перевод уже есть к моменту уведомления; немецкий — только если перевода нет
-    letter = _oneline(_safe(msg, "ru_client") or _safe(msg, "de_client"), 160)
-    lines = [head, ad_line, f"«{_html(letter)}»"]
+    raw_letter = _safe(msg, "ru_client") or _safe(msg, "de_client")
+    lines = [head, ad_line, f"«{_html(_gist(raw_letter))}»"]
+    offer = _offered_price(f"{_safe(msg, 'de_client') or ''} {_safe(msg, 'ru_client') or ''}", price)
+    if offer:
+        lines.append(f"💶 предлагает {offer}")
     if _safe(msg, "is_hot"):
         reason = _oneline(_safe(msg, "hot_reason"), 60)
         lines.insert(0, "🔥 <b>горячий покупатель</b>" + (f": {_html(reason)}" if reason else ""))
@@ -313,7 +350,8 @@ def quiet_now(now: Optional[datetime] = None) -> bool:
 
 
 def notify(text: str, start_param: Optional[str] = None,
-           label: str = "📋 Открыть в MA", kind: str = "notify", urgent: bool = False) -> dict[str, Any]:
+           label: str = "📋 Открыть в MA", kind: str = "notify", urgent: bool = False,
+           markup: Optional[dict] = None) -> dict[str, Any]:
     """Универсальное уведомление операторам: текст + (если задан target) кнопка «Открыть».
     В тихие часы — без звука, кроме urgent (горячий покупатель, продажа, угроза).
     Не доставлено ни одному — RuntimeError (см. _http_post)."""
@@ -325,7 +363,9 @@ def notify(text: str, start_param: Optional[str] = None,
         "disable_notification": (not urgent) and quiet_now(),
         "_kind": kind,
     }
-    if start_param:
+    if markup:
+        payload["reply_markup"] = markup
+    elif start_param:
         payload["reply_markup"] = _open_kb(start_param, label)
     return _http_post("sendMessage", payload)
 
@@ -579,6 +619,7 @@ def _card_put(thread_id: str, text: str, start_param: str, label: str, *, kind: 
 
 # ---- Напоминания пачкой ----
 
+REMINDER_BATCH_BUTTONS = 5  # кнопок «Напомнить · имя»; остальные — через «Входящие»
 REMINDER_BATCH_LIST = 8  # строк в сводном сообщении; остальные — «и ещё N»
 
 
@@ -597,7 +638,14 @@ def send_reminder_batch(out_message_ids: list[int], days_silent: float) -> Optio
         lines.append(f"• {buyer} — {_html(_oneline(_safe(m, 'ad_title') or '—', 40))}")
     if len(rows) > REMINDER_BATCH_LIST:
         lines.append(f"…и ещё {len(rows) - REMINDER_BATCH_LIST}")
-    r = notify("\n".join(lines), "pipeline", label="📥 Входящие", kind="reminder_batch")
+    kb = []
+    for m in rows[:REMINDER_BATCH_BUTTONS]:  # по одному: тред откроется с готовым напоминанием на предпросмотр
+        tid = _safe(m, "gmail_thread_id")
+        if tid:
+            kb.append([{"text": f"⏰ Напомнить · {_short_name(m, 14)}"[:34],
+                        "web_app": {"url": _ma_deep_link(f"thread_{tid}")}}])
+    kb.append([{"text": "📥 Входящие", "web_app": {"url": _ma_deep_link("pipeline")}}])
+    r = notify("\n".join(lines), kind="reminder_batch", markup={"inline_keyboard": kb})
     return r.get("message_id") if isinstance(r, dict) else None
 
 
@@ -780,6 +828,22 @@ def _drain_deferred(thread_id: str) -> None:
 # Итог дня (джоб scheduler, 20:00 по Берлину)
 # ============================================================
 
+def _first_action(waiting: list) -> Optional[str]:
+    """Одна строка «с чего начать»: самый старый ждущий ответа (ждёт дольше всех)."""
+    import zoneinfo
+    if not waiting:
+        return None
+    t = min(waiting, key=lambda x: _safe(x, "last_event_at") or "9")
+    who = _oneline(_safe(t, "buyer_display_name") or _safe(t, "buyer_name") or "клиент", 20)
+    since = ""
+    try:
+        dt = datetime.fromisoformat(str(_safe(t, "last_event_at")).replace("Z", "")).replace(tzinfo=timezone.utc)
+        since = " с " + dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%d.%m %H:%M")
+    except (TypeError, ValueError):
+        pass
+    return f"👉 Начните с: <b>{_html(who)}</b> — {_html(_oneline(_safe(t, 'ad_title') or '—', 30))}, ждёт{since}"
+
+
 def morning_summary_text() -> Optional[str]:
     """Утренняя сводка: что ждёт сейчас, вчерашние продажи, напоминания, склад и рынок.
     None — нечего сказать (не шлём)."""
@@ -793,6 +857,9 @@ def morning_summary_text() -> Optional[str]:
     silent = [t for t in threads if t["last_event_kind"] == "out" and not t["autopilot_active"]]
     lines = ["☀️ <b>Доброе утро</b>"]
     lines.append(f"📥 Ждут ответа: <b>{len(waiting)}</b>" if waiting else "✅ Все ответы отправлены")
+    first = _first_action(waiting)
+    if first:
+        lines.append(first)
     if silent:
         lines.append(f"⏳ Ждём клиентов: {len(silent)}")
     if sales["count"]:
@@ -822,7 +889,10 @@ def send_morning_summary() -> str:
     text = morning_summary_text()
     if text is None:
         return "утренняя сводка: пусто — не отправлена"
-    notify(text, "pipeline", label="📥 Входящие", kind="morning_summary")
+    n = len(waiting_threads())
+    # «Разбор» — одна карточка за раз, самый короткий путь к ответам
+    notify(text, "triage" if n else "pipeline", label=f"✅ Разобрать {n}" if n else "📥 Входящие",
+           kind="morning_summary")
     return "утренняя сводка отправлена"
 
 
@@ -934,13 +1004,15 @@ def check_llm_login_job() -> str:
 PANEL_ROWS = 5  # тредов в панели «Входящие»; остальные — в приложении
 
 
-def _panel(threads: list) -> "tuple[str, dict]":
+def _panel(threads: list, undo: "Optional[tuple[int, str]]" = None) -> "tuple[str, dict]":
     """Одно сообщение-панель: заголовок со счётом + по треду строка (имя · суть) и под ней
     «Ответить / Пропустить»; внизу «Все входящие» и «Обновить»."""
     ts = datetime.now().strftime("%H:%M")
     waiting = waiting_threads(threads)
     pinned = sum(1 for t in waiting if _safe(t, "is_pinned"))
     kb: list = []
+    if undo:  # «Пропущено · Вернуть» — держится в панели до следующей перерисовки (тост Telegram живёт 2–3 с)
+        kb.append([{"text": f"↩ Вернуть · {_oneline(undo[1], 14)}", "callback_data": f"unskip:{undo[0]}:p"}])
     if not waiting:
         text = f"✅ <b>Никто не ждёт ответа</b>\n<i>обновлено {ts}</i>"
     else:
@@ -955,7 +1027,8 @@ def _panel(threads: list) -> "tuple[str, dict]":
             mid = _safe(t, "id")
             kb.append([{"text": f"✅ Ответить · {_oneline(_safe(t, 'buyer_display_name') or '?', 10)}"[:30],
                         "web_app": {"url": _ma_deep_link(f"review_{mid}")}},
-                       {"text": "⏭ Пропустить", "callback_data": f"skip:{mid}:p"}])
+                       {"text": f"⏭ {_oneline(_safe(t, 'buyer_display_name') or _safe(t, 'buyer_name') or '?', 10)}",
+                        "callback_data": f"skip:{mid}:p"}])
         if len(waiting) > PANEL_ROWS:
             text += f"\n\n…и ещё {len(waiting) - PANEL_ROWS} — в приложении"
     kb.append([{"text": "📥 Все входящие", "web_app": {"url": _ma_deep_link("pipeline")}},
@@ -963,11 +1036,12 @@ def _panel(threads: list) -> "tuple[str, dict]":
     return text, {"inline_keyboard": kb}
 
 
-def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None) -> int:
+def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None,
+                         undo: "Optional[tuple[int, str]]" = None) -> int:
     """/inbox (/tasks): панель «Входящие» одним сообщением. edit_msg_id → правка на месте
     (обновить/пропустить не плодят сообщений). Возвращает число ждущих (тот же счёт, что в Mini App)."""
     threads = db.pipeline_threads()
-    text, markup = _panel(threads)
+    text, markup = _panel(threads, undo)
     if edit_msg_id:
         try:
             _http_post_single("editMessageText", {
@@ -1129,7 +1203,11 @@ def _handle_skip_cb(cb: dict, data: str, chat_id: Any, cb_msg: dict) -> None:
     mid = cb_msg.get("message_id")
     try:
         if where == "p":
-            send_pending_summary(chat_id, edit_msg_id=mid)  # панель: перерисовать без пропущенного
+            undo = None
+            if kind == "skip":
+                skipped = db.get_message(msg_id)
+                undo = (msg_id, _short_name(skipped) if skipped else "письмо")
+            send_pending_summary(chat_id, edit_msg_id=mid, undo=undo)  # панель без пропущенного + «Вернуть»
         elif kind == "skip":
             _http_post_single("editMessageText", {
                 "chat_id": chat_id, "message_id": mid, "parse_mode": "HTML", "_kind": "skip",

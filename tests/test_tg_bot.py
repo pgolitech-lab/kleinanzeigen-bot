@@ -73,7 +73,7 @@ def test_review_card_in_russian_short():
     assert len(lines) <= 6 and "Скамья ещё есть" in text and "Ist die Bank" not in text
     assert "#7" not in text and "Ещё активных" not in text and "Черновик" in text
     kb = tb._review_kb(msg)["inline_keyboard"]
-    assert [b["text"] for b in kb[0]] == ["✅ Ответить", "⏭ Пропустить"]
+    assert [b["text"] for b in kb[0]] == ["✅ Ответить", "⏭ Klaus M."]
     assert kb[0][1]["callback_data"] == "skip:7" and "💬 Переписка" in [b["text"] for b in kb[2]]
 
 
@@ -297,3 +297,33 @@ def test_skip_callback_unauthorized_ignored(cfg):
     with patch.object(tb, "_http_post_single", lambda m, p: sent.append((m, p)) or {}), patch.object(tb, "db") as mdb:
         tb._handle_update({"update_id": 1, "callback_query": cb})
     assert sent == [] and not mdb.update_message.called
+
+
+def test_gist_cuts_by_sentence_and_offer_line():
+    long = "Hallo, ist die Bank noch da? " + "Ich habe lange Text. " * 12 + "Ich zahle 300 € bar."
+    g = tb._gist(long, 60)
+    assert g.endswith((".", "?")) and len(g) <= 60 and "…" not in g
+    assert tb._offered_price("Ich zahle 300 € bar", "450 €") == "300 €"
+    assert tb._offered_price("Preis 450 € ok?", "450 €") is None
+    msg = _row(id=7, gmail_thread_id="t1", buyer_display_name="Klaus", buyer_name="k@x", client_lang="de",
+               ad_title="Bank", ad_price="450 €", ru_client="Дам 300 €. Заберу завтра.", de_client="Ich gebe 300 €.",
+               ru_translation="", ru_answer="")
+    with patch.object(tb, "db") as mdb:
+        mdb.thread_history.return_value = []
+        mdb.get_thread_autopilot.return_value = None
+        text = tb._build_review_text(msg)
+        kb = tb._review_kb(msg)
+    assert "💶 предлагает 300 €" in text and kb["inline_keyboard"][0][1]["text"] == "⏭ Klaus"
+
+
+def test_morning_summary_action_line_and_review_button(cfg):
+    sent = []
+    t = _row(id=5, last_event_kind="in", buyer_display_name="Piotr", buyer_name="p", ad_title="Bank",
+             last_event_at="2026-10-20T07:33:00", autopilot_active=0)
+    with patch.object(tb, "db") as mdb, patch.object(tb, "_http_post", lambda m, p: sent.append(p) or {}):
+        mdb.pipeline_threads.return_value = [t]
+        mdb.sales_summary.return_value = {"count": 0, "total_eur": 0}
+        tb.send_morning_summary()
+    assert "Начните с: <b>Piotr</b>" in sent[0]["text"] and "09:33" in sent[0]["text"]
+    btn = sent[0]["reply_markup"]["inline_keyboard"][0][0]
+    assert btn["text"] == "✅ Разобрать 1" and "tgWebAppStartParam=triage" in btn["web_app"]["url"]
