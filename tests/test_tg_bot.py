@@ -327,3 +327,30 @@ def test_morning_summary_action_line_and_review_button(cfg):
     assert "Начните с: <b>Piotr</b>" in sent[0]["text"] and "09:33" in sent[0]["text"]
     btn = sent[0]["reply_markup"]["inline_keyboard"][0][0]
     assert btn["text"] == "✅ Разобрать 1" and "tgWebAppStartParam=triage" in btn["web_app"]["url"]
+
+
+def test_reminder_batch_marks_only_shown(tmp_path, monkeypatch):
+    import database, scheduler
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "r.db")
+    database.init_db()
+    acc = database.add_account("a", "a@gmail.com", "pw")
+    ids = [database.add_message(acc, "in", gmail_thread_id=f"R{i}", de_client="x", status="sent",
+                                buyer_display_name=f"K{i}", ad_title="Tür") for i in range(10)]
+    monkeypatch.setattr(scheduler.config, "reminders_enabled", lambda: True)
+    monkeypatch.setattr(scheduler.db, "find_reminder_candidates", lambda after_days: [{"id": i} for i in ids])
+    monkeypatch.setattr(tb, "notify", lambda *a, **k: {"message_id": 1})
+    scheduler.check_reminders()
+    states = [database.get_message(i)["reminder_state"] for i in ids]
+    assert states.count("offered") == tb.REMINDER_BATCH_LIST and states[-1] != "offered"
+
+
+def test_summaries_label_period_and_stock_failure(tmp_path, monkeypatch):
+    import database
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "s.db")
+    database.init_db()
+    acc = database.add_account("a", "a@gmail.com", "pw")
+    database.add_message(acc, "in", gmail_thread_id="T", de_client="Hallo", status="pending")
+    from modules import inventory
+    monkeypatch.setattr(inventory, "summary_text", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    text = tb.evening_summary_text()
+    assert "Продано сегодня" in text and "склад: нет данных" in text
