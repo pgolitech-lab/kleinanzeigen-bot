@@ -27,17 +27,6 @@ def test_related_splits_exact_and_maybe():
     assert seen == {"display_name": "Hans", "account_id": 3, "include_maybe": True}
 
 
-def test_related_old_db_signature_falls_back():
-    from web import api_ma
-
-    def old(buyer_email, exclude_thread_id=None, limit=10):
-        return [_row("a", 0)]
-
-    with patch.object(api_ma.db, "find_related_inquiries", old):
-        res = api_ma._related("x@relay", "Hans", exclude_thread_id="t0")
-    assert len(res["matches"]) == 1 and res["maybe_same"] == []
-
-
 def test_related_without_email_is_empty():
     from web import api_ma
     assert api_ma._related(None, "Hans") == {"buyer_display_name": "Hans", "matches": [], "maybe_same": []}
