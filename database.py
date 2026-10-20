@@ -295,6 +295,9 @@ def init_db() -> None:
         _add_column_if_missing(conn, "messages", "reminder_snooze_until", "TEXT")
         # ad_briefs.sold_at — пометка что товар продан, новые inquiries по этому ad_id скипнутся.
         _add_column_if_missing(conn, "ad_briefs", "sold_at", "TEXT")
+        # Минимальная цена на объявление (€), ниже которой не уступаем. Ставит
+        # оператор; llm берёт в guardrails.reconcile_floor. NULL — не задана.
+        _add_column_if_missing(conn, "ad_briefs", "min_price_eur", "REAL")
         # Auto-ack: per-account toggle (накрутка метрики «отвечает в течение X часов»).
         _add_column_if_missing(conn, "accounts", "auto_ack_enabled", "INTEGER NOT NULL DEFAULT 0")
         # is_auto_ack=1 у row которая является авто-приветствием (чтобы отличать от
@@ -1040,6 +1043,10 @@ from modules.db_sales import (  # noqa: F401
     mark_ad_sold,
     is_ad_sold,
     list_sales,
+    sales_summary,
+    berlin_day_bounds_utc,
+    accept_detected_bulk,
+    set_ad_min_price,
     record_detection,
     list_pending_detections,
     apply_detection_to_messages,

@@ -2,7 +2,8 @@
 # Выделено из database.py.
 
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
 from database import DB_PATH, get_conn, get_thread_autopilot, stop_thread_autopilot, transaction
@@ -40,6 +41,56 @@ def is_ad_sold(ad_id: str) -> bool:
     return bool(row and row["sold_at"])
 
 
+def set_ad_min_price(ad_id: str, min_price_eur: Optional[float]) -> None:
+    """Задать (или снять None) минимальную цену объявления. Нет брифа — stub."""
+    if not ad_id:
+        return
+    val = float(min_price_eur) if min_price_eur is not None else None
+    if val is not None and val < 0:
+        raise ValueError("min_price_eur < 0")
+    ts = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO ad_briefs (ad_id, brief_md, min_price_eur, created_at, updated_at) "
+            "VALUES (?, '', ?, ?, ?) "
+            "ON CONFLICT(ad_id) DO UPDATE SET min_price_eur = excluded.min_price_eur, "
+            "updated_at = excluded.updated_at",
+            (ad_id, val, ts, ts),
+        )
+
+
+# --- ПРОДАЖИ: единый источник ---
+#
+# Продажа = строка messages со status='skipped_sold' И sold_price_eur (по одной на
+# тред). Так пишут все три пути: mark_thread_sold (кнопка «Продано» в треде),
+# add_manual_sale (сделка вне бота, тред 'manual-…'), apply_detection_to_messages
+# (подтверждённая найденная продажа). ad_briefs.sold_at — НЕ продажа, а флаг
+# «объявление снято, новые запросы авто-skip» — для подсчёта продаж не годится.
+
+BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def berlin_day_bounds_utc(day: "date | str") -> tuple[str, str]:
+    """Границы календарного дня по Берлину как naive-UTC ISO [from, to) — в том
+    формате, в каком в БД лежат sold_at/created_at (datetime.utcnow().isoformat())."""
+    if isinstance(day, str):
+        day = date.fromisoformat(day[:10])
+    lo = datetime(day.year, day.month, day.day, tzinfo=BERLIN)
+    hi = lo + timedelta(days=1)
+    # +1 день по стене часов, а не 24 ч: переход на летнее/зимнее время
+    hi = datetime(hi.year, hi.month, hi.day, tzinfo=BERLIN)
+    to_utc = lambda d: d.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+    return to_utc(lo), to_utc(hi)
+
+
+def _sale_source_sql() -> str:
+    return (
+        "CASE WHEN m.gmail_thread_id LIKE 'manual-%' THEN 'manual' "
+        "WHEN EXISTS (SELECT 1 FROM detected_sales ds WHERE ds.gmail_thread_id = m.gmail_thread_id "
+        "AND ds.applied_at IS NOT NULL) THEN 'detected' ELSE 'thread' END"
+    )
+
+
 def list_sales(
     period_from: Optional[str] = None,
     period_to: Optional[str] = None,
@@ -54,6 +105,8 @@ def list_sales(
     query — текстовое совпадение по ad_title или buyer_display_name (LIKE %q%).
 
     Возвращает список dict-ов: одна продажа на тред (MAX sold_price_eur per thread_id).
+    source: 'thread' | 'manual' | 'detected'. Единый источник для Обзора, Продаж и
+    бота — см. sales_summary (дни по Берлину).
     """
     where: list[str] = ["m.status = 'skipped_sold'", "m.sold_price_eur IS NOT NULL"]
     args: list[Any] = []
@@ -85,7 +138,8 @@ def list_sales(
             a.name AS account_name,
             MAX(m.sold_price_eur) AS sold_price_eur,
             MAX(COALESCE(m.sold_at, m.created_at)) AS sold_at,
-            COUNT(*) AS rows_count
+            COUNT(*) AS rows_count,
+            {_sale_source_sql()} AS source
         FROM messages m
         LEFT JOIN accounts a ON a.id = m.account_id
         WHERE {where_sql}
@@ -95,6 +149,32 @@ def list_sales(
     with get_conn() as conn:
         rows = conn.execute(sql, args).fetchall()
     return [dict(r) for r in rows]
+
+
+def sales_summary(
+    since: "date | str | None" = None,
+    until: "date | str | None" = None,
+    account_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """Сводка продаж за период [since, until] — ДНИ ПО БЕРЛИНУ включительно.
+
+    since/until — 'YYYY-MM-DD' или date (полные ISO-строки тоже: берётся дата).
+    None — без границы. «Сегодня»: sales_summary(today_berlin, today_berlin).
+    Возвращает {count, total_eur, by_source: {thread, manual, detected}, sales}.
+    """
+    frm = berlin_day_bounds_utc(since)[0] if since else None
+    to = berlin_day_bounds_utc(until)[1] if until else None
+    sales = list_sales(period_from=frm, period_to=to, account_id=account_id)
+    by_source = {"thread": 0, "manual": 0, "detected": 0}
+    for r in sales:
+        by_source[r["source"]] = by_source.get(r["source"], 0) + 1
+    total = sum(float(r["sold_price_eur"]) for r in sales if r["sold_price_eur"] is not None)
+    return {"count": len(sales), "total_eur": round(total, 2),
+            "by_source": by_source, "sales": sales}
+
+
+def today_berlin() -> date:
+    return datetime.now(BERLIN).date()
 
 
 def record_detection(
@@ -267,6 +347,39 @@ def reject_detection(detection_id: int) -> None:
         )
 
 
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def accept_detected_bulk(min_confidence: str = "high") -> dict[str, Any]:
+    """Применить ВСЕ ожидающие найденные продажи с confidence ≥ min_confidence
+    одной транзакцией. Каждая — в своём savepoint: неприменимая (нет цены, нет
+    входящего в треде) пропускается с причиной, остальные применяются.
+
+    Возвращает {"applied": [{detection_id, thread_id, msg_id, price}],
+                "skipped": [{detection_id, reason}]}.
+    """
+    if min_confidence not in _CONFIDENCE_RANK:
+        raise ValueError(f"bad min_confidence: {min_confidence!r}")
+    ok = [c for c, r in _CONFIDENCE_RANK.items() if r >= _CONFIDENCE_RANK[min_confidence]]
+    applied: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    with transaction() as conn:
+        ids = [r["id"] for r in conn.execute(
+            f"SELECT id FROM detected_sales WHERE is_sale = 1 AND applied_at IS NULL "
+            f"AND rejected_at IS NULL AND confidence IN ({','.join('?' * len(ok))}) "
+            f"ORDER BY id",
+            ok,
+        ).fetchall()]
+        for det_id in ids:
+            try:
+                res = apply_detection_to_messages(det_id)
+            except ValueError as e:
+                skipped.append({"detection_id": det_id, "reason": str(e)})
+                continue
+            applied.append({"detection_id": det_id, **res})
+    return {"applied": applied, "skipped": skipped}
+
+
 def mark_thread_sold(
     msg_id: int,
     sold_price_eur: float,
@@ -323,6 +436,17 @@ def mark_thread_sold(
                     "WHERE gmail_thread_id=? AND direction='in' AND status='pending'",
                     (other_thread,),
                 )
+
+        # Найденная продажа по этому треду, ещё ждущая ревью, — уже не нужна:
+        # продажа зафиксирована оператором (иначе висела бы в списке «найденных»).
+        # rejected_at, а не applied_at: applied_at означает «продажа пришла из
+        # детекции» (source='detected' в list_sales), а здесь её поставил оператор.
+        if thread_id:
+            conn.execute(
+                "UPDATE detected_sales SET rejected_at = ? "
+                "WHERE gmail_thread_id = ? AND applied_at IS NULL AND rejected_at IS NULL",
+                (now_iso, thread_id),
+            )
 
         # Остановить автопилоты + закрыть треды — в той же транзакции.
         for t in ([thread_id] if thread_id else []) + closed_other:
