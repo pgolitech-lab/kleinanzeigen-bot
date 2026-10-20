@@ -567,6 +567,42 @@ def _drain_deferred(thread_id: str) -> None:
 
 
 # ============================================================
+# Итог дня (джоб scheduler, 20:00 по Берлину)
+# ============================================================
+
+def evening_summary_text() -> Optional[str]:
+    """Итог дня: письма, ответы, продажи (те же числа, что «Сегодня» в Обзоре MA) + кто ждёт сейчас.
+    None — день пустой и никто не ждёт (не шлём)."""
+    from web.api_ma import _sales_summary, berlin_day_bounds  # один источник «сегодня» с MA
+    t0, t1 = berlin_day_bounds()
+    with db.get_conn() as conn:
+        new = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE direction='in' "
+                           "AND created_at >= ? AND created_at < ?", (t0, t1)).fetchone()["c"]
+        sent = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
+                            "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?",
+                            (t0, t1)).fetchone()["c"]
+    sales = _sales_summary(t0, t1)
+    waiting = sum(1 for t in db.pipeline_threads()
+                  if t["last_event_kind"] == "in" and not t["autopilot_active"])
+    if not (new or sent or sales["count"] or waiting):
+        return None
+    lines = ["🌙 <b>Итог дня</b>",
+             f"Писем: {new} · ответили: {sent}",
+             f"Продано: {sales['count']}" + (f" на {int(sales['total_eur'])} €" if sales["count"] else "")]
+    lines.append(f"Ждут ответа сейчас: {waiting}" if waiting else "Все ответы отправлены ✅")
+    return "\n".join(lines)
+
+
+def send_evening_summary() -> str:
+    """Job: итог дня операторам с кнопкой «Входящие». Пустой день — не шлём."""
+    text = evening_summary_text()
+    if text is None:
+        return "итог дня: пусто — не отправлен"
+    notify(text, "pipeline", label="📥 Входящие", kind="evening_summary")
+    return "итог дня отправлен"
+
+
+# ============================================================
 # Мониторинг входа CLI в подписку Claude (все LLM-вызовы идут через неё)
 # ============================================================
 

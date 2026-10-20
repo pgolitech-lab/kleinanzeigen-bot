@@ -140,3 +140,17 @@ def test_release_other_card_keeps_thread_busy():
         assert tb.thread_is_busy("T")  # A ещё работает
         assert tb._release_lock(11, "@a") is True
         assert not tb.thread_is_busy("T")
+
+
+def test_evening_summary(tmp_path, monkeypatch):
+    import database
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "t.db")
+    database.init_db()
+    assert tb.evening_summary_text() is None  # пустой день
+    acc = database.add_account("a", "a@gmail.com", "pw")
+    database.add_message(acc, "in", gmail_thread_id="T", de_client="Hallo", status="pending")
+    text = tb.evening_summary_text()
+    assert "Писем: 1" in text and "Ждут ответа сейчас: 1" in text
+    with patch.object(tb, "notify") as n:
+        assert tb.send_evening_summary() == "итог дня отправлен"
+    assert n.call_args.kwargs["kind"] == "evening_summary"
