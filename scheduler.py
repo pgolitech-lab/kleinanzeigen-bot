@@ -211,7 +211,10 @@ def inventory_sync_job() -> str:
     """Job: синхронизация склада (modules.inventory.sync_all). Никогда не бросает —
     сбой пишется ERROR в лог (его подхватит monitor_errors), следующий запуск по расписанию."""
     try:
-        from modules import inventory
+        from modules import incoming, inventory
+        if not incoming.inventory_ready():
+            # До seed (scripts/inventory_seed.py --apply) не заводим товары сами.
+            return "склад: не заполнен начальным seed — пропуск"
         return f"склад: {inventory.sync_all()}"
     except Exception as e:
         logger.exception("склад: sync_all упал")

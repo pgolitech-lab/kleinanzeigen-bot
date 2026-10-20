@@ -823,6 +823,7 @@ def test_sold_ad_no_longer_auto_skipped(inc, tmp_db):
 
 
 def test_link_listing_called_and_failure_tolerated(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc, "inventory_ready", lambda: True)
     seen: list = []
     monkeypatch.setattr(inc.inventory, "link_listing", lambda ad_id, **kw: seen.append((ad_id, kw)) or {})
     inc._process_incoming(ACC, _email(body=AD10))
@@ -834,6 +835,7 @@ def test_link_listing_called_and_failure_tolerated(inc, tmp_db, monkeypatch):
 
 
 def test_autopilot_skips_out_of_stock(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc, "inventory_ready", lambda: True)
     tmp_db.start_thread_autopilot("T1", 100, "silent")
     monkeypatch.setattr(inc.inventory, "ad_context_safe", lambda ad_id: {"stock": "out_of_stock"})
     monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
@@ -841,11 +843,12 @@ def test_autopilot_skips_out_of_stock(inc, tmp_db, monkeypatch):
     inc._process_incoming(ACC, _email(body=AD10))
     row = tmp_db.find_by_gmail_message_id("<m1@x>")
     assert inc._calls["review"] == [row["id"]] and inc._calls["send"] == []
-    assert any("На складе 0" in t for t in inc._calls["notify"])
+    assert any("на складе 0" in t for t in inc._calls["notify"])
     assert tmp_db.get_thread_autopilot("T1")["active"] == 1
 
 
 def test_autopilot_answers_when_stock_unknown(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc, "inventory_ready", lambda: True)
     tmp_db.start_thread_autopilot("T1", 100, "silent")
     monkeypatch.setattr(inc.inventory, "ad_context_safe", lambda ad_id: {"stock": "unknown"})
     monkeypatch.setattr(inc.claude, "generate_autopilot_reply", lambda **kw: _reply())
@@ -853,9 +856,46 @@ def test_autopilot_answers_when_stock_unknown(inc, tmp_db, monkeypatch):
     assert len(inc._calls["send"]) == 1
 
 
+def test_autopilot_sold_ad_unconfirmed_stock_goes_manual(inc, tmp_db, monkeypatch):
+    """Объявление помечено проданным, склад наличие не подтверждает — автопилот молчит."""
+    monkeypatch.setattr(inc, "inventory_ready", lambda: True)
+    monkeypatch.setattr(inc.inventory, "ad_context_safe", lambda ad_id: {"stock": "unknown"})
+    monkeypatch.setattr(inc.db, "is_ad_sold", lambda ad_id: True)
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("не должен отвечать")))
+    inc._process_incoming(ACC, _email(body=AD10))
+    row = tmp_db.find_by_gmail_message_id("<m1@x>")
+    assert inc._calls["review"] == [row["id"]] and row["ru_client"] == "привет"  # ручной путь, перевод есть
+    assert any("помечено проданным" in t for t in inc._calls["notify"])
+
+
+def test_inventory_not_touched_before_seed(inc, tmp_db, monkeypatch):
+    """Склад не заполнен seed — link_listing/ad_context не вызываются, схема не создаётся."""
+    monkeypatch.setattr(inc, "_INVENTORY_READY", False)
+    called: list = []
+    monkeypatch.setattr(inc.inventory, "link_listing", lambda *a, **kw: called.append("link"))
+    monkeypatch.setattr(inc.inventory, "ad_context_safe", lambda *a: called.append("ctx") or {})
+    tmp_db.start_thread_autopilot("T1", 100, "silent")
+    monkeypatch.setattr(inc.claude, "generate_autopilot_reply", lambda **kw: _reply())
+    inc._process_incoming(ACC, _email(body=AD10))
+    assert called == [] and len(inc._calls["send"]) == 1
+    with tmp_db.get_conn() as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='inv_products'").fetchone() is None
+
+
+def test_inventory_sync_job_skips_before_seed(tmp_db, monkeypatch):
+    import scheduler
+    from modules import incoming, inventory
+    monkeypatch.setattr(incoming, "_INVENTORY_READY", False)
+    monkeypatch.setattr(inventory, "sync_all", lambda **kw: (_ for _ in ()).throw(AssertionError("рано")))
+    assert "seed" in scheduler.inventory_sync_job()
+
+
 def test_inventory_sync_job_never_raises(monkeypatch):
     import scheduler
-    from modules import inventory
+    from modules import incoming, inventory
+    monkeypatch.setattr(incoming, "inventory_ready", lambda: True)
     monkeypatch.setattr(inventory, "sync_all", lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
     assert "ошибка" in scheduler.inventory_sync_job()
     assert scheduler.SCOUT_NOTIFY_MAX_PER_KIND > 0

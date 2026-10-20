@@ -570,6 +570,27 @@ LATE_AFTER_DAYS = 1.0
 
 
 _MESSAGES_COLUMNS: set[str] = set()
+_INVENTORY_READY = False
+
+
+def inventory_ready() -> bool:
+    """Склад заполнен начальным seed (scripts/inventory_seed.py --apply): в inv_products
+    есть строки. До этого link_listing / ad_context / sync_all не вызываем — иначе они
+    сами создадут схему и заведут товары по всей истории без проверенной группировки.
+    Кэшируем только положительный ответ."""
+    global _INVENTORY_READY
+    if _INVENTORY_READY:
+        return True
+    try:
+        with db.get_conn() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inv_products'").fetchone()
+            ready = bool(exists) and conn.execute("SELECT 1 FROM inv_products LIMIT 1").fetchone() is not None
+    except Exception:
+        logger.exception("склад: проверка готовности упала — считаю не готовым")
+        return False
+    _INVENTORY_READY = ready
+    return ready
 
 
 def _messages_has_column(name: str) -> bool:
@@ -662,9 +683,10 @@ def _notify_hot(message_id: int, thread_id: str, reason: str) -> None:
         logger.exception("Уведомление о горячем покупателе не ушло msg=%s", message_id)
 
 
-def _notify_out_of_stock(message_id: int, thread_id: str, ad_id: str) -> None:
-    text = (f"📦 <b>На складе 0</b> · #{message_id} (объявление {telegram_bot._html(str(ad_id))})\n"
-            f"Автопилот на это письмо не ответил — ответьте вручную. Автопилот треда включён.")
+def _notify_out_of_stock(message_id: int, thread_id: str, ad_id: str, note: str) -> None:
+    text = (f"📦 <b>Автопилот не ответил: {telegram_bot._html(note)}</b> · #{message_id} "
+            f"(объявление {telegram_bot._html(str(ad_id))})\n"
+            f"Ответьте вручную. Автопилот треда остаётся включённым.")
     try:
         telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
     except Exception:
@@ -1074,7 +1096,7 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 
     # Склад: привязать объявление к товару (новое — заведётся, известное — обновится).
     # Сбой склада не мешает обработке письма.
-    if ad_id:
+    if ad_id and inventory_ready():
         try:
             inventory.link_listing(
                 ad_id, title=ad.get("title"), price=ad.get("price"),
@@ -1149,16 +1171,20 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         logger.info("autopilot пропущен: письмо запоздало (%.1f дн.) msg=%s", age_days, inserted_id)
         is_autopilot = False
 
+    # Наличие товара: на складе 0 — автопилот не отвечает (пообещал бы несуществующий
+    # товар); объявление помечено проданным, а склад наличие не подтверждает — тоже.
+    # Письмо идёт обычным ручным путём (перевод, отложенная карточка), с пометкой;
+    # автопилот на треде остаётся включённым.
+    stock_note: Optional[str] = None
     if is_autopilot and ad_id:
-        # На складе 0 — автопилот не отвечает (пообещал бы несуществующий товар):
-        # карточка оператору с пометкой, автопилот на треде остаётся включённым.
-        stock = inventory.ad_context_safe(ad_id).get("stock")
+        stock = inventory.ad_context_safe(ad_id).get("stock") if inventory_ready() else "unknown"
         if stock == "out_of_stock":
-            logger.info("autopilot пропущен: на складе 0 (ad_id=%s) msg=%s", ad_id, inserted_id)
-            _deliver_review(inserted_id)
-            _notify_out_of_stock(inserted_id, ap_thread_id, ad_id)
-            _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body, allow_llm=False)
-            return
+            stock_note = "на складе 0"
+        elif stock != "in_stock" and db.is_ad_sold(ad_id):
+            stock_note = "объявление помечено проданным, наличие на складе не подтверждено"
+        if stock_note:
+            logger.info("autopilot пропущен: %s (ad_id=%s) msg=%s", stock_note, ad_id, inserted_id)
+            is_autopilot = False
 
     if is_autopilot:
         try:
@@ -1253,6 +1279,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
             inserted_id, thread_id,
         )
         _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body)
+        if stock_note:
+            _notify_out_of_stock(inserted_id, thread_id, ad_id, stock_note)
         return
 
     try:
@@ -1265,6 +1293,8 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
     if late:
         _notify_late(inserted_id, thread_id, age_days, bool(autopilot and autopilot["active"]))
     _hot_followup(inserted_id, thread_id, hot_verdict, hot_why, body)
+    if stock_note:
+        _notify_out_of_stock(inserted_id, thread_id, ad_id, stock_note)
 
 
 # Публичный алиас для импорта из scheduler.py
