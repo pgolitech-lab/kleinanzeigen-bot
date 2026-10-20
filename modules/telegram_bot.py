@@ -1060,7 +1060,6 @@ def send_pending_summary(chat_id: int, edit_msg_id: Optional[int] = None,
             })
         except Exception as exc:  # сеть тоже: иначе «🔄 Обновить» крутится без answerCallbackQuery
             if "message is not modified" not in str(exc):
-                logger.error("send_pending_summary edit fail: %s", exc)
                 raise  # вызывающий скажет оператору, что панель не обновилась
     else:
         _http_post_single("sendMessage", {
