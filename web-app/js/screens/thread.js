@@ -318,6 +318,16 @@ function renderThread(mount, params, data, opts = {}) {
   if (chips) main.appendChild(chips);
   const strip = dealStrip(data);
   if (strip) main.appendChild(strip);
+  // рынок под объявление: одна строка у полосы сделки, без LLM; ошибка — строка просто не появится
+  if (strip && params.thread_id) {
+    const mk = el(`<div class="mk-line small" hidden></div>`);
+    strip.after(mk);
+    api(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/market`).then(r => {
+      if (!mk.isConnected || !r?.text) return;
+      mk.textContent = `📈 ${r.text}`;
+      mk.hidden = false;
+    }).catch(() => {});
+  }
 
   if (opts.conflictText) {
     const b = el(`<div class="alert alert-warning small py-2"><div class="t"></div>

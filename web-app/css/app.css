@@ -1516,3 +1516,5 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 :root[data-layout="flex"] .pane { overflow-x: hidden; }
 :root[data-layout="flex"] .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 :root[data-layout="flex"] .nextup { min-height: 44px; padding: 6px 10px; }
+.mk-line { margin: -4px 2px 8px; color: var(--sub); }
+:root[data-layout="flex"] .mk-line { display: none; }
