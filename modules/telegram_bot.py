@@ -1,16 +1,22 @@
-"""Telegram-бот: уведомления оператору + интерактивная сводка задач (sync, urllib stdlib).
+"""Telegram-бот: исходящие уведомления оператору + маленький callback-поллер (sync, urllib stdlib).
 
-Архитектура (2026-06-23): Вся основная работа оператора — в Mini App / веб-морде.
-Бот шлёт уведомления-ссылки в MA и обрабатывает команду /tasks (сводка висячих задач
-с кнопками «открыть» → MA и «🗑 закрыть тред»).
+Архитектура (2026-06-23): вся работа оператора — в Mini App. Бот:
+  • шлёт уведомления-ссылки в MA (`notify`, `send_for_review`, автопилот, напоминания);
+  • держит daemon-поток `start_callback_poller` (long-poll getUpdates, запускается из main.py):
+    команда /tasks → сводка висячих задач; кнопки «👁 Прочитал» (read_N), «🗑» (close_THREAD),
+    «🔄 Обновить» (tasks); любые старые кнопки до 2026-06-23 → алерт «кнопка устарела».
 
-Lock/thread-busy обёртки оставлены здесь (их зовут scheduler/api_ma) — они про
+Lock/thread-busy обёртки оставлены здесь (их зовут outgoing/incoming/api_ma) — это
 in-memory concurrency поверх modules/operator_lock, к Telegram отношения не имеют.
+Всё сетевое, что может зваться из HTTP-запроса MA, уходит в фон через `run_in_background`.
 """
 from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -23,6 +29,20 @@ from modules import operator_lock
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
+
+# Фоновый пул: Telegram-уведомления и drain отложенных карточек не держат HTTP-ответ MA
+_BG = ThreadPoolExecutor(max_workers=2, thread_name_prefix="tg-bg")
+
+
+def run_in_background(fn, *args, **kwargs) -> None:
+    """Выполнить fn в фоне; исключение — в лог (а не в никуда)."""
+    def _job() -> None:
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            logger.exception("фоновая задача %s упала", getattr(fn, "__name__", fn))
+    _BG.submit(_job)
+
 
 # Mini App URL для deep-link / web_app кнопок. Pages serves SPA из main:/web-app/.
 MA_BASE_URL = "https://pgolitech-lab.github.io/kleinanzeigen-bot/web-app/"
@@ -358,44 +378,49 @@ def send_autopilot_start_notification(msg_id: int, floor: float, actor: str) -> 
 _THREAD_BUSY: dict[str, dict[str, Any]] = {}
 # thread_id -> msg_id of the operator currently holding the lock (for expiry detection)
 _THREAD_OP_MSG: dict[str, int] = {}
+# Оба словаря трогают и потоки uvicorn (MA), и APScheduler (SMTP/incoming) — только под этим локом
+_BUSY_LOCK = threading.RLock()
 
 
 def thread_is_busy(thread_id: Optional[str]) -> bool:
     if not thread_id:
         return False
-    entry = _THREAD_BUSY.get(thread_id)
-    if not entry or not entry.get("kinds"):
-        return False
-    # Auto-expire stale "operator" kind when the actual lock has expired
-    if "operator" in entry["kinds"]:
-        mid = _THREAD_OP_MSG.get(thread_id)
-        if mid is not None and operator_lock.state(mid) is None:
-            entry["kinds"].discard("operator")
-            _THREAD_OP_MSG.pop(thread_id, None)
-            if not entry["kinds"]:
-                _THREAD_BUSY.pop(thread_id, None)
-                return False
-    return bool(entry and entry.get("kinds"))
+    with _BUSY_LOCK:
+        entry = _THREAD_BUSY.get(thread_id)
+        if not entry or not entry.get("kinds"):
+            return False
+        # Auto-expire stale "operator" kind when the actual lock has expired
+        if "operator" in entry["kinds"]:
+            mid = _THREAD_OP_MSG.get(thread_id)
+            if mid is not None and operator_lock.state(mid) is None:
+                entry["kinds"].discard("operator")
+                _THREAD_OP_MSG.pop(thread_id, None)
+                if not entry["kinds"]:
+                    _THREAD_BUSY.pop(thread_id, None)
+                    return False
+        return bool(entry["kinds"])
 
 
 def mark_thread_busy(thread_id: Optional[str], kind: str, by: str = "?") -> None:
     if not thread_id:
         return
-    entry = _THREAD_BUSY.setdefault(
-        thread_id, {"kinds": set(), "by": by, "since": datetime.utcnow().isoformat()})
-    entry["kinds"].add(kind)
-    entry["by"] = by
+    with _BUSY_LOCK:
+        entry = _THREAD_BUSY.setdefault(
+            thread_id, {"kinds": set(), "by": by, "since": datetime.utcnow().isoformat()})
+        entry["kinds"].add(kind)
+        entry["by"] = by
 
 
 def clear_thread_busy(thread_id: Optional[str], kind: str) -> None:
     if not thread_id:
         return
-    entry = _THREAD_BUSY.get(thread_id)
-    if not entry:
-        return
-    entry["kinds"].discard(kind)
-    if not entry["kinds"]:
-        _THREAD_BUSY.pop(thread_id, None)
+    with _BUSY_LOCK:
+        entry = _THREAD_BUSY.get(thread_id)
+        if not entry:
+            return
+        entry["kinds"].discard(kind)
+        if not entry["kinds"]:
+            _THREAD_BUSY.pop(thread_id, None)
 
 
 def _msg_thread_id(msg_id: int) -> Optional[str]:
@@ -420,7 +445,8 @@ def _acquire_lock(msg_id: int, actor: str) -> None:
     tid = _msg_thread_id(msg_id)
     mark_thread_busy(tid, "operator", actor)
     if tid:
-        _THREAD_OP_MSG[tid] = msg_id
+        with _BUSY_LOCK:
+            _THREAD_OP_MSG[tid] = msg_id
 
 
 def _release_lock(msg_id: int) -> None:
@@ -428,13 +454,12 @@ def _release_lock(msg_id: int) -> None:
     thread_id = _msg_thread_id(msg_id)
     clear_thread_busy(thread_id, "operator")
     if thread_id:
-        _THREAD_OP_MSG.pop(thread_id, None)
-    if thread_id:
-        try:
-            import scheduler as _sched
-            _sched.drain_deferred_thread(thread_id)
-        except Exception:
-            logger.exception("drain_deferred_thread fail")
+        with _BUSY_LOCK:
+            _THREAD_OP_MSG.pop(thread_id, None)
+        # drain поднимает отложенные карточки и шлёт send_for_review (Telegram, до 30 с
+        # на каждый DM) — в фоне, чтобы не держать ответ MA
+        import scheduler as _sched
+        run_in_background(_sched.drain_deferred_thread, thread_id)
 
 
 def _lock_remaining_min(msg_id: int) -> int:
@@ -442,8 +467,8 @@ def _lock_remaining_min(msg_id: int) -> int:
 
 
 # ============================================================
-# No-op заглушки (бот больше не рисует/синхронизирует карточки).
-# Оставлены чтобы не трогать десятки call-site'ов в scheduler/api_ma.
+# No-op заглушки. TODO(api): удалить, когда модуль mail уберёт вызовы
+# из modules/incoming.py и modules/outgoing.py (api_ma их уже не зовёт).
 # ============================================================
 
 def refresh_pipeline_for_active_chats() -> None:
@@ -451,14 +476,41 @@ def refresh_pipeline_for_active_chats() -> None:
     return None
 
 
-def broadcast_after_external_action(msg_id: int) -> None:
-    """No-op: карточек для синхронизации в боте больше нет."""
-    return None
-
-
 def broadcast_thread_state(gmail_thread_id: str) -> None:
     """No-op: мини-карточек треда в боте больше нет."""
     return None
+
+
+# ============================================================
+# Мониторинг входа CLI в подписку Claude (все LLM-вызовы идут через неё)
+# ============================================================
+
+LLM_LOGIN_REMIND_SEC = 6 * 3600  # пока вход не восстановлен — напоминать не чаще раза в 6 ч
+_llm_login_state: dict[str, Any] = {"ok": True, "alerted_at": 0.0}
+
+
+def check_llm_login_job() -> str:
+    """Job: если CLI вышел из подписки claude.ai — уведомить оператора (с дедупом).
+
+    Без входа все генерации (черновики, переводы, автопилот) падают — оператор должен
+    узнать об этом сразу, а не по пустым черновикам.
+    """
+    from modules import llm
+    ok, msg = llm.status()
+    st = _llm_login_state
+    now = time.time()
+    if ok:
+        if not st["ok"]:
+            notify("🟩 <b>Подписка Claude снова подключена</b> — генерация ответов работает.")
+        st["ok"], st["alerted_at"] = True, 0.0
+        return msg
+    if st["ok"] or now - st["alerted_at"] >= LLM_LOGIN_REMIND_SEC:
+        logger.error("LLM: нет входа в подписку Claude: %s", msg)
+        notify("🟥 <b>Нет входа в подписку Claude</b> — черновики и переводы не генерируются.\n"
+               f"{_html(msg)}\nНа сервере под пользователем сервиса: <code>claude auth login</code>")
+        st["alerted_at"] = now
+    st["ok"] = False
+    return msg
 
 
 # ============================================================
@@ -536,9 +588,6 @@ def start_callback_poller() -> None:
     - callback close_THREAD_ID → закрыть тред + обновить сводку
     - прочие callback → «кнопка устарела» (legacy до 2026-06-23)
     """
-    import threading
-    import time
-
     def _run() -> None:
         offset = 0
         while True:

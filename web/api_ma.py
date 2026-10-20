@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
 import json
@@ -31,7 +32,7 @@ _ALLOWED_TAGS = {"Серьёзный", "Торгуется", "Тянет вре�
 
 
 @router.get("/health")
-async def ma_health(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_health(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Health endpoint для Mini App. Возвращает идентичность оператора."""
     return {
         "ok": True,
@@ -69,7 +70,7 @@ def _row_to_pipeline_item(row: Any, autopilot_row: Any) -> dict[str, Any]:
 
 
 @router.get("/pipeline")
-async def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, list]:
+def ma_pipeline(user: dict = Depends(verify_init_data_dep)) -> dict[str, list]:
     """Pipeline активных тредов: разделение на red (ждут нас) / green (ждём клиента).
 
     Сортировка внутри секции — DESC по last_event_at (новые сверху).
@@ -165,7 +166,7 @@ class BulkActionBody(BaseModel):
 
 
 @router.post("/threads/bulk-action")
-async def ma_bulk_action(
+def ma_bulk_action(
     body: BulkActionBody,
     user: dict = Depends(verify_init_data_dep),
 ) -> dict[str, Any]:
@@ -189,12 +190,12 @@ async def ma_bulk_action(
 
 
 @router.get("/threads/{thread_id}")
-async def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     return _thread_dict(thread_id)
 
 
 @router.get("/clients/{email}/history")
-async def ma_client_history(email: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_client_history(email: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Профиль клиента: треды + deal_brief + теги + агрегаты."""
     rows = db.list_threads_for_client(email)
 
@@ -278,7 +279,7 @@ class ClientProfilePayload(BaseModel):
 
 
 @router.post("/clients/{email}/profile")
-async def ma_client_profile_save(
+def ma_client_profile_save(
     email: str,
     payload: ClientProfilePayload,
     user: dict = Depends(verify_init_data_dep),
@@ -390,13 +391,13 @@ class RegenerateBody(BaseModel):
 
 
 @router.get("/messages/{msg_id}")
-async def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_message_review(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     """Полный review payload."""
     return _message_review_dict(msg_id)
 
 
 @router.get("/messages/{msg_id}/lock")
-async def ma_message_lock_state(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_message_lock_state(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Lock-state poll endpoint — лёгкий, без full review payload."""
     row = db.get_message(msg_id)
     if row is None:
@@ -408,7 +409,7 @@ async def ma_message_lock_state(msg_id: int, user: dict = Depends(verify_init_da
     }
 
 @router.post("/messages/{msg_id}/lock/acquire")
-async def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict:
+def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> dict:
     """Acquire lock on review card. 409 if held by someone else."""
     row = db.get_message(msg_id)
     if row is None:
@@ -431,7 +432,7 @@ async def ma_lock_acquire(msg_id: int, user: dict = Depends(verify_init_data_dep
 
 
 @router.post("/messages/{msg_id}/lock/release", status_code=204)
-async def ma_lock_release(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> None:
+def ma_lock_release(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> None:
     """Release lock. Permissive — does not check holder."""
     row = db.get_message(msg_id)
     if row is None:
@@ -452,8 +453,9 @@ async def ma_lock_release_beacon(msg_id: int, request: Request) -> None:
     ловил 422, лок висел до auto-expire (5 мин), блокируя других операторов.
     """
     raw = (await request.body()).decode("utf-8", "replace").strip()
-    verify_init_data(raw)  # 401/403 если протух/чужой — ответ beacon клиент игнорит
-    telegram_bot._release_lock(msg_id)
+    # HMAC + чтение настроек и БД — не в event loop
+    await run_in_threadpool(verify_init_data, raw)  # 401/403 если протух/чужой — ответ beacon клиент игнорит
+    await run_in_threadpool(telegram_bot._release_lock, msg_id)
     return None
 
 
@@ -505,8 +507,8 @@ class SendBody(BaseModel):
 
 
 @router.post("/messages/{msg_id}/send")
-async def ma_send(msg_id: int, body: "SendBody | None" = None,
-                  user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_send(msg_id: int, body: "SendBody | None" = None,
+            user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
@@ -519,15 +521,12 @@ async def ma_send(msg_id: int, body: "SendBody | None" = None,
     b = body or SendBody()
     client_lang = (row["client_lang"] if "client_lang" in row.keys() else None) or "de"
 
-    import asyncio
     if b.mode == "translate":
         # Оператор явно попросил перевести на язык клиента перед отправкой.
         src_text = (b.text or "").strip() or ((row["de_answer"] if "de_answer" in row.keys() else "") or "").strip()
         if not src_text:
             raise HTTPException(400, "нечего переводить: текст пуст")
-        tr = await asyncio.to_thread(
-            claude.translate_only, src_text, target_lang=client_lang, source_lang="ru",
-        )
+        tr = claude.translate_only(src_text, target_lang=client_lang, source_lang="ru")
         translated = (tr.get("translation", "") if isinstance(tr, dict) else str(tr)).strip()
         if not translated:
             raise HTTPException(500, "перевод вернулся пустым — отправка отменена")
@@ -543,7 +542,7 @@ async def ma_send(msg_id: int, body: "SendBody | None" = None,
                 "Подтвердите отправку «как есть» или выберите «Перевести и отправить».",
             )
 
-    result = await asyncio.to_thread(scheduler.send_one, msg_id)
+    result = scheduler.send_one(msg_id)
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "send failed"))
 
@@ -571,13 +570,6 @@ async def ma_send(msg_id: int, body: "SendBody | None" = None,
                     (thread_id, msg_id),
                 )
 
-    telegram_bot.broadcast_after_external_action(msg_id)
-    for mid in closed_drafts:
-        try:
-            telegram_bot.broadcast_after_external_action(mid)
-        except Exception:
-            pass  # best-effort: устаревшая карточка могла быть удалена
-    telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
 
     fresh = db.get_message(msg_id)
@@ -591,8 +583,8 @@ class TranslateDraftBody(BaseModel):
 
 
 @router.post("/messages/{msg_id}/translate-draft")
-async def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
-                             user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
+                       user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     """Перевести черновик на язык клиента БЕЗ отправки (шаг send-флоу «Перевести и отправить»).
 
     Перевод сохраняется в de_answer, оператор видит финальный текст в превью
@@ -613,11 +605,8 @@ async def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = No
     if not src_text:
         raise HTTPException(400, "нечего переводить: текст пуст")
 
-    import asyncio
     source_lang = "ru" if _mostly_cyrillic(src_text) else None
-    tr = await asyncio.to_thread(
-        claude.translate_only, src_text, target_lang=client_lang, source_lang=source_lang,
-    )
+    tr = claude.translate_only(src_text, target_lang=client_lang, source_lang=source_lang)
     translated = (tr.get("translation", "") if isinstance(tr, dict) else str(tr)).strip()
     if not translated:
         raise HTTPException(500, "перевод вернулся пустым")
@@ -628,7 +617,6 @@ async def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = No
         fields["ru_answer"] = src_text
         fields["ru_translation"] = src_text
     db.update_message(msg_id, **fields)
-    telegram_bot.broadcast_after_external_action(msg_id)
     return _message_review_dict(msg_id)
 
 
@@ -638,8 +626,8 @@ class LangCheckBody(BaseModel):
 
 
 @router.post("/messages/{msg_id}/lang-check")
-async def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
-                        user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
+                  user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     """LLM-проверка (Haiku) языка финального текста перед отправкой.
 
     Ловит несовпадения, которые кириллическая эвристика не видит (например,
@@ -656,9 +644,8 @@ async def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
         raise HTTPException(400, "нечего проверять: текст пуст")
     client_lang = ((row["client_lang"] if "client_lang" in row.keys() else None) or "de").lower()
 
-    import asyncio
     try:
-        res = await asyncio.to_thread(claude.detect_text_lang, text)
+        res = claude.detect_text_lang(text)
     except Exception as e:
         # 502 — фронт покажет «проверка недоступна», но НЕ разблокирует чужой язык:
         # кириллическая эвристика и серверный guard в /send остаются
@@ -670,7 +657,7 @@ async def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
 
 
 @router.post("/messages/{msg_id}/skip")
-async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
@@ -680,8 +667,6 @@ async def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "d
     _ensure_lock(msg_id, actor)
 
     db.update_message(msg_id, status="skipped")
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
     return {"ok": True, "status": "skipped"}
 
@@ -692,8 +677,8 @@ class SoldBody(BaseModel):
 
 
 @router.post("/messages/{msg_id}/sold")
-async def ma_sold(msg_id: int, body: SoldBody,
-                  user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_sold(msg_id: int, body: SoldBody,
+            user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
@@ -707,8 +692,6 @@ async def ma_sold(msg_id: int, body: SoldBody,
         sold_price_eur=body.price_eur,
         close_other_threads_for_ad=body.close_other_threads_for_ad,
     )
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     telegram_bot._release_lock(msg_id)
     return {
         "ok": True,
@@ -738,8 +721,8 @@ def _apply_regenerate_result(msg_id: int, result: "dict[str, Any]") -> None:
 
 
 @router.post("/messages/{msg_id}/regenerate")
-async def ma_regenerate(msg_id: int, body: RegenerateBody,
-                        user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_regenerate(msg_id: int, body: RegenerateBody,
+                  user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     """Регенерировать draft под strategy. Intermediate — lock keeps."""
     row = db.get_message(msg_id)
     if row is None:
@@ -750,13 +733,8 @@ async def ma_regenerate(msg_id: int, body: RegenerateBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    import asyncio
-    result = await asyncio.to_thread(
-        claude.regenerate_with_strategy, row, body.strategy
-    )
+    result = claude.regenerate_with_strategy(row, body.strategy)
     _apply_regenerate_result(msg_id, result)
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
 
     return _message_review_dict(msg_id)
 
@@ -766,8 +744,8 @@ class EditTextBody(BaseModel):
 
 
 @router.post("/messages/{msg_id}/edit-ru")
-async def ma_edit_ru(msg_id: int, body: EditTextBody,
-                     user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_edit_ru(msg_id: int, body: EditTextBody,
+               user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     """Operator edits RU answer. Forward+back translate."""
     row = db.get_message(msg_id)
     if row is None:
@@ -778,26 +756,19 @@ async def ma_edit_ru(msg_id: int, body: EditTextBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    import asyncio
     target_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
-    de_res = await asyncio.to_thread(
-        claude.translate_only, body.text, target_lang=target_lang, source_lang="ru"
-    )
+    de_res = claude.translate_only(body.text, target_lang=target_lang, source_lang="ru")
     de_text = de_res.get("translation", "") if isinstance(de_res, dict) else str(de_res)
-    ru_res = await asyncio.to_thread(
-        claude.translate_only, de_text, target_lang="ru", source_lang=target_lang
-    )
+    ru_res = claude.translate_only(de_text, target_lang="ru", source_lang=target_lang)
     ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
     db.update_message(msg_id, ru_answer=body.text, de_answer=de_text,
                       ru_translation=ru_back, status="edited")
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
 @router.post("/messages/{msg_id}/edit-de")
-async def ma_edit_de(msg_id: int, body: EditTextBody,
-                     user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+def ma_edit_de(msg_id: int, body: EditTextBody,
+               user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     """Operator edits DE answer directly. Back-translate for verification."""
     row = db.get_message(msg_id)
     if row is None:
@@ -808,16 +779,11 @@ async def ma_edit_de(msg_id: int, body: EditTextBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    import asyncio
     source_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
-    ru_res = await asyncio.to_thread(
-        claude.translate_only, body.text, target_lang="ru", source_lang=source_lang
-    )
+    ru_res = claude.translate_only(body.text, target_lang="ru", source_lang=source_lang)
     ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
     db.update_message(msg_id, de_answer=body.text, ru_translation=ru_back,
                       status="edited")
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
@@ -830,8 +796,8 @@ class InstructionBody(BaseModel):
 
 
 @router.post("/messages/{msg_id}/price")
-async def ma_price(msg_id: int, body: PriceBody,
-                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_price(msg_id: int, body: PriceBody,
+             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Регенерировать с конкретной ценой от оператора."""
     row = db.get_message(msg_id)
     if row is None:
@@ -842,19 +808,14 @@ async def ma_price(msg_id: int, body: PriceBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    import asyncio
-    result = await asyncio.to_thread(
-        claude.regenerate_with_price, row, body.eur
-    )
+    result = claude.regenerate_with_price(row, body.eur)
     _apply_regenerate_result(msg_id, result)
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
 @router.post("/messages/{msg_id}/instruction")
-async def ma_instruction(msg_id: int, body: InstructionBody,
-                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_instruction(msg_id: int, body: InstructionBody,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Регенерировать со свободной инструкцией."""
     row = db.get_message(msg_id)
     if row is None:
@@ -865,13 +826,8 @@ async def ma_instruction(msg_id: int, body: InstructionBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    import asyncio
-    result = await asyncio.to_thread(
-        claude.regenerate_with_instruction, row, body.text
-    )
+    result = claude.regenerate_with_instruction(row, body.text)
     _apply_regenerate_result(msg_id, result)
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _message_review_dict(msg_id)
 
 
@@ -886,8 +842,8 @@ class ComposeSendBody(BaseModel):
 
 
 @router.post("/threads/{thread_id}/compose")
-async def ma_compose(thread_id: str, body: ComposeSendBody,
-                     user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_compose(thread_id: str, body: ComposeSendBody,
+               user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Operator-initiated message in thread (compose mode).
 
     Требует, чтобы оператор сначала вызвал /compose-preview и подтвердил (возможно
@@ -899,10 +855,7 @@ async def ma_compose(thread_id: str, body: ComposeSendBody,
         raise HTTPException(404, "thread not found")
     source_msg_id = history[-1]["id"]
 
-    import asyncio
-    result = await asyncio.to_thread(
-        scheduler.send_manual_compose, source_msg_id, body.text, body.final_text, body.target_lang
-    )
+    result = scheduler.send_manual_compose(source_msg_id, body.text, body.final_text, body.target_lang)
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "compose failed"))
 
@@ -923,13 +876,6 @@ async def ma_compose(thread_id: str, body: ComposeSendBody,
                 (thread_id,),
             )
 
-    # Broadcast обновление текстов мини-карточек у закрытых drafts
-    for mid in closed_drafts:
-        try:
-            telegram_bot.broadcast_after_external_action(mid)
-        except Exception:
-            pass
-    telegram_bot.refresh_pipeline_for_active_chats()
 
     return {
         "ok": True,
@@ -954,8 +900,8 @@ class AutopilotStartBody(BaseModel):
 
 
 @router.post("/threads/{thread_id}/autopilot/start")
-async def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
-                              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
+                       user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Запустить автопилот для треда. Если preview передан — применяется к latest in-row."""
     history = db.thread_history(thread_id)
     if not history:
@@ -987,12 +933,9 @@ async def ma_autopilot_start(thread_id: str, body: AutopilotStartBody,
     db.start_thread_autopilot(thread_id, body.floor_eur, body.notify_mode, actor)
 
     if body.notify_mode == "notify":
-        try:
-            telegram_bot.send_autopilot_start_notification(msg_id, body.floor_eur, actor)
-        except Exception:
-            pass  # best-effort
-
-    telegram_bot.refresh_pipeline_for_active_chats()
+        # Telegram — в фоне: ответ MA не ждёт сеть, ошибка уходит в лог
+        telegram_bot.run_in_background(
+            telegram_bot.send_autopilot_start_notification, msg_id, body.floor_eur, actor)
 
     return _thread_dict(thread_id)
 
@@ -1019,8 +962,8 @@ def _build_regen_context(msg_row: Any) -> tuple[Any, str, Any]:
 
 
 @router.post("/threads/{thread_id}/autopilot/preview")
-async def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
-                                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
+                         user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сгенерировать preview первого автопилот-ответа БЕЗ записи в БД."""
     history = db.thread_history(thread_id)
     if not history:
@@ -1035,7 +978,6 @@ async def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
 
     history_ctx, brief_text, lessons = _build_regen_context(latest_in)
 
-    import asyncio
 
     def _get_field(row, key):
         try:
@@ -1044,8 +986,7 @@ async def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
             return ""
 
     try:
-        result = await asyncio.to_thread(
-            claude.generate_autopilot_reply,
+        result = claude.generate_autopilot_reply(
             de_client_text=_get_field(latest_in, "de_client"),
             ad_title=_get_field(latest_in, "ad_title"),
             ad_price=_get_field(latest_in, "ad_price"),
@@ -1079,32 +1020,30 @@ async def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
 
 
 @router.post("/threads/{thread_id}/autopilot/stop")
-async def ma_autopilot_stop(thread_id: str,
-                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_autopilot_stop(thread_id: str,
+                      user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Остановить автопилот (manual stop)."""
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
     db.stop_thread_autopilot(thread_id, "manual")
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _thread_dict(thread_id)
 
 
 @router.post("/threads/{thread_id}/wait")
-async def ma_thread_wait(thread_id: str,
-                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_thread_wait(thread_id: str,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
     actor = actor_from_user(user)
     db.mark_thread_waiting(thread_id, marked_by=actor)
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _thread_dict(thread_id)
 
 
 @router.post("/threads/{thread_id}/suggest-reply")
-async def ma_suggest_reply(thread_id: str,
-                            user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_suggest_reply(thread_id: str,
+                     user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сгенерировать свежий draft для последнего incoming в треде."""
     history = db.thread_history(thread_id)
     if not history:
@@ -1119,13 +1058,10 @@ async def ma_suggest_reply(thread_id: str,
         raise HTTPException(404, "no incoming message in thread")
 
     msg_id = latest_in["id"]
-    import asyncio
-    result = await asyncio.to_thread(scheduler.regenerate_draft, msg_id, "regen")
+    result = scheduler.regenerate_draft(msg_id, "regen")
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "regenerate failed"))
 
-    telegram_bot.broadcast_after_external_action(msg_id)
-    telegram_bot.refresh_pipeline_for_active_chats()
     return _thread_dict(thread_id)
 
 
@@ -1210,7 +1146,7 @@ def _bucket_label(iso_ts: str, granularity: str) -> str:
 
 
 @router.get("/sales")
-async def ma_sales(
+def ma_sales(
     period: str = "all",
     from_: "str | None" = None,
     to_: "str | None" = None,
@@ -1304,7 +1240,7 @@ async def ma_sales(
 # ──────────────────────── DETECTED SALES (LLM-сканер) ────────────────────────
 
 @router.get("/detected-sales")
-async def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Список pending detections для review-экрана."""
     rows = db.list_pending_detections()
     items: list[dict[str, Any]] = []
@@ -1336,20 +1272,19 @@ class DetectionApplyBody(BaseModel):
 
 
 @router.post("/detected-sales/{detection_id}/apply")
-async def ma_detection_apply(detection_id: int, body: DetectionApplyBody,
-                              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_detection_apply(detection_id: int, body: DetectionApplyBody,
+                       user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Применить detection — записывает в messages + close_thread."""
     try:
         applied = db.apply_detection_to_messages(detection_id, sold_price_eur=body.price_eur)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    telegram_bot.refresh_pipeline_for_active_chats()
     return {"ok": True, **applied}
 
 
 @router.post("/detected-sales/{detection_id}/reject", status_code=204)
-async def ma_detection_reject(detection_id: int,
-                               user: dict = Depends(verify_init_data_dep)) -> None:
+def ma_detection_reject(detection_id: int,
+                        user: dict = Depends(verify_init_data_dep)) -> None:
     db.reject_detection(detection_id)
 
 
@@ -1364,8 +1299,8 @@ class ManualSaleBody(BaseModel):
 
 
 @router.post("/sales/manual")
-async def ma_sales_manual(body: ManualSaleBody,
-                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_sales_manual(body: ManualSaleBody,
+                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Зафиксировать продажу совершённую ВНЕ бота (по телефону / лично).
 
     Создаёт synthetic messages-row с gmail_thread_id='manual-<uuid>'. Сделка
@@ -1453,7 +1388,7 @@ class SettingPostBody(BaseModel):
 
 
 @router.get("/settings")
-async def ma_settings_get(user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
+def ma_settings_get(user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
     """Все whitelist-настройки. Sensitive ключи замаскированы."""
     out: dict[str, str] = {}
     for key in sorted(ALLOWED_SETTING_KEYS):
@@ -1466,8 +1401,8 @@ async def ma_settings_get(user: dict = Depends(verify_init_data_dep)) -> dict[st
 
 
 @router.post("/settings")
-async def ma_settings_post(body: SettingPostBody,
-                           user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_settings_post(body: SettingPostBody,
+                     user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Установить одно значение. Whitelist + per-key validator."""
     if body.key not in ALLOWED_SETTING_KEYS:
         raise HTTPException(400, f"key '{body.key}' is not in whitelist")
@@ -1479,7 +1414,7 @@ async def ma_settings_post(body: SettingPostBody,
 
 
 @router.get("/dashboard")
-async def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сводный дашборд: pipeline-счётчики, сегодня, баланс API, продажи 7/30д."""
     from datetime import datetime, timedelta
 
@@ -1563,7 +1498,7 @@ async def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, 
 
 
 @router.get("/accounts")
-async def ma_accounts(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_accounts(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Список аккаунтов (для фильтра инбокса и бейджей)."""
     return {"accounts": [
         {"id": a["id"], "name": a["name"], "active": bool(a["is_active"])}
@@ -1572,7 +1507,7 @@ async def ma_accounts(user: dict = Depends(verify_init_data_dep)) -> dict[str, A
 
 
 @router.get("/clients")
-async def ma_clients(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_clients(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """База обращений (CRM): уникальные покупатели с агрегатами."""
     return {"clients": [
         {
@@ -1592,8 +1527,8 @@ _CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁ]")
 
 
 @router.post("/threads/{thread_id}/compose-preview")
-async def ma_compose_preview(thread_id: str, body: ComposeBody,
-                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_compose_preview(thread_id: str, body: ComposeBody,
+                       user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Предпросмотр перевода ответа: RU → язык клиента + обратный перевод RU.
 
     Это ЕДИНСТВЕННОЕ место, где происходит перевод — /compose (отправка) больше не
@@ -1605,7 +1540,6 @@ async def ma_compose_preview(thread_id: str, body: ComposeBody,
     кириллицы — это не может быть русский, перевод не выполняется, текст идёт как есть.
     """
     from fastapi import HTTPException
-    import asyncio
     if claude.is_empty_directive(body.text):
         raise HTTPException(400, "Указан язык («на X:»), но само сообщение не дописано")
     history = db.thread_history(thread_id)
@@ -1637,15 +1571,13 @@ async def ma_compose_preview(thread_id: str, body: ComposeBody,
             f"Перевод НЕ выполнялся, текст будет отправлен как есть. Проверьте, что это {target_lang.upper()}."
         )
     else:
-        tr = await asyncio.to_thread(claude.translate_only, ru_text,
-                                     target_lang=target_lang, source_lang="ru", context=ad_ctx)
+        tr = claude.translate_only(ru_text, target_lang=target_lang, source_lang="ru", context=ad_ctx)
         translated = tr.get("translation", "") if isinstance(tr, dict) else ""
 
     if target_lang == "ru":
         back_ru = translated
     else:
-        back = await asyncio.to_thread(claude.translate_only, translated,
-                                       target_lang="ru", source_lang=target_lang)
+        back = claude.translate_only(translated, target_lang="ru", source_lang=target_lang)
         back_ru = back.get("translation", "") if isinstance(back, dict) else ""
     result = {"translated": translated, "back_ru": back_ru, "target_lang": target_lang, "ru_text": ru_text}
     if note:
@@ -1710,7 +1642,7 @@ def _scout_region_dict(r: Any) -> dict[str, Any]:
 
 
 @router.get("/scout/overview")
-async def ma_scout_overview(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_overview(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сводка разведки: счётчики, статус прогона, запросы, регионы."""
     st = scout_runner.status()
     return {
@@ -1727,8 +1659,8 @@ async def ma_scout_overview(user: dict = Depends(verify_init_data_dep)) -> dict[
 
 
 @router.get("/scout/listings")
-async def ma_scout_listings(kind: str = "car", include_removed: bool = False,
-                            user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_listings(kind: str = "car", include_removed: bool = False,
+                      user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Объявления разведки одного вида (car|part). Фильтрация — на клиенте.
 
     По умолчанию снятые (нет в выдаче дольше scout_stale_days) не отдаются.
@@ -1750,7 +1682,7 @@ async def ma_scout_listings(kind: str = "car", include_removed: bool = False,
 
 
 @router.get("/scout/status")
-async def ma_scout_status(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_status(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Статус фонового прогона (для поллинга)."""
     st = scout_runner.status()
     return {"running": st["running"], "started_at": st["started_at"],
@@ -1762,8 +1694,8 @@ class ScoutRunBody(BaseModel):
 
 
 @router.post("/scout/run")
-async def ma_scout_run(body: ScoutRunBody,
-                       user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_run(body: ScoutRunBody,
+                 user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Запустить разведку в фоне (все enabled, либо один query_id)."""
     ids = [body.query_id] if body.query_id else None
     started = scout_runner.start(ids)
@@ -1775,14 +1707,12 @@ class ScoutGenerateBody(BaseModel):
 
 
 @router.post("/scout/generate")
-async def ma_scout_generate(body: ScoutGenerateBody,
-                            user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_generate(body: ScoutGenerateBody,
+                      user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сгенерить запросы через LLM и добавить новые (без дублей)."""
-    import asyncio
     existing = [q["keywords"] for q in db.list_scout_queries()]
-    result = await asyncio.to_thread(
-        claude_scout.generate_scout_queries, existing_keywords=existing,
-        extra_instruction=body.extra.strip(),
+    result = claude_scout.generate_scout_queries(
+        existing_keywords=existing, extra_instruction=body.extra.strip(),
     )
     added = 0
     for q in result["queries"]:
@@ -1805,8 +1735,8 @@ class ScoutQueryBody(BaseModel):
 
 
 @router.post("/scout/queries")
-async def ma_scout_query_add(body: ScoutQueryBody,
-                             user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_query_add(body: ScoutQueryBody,
+                       user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Добавить поисковый запрос вручную."""
     from fastapi import HTTPException
     kind = "part" if body.kind == "part" else "car"
@@ -1829,8 +1759,8 @@ class ScoutQueryUpdateBody(BaseModel):
 
 
 @router.post("/scout/queries/{query_id}/update")
-async def ma_scout_query_update(query_id: int, body: ScoutQueryUpdateBody,
-                                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_query_update(query_id: int, body: ScoutQueryUpdateBody,
+                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     from fastapi import HTTPException
     if not db.get_scout_query(query_id):
         raise HTTPException(404, "query not found")
@@ -1842,8 +1772,8 @@ async def ma_scout_query_update(query_id: int, body: ScoutQueryUpdateBody,
 
 
 @router.post("/scout/queries/{query_id}/toggle")
-async def ma_scout_query_toggle(query_id: int,
-                                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_query_toggle(query_id: int,
+                          user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     from fastapi import HTTPException
     q = db.get_scout_query(query_id)
     if not q:
@@ -1854,13 +1784,13 @@ async def ma_scout_query_toggle(query_id: int,
 
 
 @router.post("/scout/queries/{query_id}/delete", status_code=204)
-async def ma_scout_query_delete(query_id: int,
-                                user: dict = Depends(verify_init_data_dep)) -> None:
+def ma_scout_query_delete(query_id: int,
+                          user: dict = Depends(verify_init_data_dep)) -> None:
     db.delete_scout_query(query_id)
 
 
 @router.post("/scout/verify")
-async def ma_scout_verify(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_verify(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Запустить Haiku-проверку типа непроверенных объявлений в фоне."""
     import threading
     from modules import scout as _scout
@@ -1874,8 +1804,8 @@ class ScoutCorrectBody(BaseModel):
 
 
 @router.post("/scout/listings/{ad_id}/correct")
-async def ma_scout_correct(ad_id: str, body: ScoutCorrectBody,
-                           user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+def ma_scout_correct(ad_id: str, body: ScoutCorrectBody,
+                     user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Операторская правка: переклассифицировать или удалить (с обучением Haiku)."""
     from fastapi import HTTPException
     actor = actor_from_user(user)
