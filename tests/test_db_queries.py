@@ -828,3 +828,46 @@ def test_set_ad_min_price(tmp_db):
     assert tmp_db.get_ad_brief("adX")["min_price_eur"] is None
     with pytest.raises(ValueError):
         tmp_db.set_ad_min_price("adX", -1)
+
+
+# --- Склад / SLA / B-02 -----------------------------------------------------------------
+
+def test_thread_events_only_sent(tmp_db):
+    _account(tmp_db)
+    for st in ("pending", "new", "edited", "approved", "sent"):
+        tmp_db.add_message(1, "in", status=st, gmail_thread_id="tb", de_client=f"q-{st}",
+                           de_answer=f"a-{st}", sent_at="2026-10-01T12:00:00" if st == "sent" else None)
+    outs = [e["text"] for e in tmp_db.thread_events("tb") if e["kind"] == "out"]
+    assert outs == ["a-sent"]
+    assert len([e for e in tmp_db.thread_events("tb") if e["kind"] == "in"]) == 5
+
+
+def test_sla_hot_columns_and_defaults(tmp_db):
+    import config
+    with tmp_db.get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(messages)")}
+        idx = {r["name"] for r in conn.execute("PRAGMA index_list(messages)")}
+        inv = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'inv_%'")}
+    assert {"is_hot", "hot_reason", "sla_reminded_at"} <= cols
+    assert "idx_messages_dir_status_created" in idx
+    assert {"inv_products", "inv_listings", "inv_movements"} <= inv
+    assert config.DEFAULTS["sla_enabled"] == "1" and config.DEFAULTS["sla_reply_minutes"] == "30"
+    assert config.DEFAULTS["sla_hot_reply_minutes"] == "10"
+    assert (config.DEFAULTS["sla_day_start_hour"], config.DEFAULTS["sla_day_end_hour"]) == ("8", "22")
+
+
+def test_clear_forever_sold_marks_once(tmp_path, monkeypatch):
+    import database as db
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "m.db")
+    db.init_db()  # маркер ставится на чистой БД
+    with db.get_conn() as conn:
+        conn.execute("DELETE FROM settings WHERE key = 'migr_clear_adbrief_sold_3'")
+    for ad in ("3391997887", "3378070882", "3398862667", "1111111111"):
+        db.mark_ad_sold(ad)
+    db.init_db()
+    assert [db.is_ad_sold(a) for a in ("3391997887", "3378070882", "3398862667")] == [False] * 3
+    assert db.is_ad_sold("1111111111") is True  # чужие отметки не трогаем
+    db.mark_ad_sold("3391997887")  # поставили снова осознанно — миграция не повторяется
+    db.init_db()
+    assert db.is_ad_sold("3391997887") is True
