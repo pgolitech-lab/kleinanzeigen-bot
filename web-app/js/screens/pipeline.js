@@ -6,7 +6,7 @@
 // свайп «Жду / Продано», долгое нажатие — выбор нескольких.
 // Опрос каждые 20 с, устаревшие ответы отбрасываются (см. paint).
 import { api } from "../api.js";
-import { el, setLoading, setError } from "../utils.js";
+import { el, setLoading, setError, soldToday } from "../utils.js";
 import { confirmSheet, menuSheet } from "../components/sheet.js";
 import { threadRow, dealOf } from "../components/thread-row.js";
 import { icon, toast } from "../components/kit.js";
@@ -17,6 +17,7 @@ const state = { account: "", status: "all" };
 const sel = { active: false, ids: new Set() };
 let _cachedData = null;   // последний ответ /pipeline (перерисовка без запроса)
 let _detected = { n: null, at: 0 };  // найденные продажи — не чаще раза в 5 мин
+let _soldToday = null;  // {count, eur} — из /sales, если api не прислал summary
 
 let _timer = null, _visHandler = null, _hashHandler = null;
 const REFRESH_MS = 20000;
@@ -63,10 +64,12 @@ function summaryStrip(data, mount) {
   };
   cell(String(waiting), "ждут ответа", waiting ? "hot" : "", () => { state.status = "red"; renderWith(mount, data); });
   cell(String(waitingClient), "ждём клиента", "", () => { state.status = "green"; renderWith(mount, data); });
-  if (s.sold_today_count != null) {
-    const sum = s.sold_today_eur ? ` · ${Math.round(s.sold_today_eur).toLocaleString("de-DE")} €` : "";
-    cell(`${s.sold_today_count}${sum}`, "продано сегодня", s.sold_today_count ? "good" : "", () => { location.hash = "#/sales"; });
-  }
+  const soldCell = (n, sumEur) => {
+    const sum = sumEur ? ` · ${Math.round(sumEur).toLocaleString("de-DE")} €` : "";
+    cell(`${n}${sum}`, "продано сегодня", n ? "good" : "", () => { location.hash = "#/sales"; });
+  };
+  if (s.sold_today_count != null) soldCell(s.sold_today_count, s.sold_today_eur);
+  else if (_soldToday) soldCell(_soldToday.count, _soldToday.eur);
   return strip;
 }
 
@@ -276,6 +279,13 @@ async function paint(mount) {
     if (!mount.isConnected || seq !== _paintSeq) return;
     _cachedData = data;
     refreshDetected(data, mount);
+    if (data.summary?.sold_today_count == null) {
+      soldToday(api).then(v => {
+        const changed = !_soldToday || _soldToday.count !== v.count;
+        _soldToday = v;
+        if (changed && mount.isConnected && _cachedData && !sel.active) renderWith(mount, _cachedData);
+      }).catch(e => console.warn("[pipeline] sold today:", e));
+    }
   }
   renderWith(mount, _cachedData);
 }

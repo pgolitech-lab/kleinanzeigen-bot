@@ -106,3 +106,23 @@ export function parseEur(v) {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
 }
+
+// «Продано сегодня» — из того же /api/ma/sales, что и экран «Продажи»
+// (одно число на всех экранах, день по Берлину). Кэш 2 мин.
+let _soldToday = { at: 0, p: null };
+export function soldToday(api) {
+  if (_soldToday.p && Date.now() - _soldToday.at < 120000) return _soldToday.p;
+  const day = d => new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  const today = day(new Date());
+  _soldToday.at = Date.now();
+  _soldToday.p = api("/api/ma/sales?period=week&group_by=day").then(r => {
+    const sales = (r?.sales ?? []).filter(s => {
+      if (!s.sold_at) return false;
+      const iso = s.sold_at.length <= 10 ? `${s.sold_at}T12:00:00` : s.sold_at;
+      const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+      return !isNaN(d) && day(d) === today;
+    });
+    return { count: sales.length, eur: sales.reduce((a, s) => a + (Number(s.sold_price_eur) || 0), 0) };
+  }).catch(e => { _soldToday.at = 0; throw e; });
+  return _soldToday.p;
+}

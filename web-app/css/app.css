@@ -1412,3 +1412,34 @@ em.good { color: var(--good); }
 .bk-run { min-height: 46px; width: 100%; }
 .pw-form { display: flex; flex-direction: column; gap: 6px; }
 .pw-form .form-control { min-height: 46px; }
+
+/* ---------- Настройки ---------- */
+.settings { display: flex; flex-direction: column; gap: 10px; }
+.set-groups { display: flex; flex-direction: column; gap: 10px; }
+.settings .c-sec .form-control { min-height: 44px; margin-bottom: 10px; }
+.set-mode { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.sm-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line2); cursor: pointer; }
+.sm-opt input { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
+.sm-t { display: flex; flex-direction: column; }
+.sm-t small { color: var(--hint); font-size: .76rem; }
+.sm-opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sm-production:has(input:checked) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.sm-production b { color: var(--danger); }
+.set-save {
+  position: sticky; bottom: 6px; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 8px;
+  background: var(--glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow);
+}
+.set-save .set-n { flex: 1; color: var(--sub); font-size: .86rem; padding-left: 6px; }
+.set-save .btn { min-height: 46px; }
+.set-save:not(.on) { display: none; }
+
+/* ---------- слой совместимости: навигация-таблетки (Рынок) ---------- */
+.nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; padding: 3px; list-style: none; border-radius: 12px; background: var(--tonal); }
+.nav-fill .nav-item { flex: 1; }
+.nav-link {
+  display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 40px; padding: 4px 8px;
+  border-radius: 10px; color: var(--sub); text-decoration: none; font-weight: 700; font-size: .84rem; cursor: pointer; white-space: nowrap;
+}
+.nav-link.active { background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); }
+.dash { display: flex; flex-direction: column; gap: 8px; }
