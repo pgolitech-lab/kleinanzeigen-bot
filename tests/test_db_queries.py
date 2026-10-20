@@ -735,3 +735,96 @@ def test_has_our_reply_like(tmp_db):
     assert tmp_db.has_our_reply_like("ts1", "ja, noch da.", around_iso="2026-10-01T12:00:00Z")
     assert not tmp_db.has_our_reply_like("ts1", "ja, noch da.", around_iso="2026-10-03T12:00:00")
     assert not tmp_db.has_our_reply_like("ts1", "anders")
+
+
+# --- Продажи: единый источник, дни по Берлину --------------------------------------------
+
+def test_berlin_day_bounds():
+    import database as db
+    # летом Берлин = UTC+2, зимой UTC+1; день перехода на зимнее время — 25 часов
+    assert db.berlin_day_bounds_utc("2026-10-20") == ("2026-10-19T22:00:00", "2026-10-20T22:00:00")
+    assert db.berlin_day_bounds_utc("2026-10-25") == ("2026-10-24T22:00:00", "2026-10-25T23:00:00")
+    assert db.berlin_day_bounds_utc("2026-12-01")[0] == "2026-11-30T23:00:00"
+
+
+def _in_row(db, tid, created="2026-10-20T08:00:00", status="pending", ad="ad1"):
+    _account(db)
+    return db.add_message(1, "in", status=status, gmail_thread_id=tid, de_client="q",
+                          ad_id=ad, ad_title="T", ad_price="100 €", created_at=created)
+
+
+def test_sales_summary_all_three_sources_by_berlin_day(tmp_db, monkeypatch):
+    import modules.db_sales as sales
+    # 1) из треда: mark_thread_sold — sold_at = utcnow; фиксируем «сейчас»
+    mid = _in_row(tmp_db, "t-thread")
+
+    class _DT(datetime):
+        @classmethod
+        def utcnow(cls):
+            return datetime(2026, 10, 20, 21, 30)  # 23:30 по Берлину 20.10
+    with monkeypatch.context() as mp:
+        mp.setattr(sales, "datetime", _DT)
+        tmp_db.mark_thread_sold(mid, 90.0)
+    # 2) ручная
+    tmp_db.add_manual_sale(account_id=1, ad_title="X", ad_price=None,
+                           sold_price_eur=50.0, sold_at="2026-10-20T12:00:00")
+    # 3) найденная и подтверждённая
+    _in_row(tmp_db, "t-det", status="sent")
+    det = tmp_db.record_detection(gmail_thread_id="t-det", is_sale=True, confidence="high",
+                                  sold_price_eur=70.0, detected_ad_title="T",
+                                  detected_sold_at="2026-10-20", evidence="e", model="m")
+    tmp_db.apply_detection_to_messages(det)
+    # продажа 21.10 00:30 по Берлину (= 20.10 22:30 UTC) — уже не «20-е»
+    late = _in_row(tmp_db, "t-late")
+    tmp_db.update_message(late, status="skipped_sold", sold_price_eur=10.0,
+                          sold_at="2026-10-20T22:30:00")
+
+    s = tmp_db.sales_summary("2026-10-20", "2026-10-20")
+    assert s["count"] == 3 and s["total_eur"] == 210.0
+    assert s["by_source"] == {"thread": 1, "manual": 1, "detected": 1}
+    assert tmp_db.sales_summary("2026-10-21", "2026-10-21")["count"] == 1
+    assert tmp_db.sales_summary()["count"] == 4
+
+
+def test_mark_thread_sold_supersedes_pending_detection(tmp_db):
+    mid = _in_row(tmp_db, "t1")
+    tmp_db.record_detection(gmail_thread_id="t1", is_sale=True, confidence="high",
+                            sold_price_eur=70.0, detected_ad_title=None,
+                            detected_sold_at=None, evidence=None, model=None)
+    assert len(tmp_db.list_pending_detections()) == 1
+    tmp_db.mark_thread_sold(mid, 80.0)
+    assert tmp_db.list_pending_detections() == []
+    assert [r["source"] for r in tmp_db.list_sales()] == ["thread"]
+
+
+def test_accept_detected_bulk(tmp_db):
+    ids = {}
+    for tid, conf, price in [("h1", "high", 10.0), ("h2", "high", None),
+                             ("m1", "medium", 20.0), ("l1", "low", 30.0)]:
+        _in_row(tmp_db, tid, status="sent")
+        ids[tid] = tmp_db.record_detection(
+            gmail_thread_id=tid, is_sale=True, confidence=conf, sold_price_eur=price,
+            detected_ad_title=None, detected_sold_at="2026-10-01", evidence=None, model=None)
+    ids["none"] = tmp_db.record_detection(
+        gmail_thread_id="no-rows", is_sale=True, confidence="high", sold_price_eur=5.0,
+        detected_ad_title=None, detected_sold_at=None, evidence=None, model=None)
+    res = tmp_db.accept_detected_bulk("medium")
+    assert sorted(a["thread_id"] for a in res["applied"]) == ["h1", "m1"]
+    assert sorted(x["detection_id"] for x in res["skipped"]) == sorted([ids["h2"], ids["none"]])
+    assert tmp_db.thread_close_reason("h1") == "detected-sale"
+    assert tmp_db.thread_close_reason("h2") is None  # пропущенная не оставила следов
+    pending = {d["id"] for d in tmp_db.list_pending_detections()}
+    assert pending == {ids["h2"], ids["none"], ids["l1"]}
+    with pytest.raises(ValueError):
+        tmp_db.accept_detected_bulk("ultra")
+
+
+def test_set_ad_min_price(tmp_db):
+    tmp_db.set_ad_min_price("adX", 150)
+    assert tmp_db.get_ad_brief("adX")["min_price_eur"] == 150.0
+    tmp_db.upsert_ad_brief("adX", "T", None, "200 €", "brief", None)
+    assert tmp_db.get_ad_brief("adX")["min_price_eur"] == 150.0  # бриф не затирает минимум
+    tmp_db.set_ad_min_price("adX", None)
+    assert tmp_db.get_ad_brief("adX")["min_price_eur"] is None
+    with pytest.raises(ValueError):
+        tmp_db.set_ad_min_price("adX", -1)
