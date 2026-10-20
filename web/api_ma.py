@@ -1405,6 +1405,9 @@ _variant_cache_lock = threading.Lock()
 _VARIANT_CACHE_MAX = 100
 
 
+_LLM_DOWN_RU = "ИИ сейчас недоступен — возьмите шаблон цены (−5 %, минимум) или напишите сами."
+
+
 def _suggest_call(fn, *args, **kwargs):
     """Функции подсказок llm: ошибки → понятные HTTP-коды с текстом для оператора."""
     from modules import llm
@@ -1418,7 +1421,12 @@ def _suggest_call(fn, *args, **kwargs):
         raise HTTPException(503, str(e))
     except llm.LLMError as e:
         logger.warning("подсказка LLM не построена: %s", e)
-        raise HTTPException(502, f"LLM не ответил: {e}")
+        raise HTTPException(502, _LLM_DOWN_RU)
+    except HTTPException:
+        raise
+    except Exception:  # CLI не найден, таймаут, обрыв — оператору не «500 Internal Server Error»
+        logger.exception("подсказка LLM упала неожиданно")
+        raise HTTPException(503, _LLM_DOWN_RU)
 
 
 class VariantsBody(BaseModel):
