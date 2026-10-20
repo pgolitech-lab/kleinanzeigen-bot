@@ -188,6 +188,12 @@ def rows_to_history(
             "is_auto_ack": bool(_rget(r, "is_auto_ack")),
             "created_at": _rget(r, "created_at") or "",
             "sent_at": _rget(r, "sent_at") or "",
+            # для памяти о клиенте (автопилот получает только историю)
+            "gmail_thread_id": _rget(r, "gmail_thread_id"),
+            "account_id": _rget(r, "account_id"),
+            "ad_id": _rget(r, "ad_id"),
+            "buyer_name": _rget(r, "buyer_name"),
+            "buyer_display_name": _rget(r, "buyer_display_name"),
         })
     return out
 
@@ -254,8 +260,10 @@ def _context_parts(
     seller_name: str = "",
     brief_text: str = "",
     history: Optional[list[dict[str, Any]]] = None,
+    memory_text: str = "",
+    lessons_text: str = "",
 ) -> list[str]:
-    """Общий контекст для всех генераций: бриф, состояние и текст объявления, история."""
+    """Общий контекст генераций: бриф, объявление, память о клиенте, уроки, история."""
     parts: list[str] = []
     if brief_text:
         parts += [brief_text, ""]
@@ -281,6 +289,11 @@ def _context_parts(
         if ad_description:
             parts += ["Описание:", _clip(ad_description, 4000)]
         parts.append("")
+
+    if memory_text:
+        parts += [memory_text, ""]
+    if lessons_text:
+        parts += [lessons_text, ""]
 
     hist_text, has_ours = format_history(history)
     if hist_text:
@@ -410,17 +423,21 @@ def generate_draft(
     client_lang: Optional[str] = None,
     task: str = "",
     current_draft: str = "",
+    memory_text: str = "",
+    lessons_text: str = "",
     max_tokens: int = 2000,
 ) -> dict[str, Any]:
     """Ответ клиенту с полным контекстом (объявление, бриф, история).
 
     task — доп. задача (стратегия / цена / инструкция оператора); пусто — обычный
     первый черновик. current_draft — текущий черновик, если задача его переделать.
+    memory_text / lessons_text — блоки из `extra_context` (память о покупателе, уроки).
     Возвращает `_answer_result`.
     """
     parts = _context_parts(
         ad_title=ad_title, ad_price=ad_price, ad_description=ad_description,
         seller_name=seller_name, brief_text=brief_text, history=history,
+        memory_text=memory_text, lessons_text=lessons_text,
     )
     parts += ["=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (de_client_text or "").strip(), ""]
     if current_draft:
@@ -478,19 +495,28 @@ def generate_autopilot_reply(
     seller_name: str = "",
     history: Optional[list[dict[str, Any]]] = None,
     brief_text: str = "",
-    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — уроки не используются (таблица пуста)
+    lessons: Optional[list[dict[str, Any]]] = None,
     floor_eur: float = 0,
     last_our_price_eur: Optional[float] = None,
     max_tokens: int = 2500,
+    client_memory: Optional[str] = None,
 ) -> dict[str, Any]:
     """Ответ автопилота: floor-aware, с web_search, со стоп-детекцией.
 
+    lessons — строки lessons (как из db.find_relevant_lessons); client_memory — блок
+    памяти о покупателе; если None — строится по последней строке истории (там есть
+    buyer_name/аккаунт/тред), чтобы вызывающим не нужно было ничего менять.
     Возвращает `_answer_result` + ru_client / should_stop / stop_reason /
     client_pressing_below_floor / used_web_search.
     """
+    from modules import llm_memory
+    if client_memory is None:
+        anchor = next((h for h in reversed(history or []) if h.get("buyer_name")), None)
+        client_memory = _safe_memory(anchor) if anchor else ""
     parts = _context_parts(
         ad_title=ad_title, ad_price=ad_price, ad_description=ad_description,
         seller_name=seller_name, brief_text=brief_text, history=history,
+        memory_text=client_memory, lessons_text=llm_memory.format_lessons(lessons),
     )
     parts += [
         "=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (de_client_text or "").strip(), "",
@@ -689,6 +715,32 @@ def draft_context(msg_row: Any) -> tuple[list[dict[str, Any]], str]:
     return history, ad_brief.brief_text_for(_rget(msg_row, "ad_id"))
 
 
+def _safe_memory(msg_row: Any) -> str:
+    """Память о покупателе; ошибка не валит генерацию ответа (логируется с traceback)."""
+    from modules import llm_memory
+    try:
+        return llm_memory.client_memory_text(msg_row)
+    except Exception:  # noqa: BLE001
+        logger.exception("память о клиенте не собрана для msg=%s — генерирую без неё", _rget(msg_row, "id"))
+        return ""
+
+
+def extra_context(msg_row: Any) -> tuple[str, str]:
+    """(memory_text, lessons_text) для письма: память о покупателе + релевантные уроки.
+
+    Вспомогательный контекст: при ошибке БД — пустая строка и запись в лог с traceback,
+    сам ответ всё равно генерируется.
+    """
+    from modules import llm_memory
+    memory = _safe_memory(msg_row)
+    try:
+        lessons = llm_memory.format_lessons(llm_memory.lessons_for(msg_row))
+    except Exception:  # noqa: BLE001
+        logger.exception("уроки не загружены для msg=%s — генерирую без них", _rget(msg_row, "id"))
+        lessons = ""
+    return memory, lessons
+
+
 def _regenerate_core(
     msg_row: Any,
     instruction: str,
@@ -713,6 +765,7 @@ def _regenerate_core(
     current = ""
     if include_current_draft:
         current = _rget(msg_row, "ru_answer") or _rget(msg_row, "de_answer") or ""
+    memory_text, lessons_text = extra_context(msg_row)
     return generate_draft(
         _rget(msg_row, "de_client") or "",
         ad_title=_rget(msg_row, "ad_title") or "",
@@ -722,6 +775,7 @@ def _regenerate_core(
         history=history, brief_text=brief_text,
         client_lang=_rget(msg_row, "client_lang") or _rget(msg_row, "answer_lang") or None,
         task=instruction, current_draft=current,
+        memory_text=memory_text, lessons_text=lessons_text,
     )
 
 
@@ -730,7 +784,7 @@ def regenerate_with_strategy(
     strategy: str,
     brief_text: Optional[str] = None,
     history: Optional[list[dict[str, Any]]] = None,
-    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — совместимость
+    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — совместимость (уроки подбираются сами)
 ) -> dict[str, Any]:
     """Перегенерить драфт под пресет (fest / harsh / friend / short / regen)."""
     instruction = QUICK_STRATEGIES.get(strategy) or TWEAK_INSTRUCTIONS.get(strategy)
@@ -748,7 +802,7 @@ def regenerate_with_price(
     price_eur: float,
     brief_text: Optional[str] = None,
     history: Optional[list[dict[str, Any]]] = None,
-    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — совместимость
+    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — совместимость (уроки подбираются сами)
 ) -> dict[str, Any]:
     """Перегенерить драфт с конкретной ценой от оператора."""
     price_str = f"{int(price_eur)}" if float(price_eur).is_integer() else f"{price_eur:.2f}"
@@ -766,7 +820,7 @@ def regenerate_with_instruction(
     instruction: str,
     brief_text: Optional[str] = None,
     history: Optional[list[dict[str, Any]]] = None,
-    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — совместимость
+    lessons: Optional[list[dict[str, Any]]] = None,  # noqa: ARG001 — совместимость (уроки подбираются сами)
 ) -> dict[str, Any]:
     """Перегенерить драфт по свободной инструкции оператора."""
     full_instruction = (
@@ -776,6 +830,61 @@ def regenerate_with_instruction(
     )
     return _regenerate_core(msg_row, full_instruction, include_current_draft=True,
                             brief_text=brief_text, history=history)
+
+
+# ─────────────────────────── Уроки ───────────────────────────
+
+_LESSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "has_lesson": {"type": "boolean",
+                       "description": "false, если правка — мелочь (опечатка, порядок слов) и учить нечему"},
+        "situation_ru": {"type": "string", "description": "Ситуация клиента одной фразой на русском"},
+        "lesson_ru": {"type": "string",
+                      "description": "Обобщённый урок, 1-2 предложения: что делать / чего не делать в таких случаях"},
+    },
+    "required": ["has_lesson", "situation_ru", "lesson_ru"],
+    "additionalProperties": False,
+}
+
+
+def extract_operator_lesson(
+    *,
+    client_message: str,
+    llm_draft: str,
+    sent_text: str,
+    llm_draft_ru: str = "",
+    sent_text_ru: str = "",
+    ad_title: str = "",
+) -> dict[str, Any]:
+    """Сформулировать урок по паре «черновик LLM → что оператор реально отправил».
+
+    Возвращает {lesson_ru ('' если учить нечему), situation_ru, tokens_in, tokens_out, cost_usd}.
+    Запись в БД — llm_memory.learn_from_sent.
+    """
+    user = (
+        f"Объявление: {ad_title or '—'}\n\n"
+        f"=== СООБЩЕНИЕ КЛИЕНТА ===\n{_clip(client_message, 1500)}\n\n"
+        f"=== ЧЕРНОВИК БОТА ===\n{_clip(llm_draft, 1500)}\n"
+        + (f"(по-русски: {_clip(llm_draft_ru, 1000)})\n" if llm_draft_ru else "")
+        + f"\n=== ОПЕРАТОР ОТПРАВИЛ ВМЕСТО ЭТОГО ===\n{_clip(sent_text, 1500)}\n"
+        + (f"(по-русски: {_clip(sent_text_ru, 1000)})\n" if sent_text_ru else "")
+        + "\nЧто оператор исправил по существу (цена, тон, факты, тактика, длина, лишние обещания)? "
+          "Сформулируй обобщённый урок для будущих ответов бота — не пересказ этого письма, а правило. "
+          "Если отличия косметические — has_lesson=false и пустой lesson_ru."
+    )
+    data, meta = call_json(
+        label="урок из правки оператора",
+        model=smart_model(),
+        system="Ты наставник продавца на Kleinanzeigen.de. Извлекаешь уроки из правок оператора.",
+        user=user, schema=_LESSON_SCHEMA, max_tokens=600,
+    )
+    lesson = (data.get("lesson_ru") or "").strip() if data.get("has_lesson") else ""
+    return {
+        "lesson_ru": lesson,
+        "situation_ru": (data.get("situation_ru") or "").strip(),
+        "tokens_in": meta["tokens_in"], "tokens_out": meta["tokens_out"], "cost_usd": meta["cost_usd"],
+    }
 
 
 # ─────────────────────────── Классификатор / детекторы (быстрая модель) ───────────────────────────

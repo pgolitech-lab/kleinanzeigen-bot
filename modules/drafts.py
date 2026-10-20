@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 import database as db
-from modules import claude
+from modules import claude, llm_memory
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +24,15 @@ def _final_msg(message_id: int, status: str) -> str:
 def _regen_context(msg: Any) -> tuple[list, str, list]:
     """Контекст генерации по сохранённому письму: (история до письма, бриф, уроки).
 
-    Уроки — всегда [] (таблица lessons не наполняется); элемент кортежа оставлен
-    ради совместимости с api_ma (превью автопилота).
+    Уроки — строки lessons (api_ma передаёт их в превью автопилота).
     """
     history, brief_text = claude.draft_context(msg)
-    return history, brief_text, []
+    try:
+        lessons = llm_memory.lessons_for(msg)
+    except Exception:  # noqa: BLE001 — уроки вспомогательные
+        logger.exception("уроки не загружены для msg=%s", msg["id"])
+        lessons = []
+    return history, brief_text, lessons
 
 
 def _save_regen_result(message_id: int, msg: Any, result: dict[str, Any], *,
@@ -45,6 +49,7 @@ def _save_regen_result(message_id: int, msg: Any, result: dict[str, Any], *,
     )
     if first_draft and not msg["client_lang"] and result.get("client_lang"):
         fields["client_lang"] = result["client_lang"]
+    fields.update(llm_memory.llm_draft_fields(result["client_answer"], result["ru_answer"]))
     if result.get("deal_brief"):
         fields["deal_brief_json"] = json.dumps(result["deal_brief"], ensure_ascii=False)
     db.update_message(message_id, **fields)
@@ -63,6 +68,7 @@ def generate_draft_for_msg(message_id: int) -> dict[str, Any]:
     if msg["status"] in _FINAL_STATUSES:
         return {"kind": "error", "message": _final_msg(message_id, msg["status"])}
     history, brief_text = claude.draft_context(msg)
+    memory_text, lessons_text = claude.extra_context(msg)
     try:
         result = claude.generate_draft(
             msg["de_client"] or "",
@@ -72,6 +78,7 @@ def generate_draft_for_msg(message_id: int) -> dict[str, Any]:
             seller_name=msg["seller_name"] or "",
             history=history, brief_text=brief_text,
             client_lang=msg["client_lang"] or None,
+            memory_text=memory_text, lessons_text=lessons_text,
         )
     except Exception as e:
         logger.exception("generate_draft_for_msg упал msg=%s", message_id)
