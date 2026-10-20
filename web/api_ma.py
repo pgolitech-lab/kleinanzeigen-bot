@@ -265,6 +265,93 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
     return {"header": header, "events": events, "related": related}
 
 
+# ──────────────────────── РАЗБОР (triage) ────────────────────────
+# Очередь «ждут нас», отсортированная по срочности и шансу сделки. Баллы прозрачные —
+# фронт показывает reasons, чтобы оператор видел, почему тред наверху.
+_HOT_WORDS = ("серьёз", "серьез", "готов", "горяч", "быстро", "сегодня", "завтра", "забер")
+_COLD_WORDS = ("мошен", "тянет", "спам", "скам", "подозр")
+
+
+def _triage_item(row: Any, now: datetime) -> dict[str, Any]:
+    keys = row.keys()
+    score = 0.0
+    reasons: list[str] = []
+    # 1) ожидание: до 40 баллов за первые сутки
+    wait_h = None
+    try:
+        last = datetime.fromisoformat(str(row["last_event_at"]).replace("Z", "").split("+")[0])
+        wait_h = max(0.0, (now - last).total_seconds() / 3600)
+    except (TypeError, ValueError):
+        pass
+    if wait_h is not None:
+        score += min(wait_h / 24, 1.0) * 40
+        if wait_h >= 2:
+            reasons.append(f"ждёт {int(wait_h)} ч" if wait_h < 48 else f"ждёт {int(wait_h // 24)} дн.")
+    # 2) горячесть из сводки сделки
+    brief = _parse_deal_brief(row["deal_brief_json"] if "deal_brief_json" in keys else None) or {}
+    assessment = " ".join(str(brief.get(k) or "") for k in ("client_assessment", "expected_next")).lower()
+    if any(w in assessment for w in _HOT_WORDS):
+        score += 25
+        reasons.append("горячий")
+    if any(w in assessment for w in _COLD_WORDS):
+        score -= 25
+        reasons.append("сомнительный")
+    # 3) цена: предложение покупателя против цены объявления и минимума
+    listed = _parse_listed_price_eur(row["ad_price"])
+    offered = brief.get("negotiated_price_eur")
+    floor = row["autopilot_floor_price_eur"] if "autopilot_floor_price_eur" in keys else None
+    if isinstance(offered, (int, float)) and offered > 0:
+        if listed:
+            ratio = offered / listed
+            if ratio >= 0.9:
+                score += 25
+                reasons.append("цена почти полная")
+            elif ratio >= 0.75:
+                score += 10
+                reasons.append(f"предлагает {int(ratio * 100)}%")
+        if floor and offered >= floor:
+            score += 15
+            reasons.append("не ниже минимума")
+    # 4) готовый черновик — ответить можно сразу
+    has_draft = bool(row["has_pending_draft"]) and bool(row["de_answer"] if "de_answer" in keys else None)
+    if has_draft:
+        score += 5
+    return {
+        "thread_id": row["gmail_thread_id"],
+        "msg_id": row["id"],
+        "account_id": row["account_id"] if "account_id" in keys else None,
+        "buyer_display_name": row["buyer_display_name"],
+        "ad_title": row["ad_title"],
+        "ad_price": row["ad_price"],
+        "ad_price_eur": listed,
+        "offered_eur": offered if isinstance(offered, (int, float)) else None,
+        "floor_eur": floor,
+        "client_message_ru": _preview(row["ru_client"] if "ru_client" in keys else None),
+        "last_event_at": row["last_event_at"],
+        "wait_hours": round(wait_h, 1) if wait_h is not None else None,
+        "deal_summary_ru": brief.get("summary_ru"),
+        "draft": {
+            "msg_id": row["id"],
+            "status": row["status"],
+            "client_text": row["de_answer"],
+            "ru_text": (row["ru_translation"] if "ru_translation" in keys else None) or row["ru_answer"],
+        } if has_draft else None,
+        "score": round(score, 1),
+        "reasons": reasons,
+    }
+
+
+@router.get("/triage")
+def ma_triage(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """«Разбор»: треды, где ход за нами (последним писал покупатель), без активного автопилота —
+    по убыванию балла (ожидание, горячесть, цена против объявления/минимума, готовый черновик)."""
+    now = datetime.utcnow()
+    items = [_triage_item(r, now) for r in _pipeline_rows()
+             if r["last_event_kind"] == "in" and not r["autopilot_active"]]
+    items.sort(key=lambda x: (x["score"], x["last_event_at"] or ""), reverse=True)
+    return {"items": items, "count": len(items)}
+
+
 class BulkActionBody(BaseModel):
     thread_ids: list[str] = Field(..., min_length=1)
     action: str  # "pin" | "unpin" | "read" | "unread" | "close"
