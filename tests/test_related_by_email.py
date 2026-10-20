@@ -66,14 +66,17 @@ def test_same_name_different_email_is_maybe_same(tmp_db):
     _ensure_account(tmp_db)
     _in(tmp_db, "t1", "hans1@relay.de", "Hans  Müller")
     _in(tmp_db, "t2", "hans2@relay.de", "hans müller")
-    rows = tmp_db.find_related_inquiries("hans1@relay.de", exclude_thread_id="t1")
+    assert tmp_db.find_related_inquiries("hans1@relay.de", exclude_thread_id="t1") == []
+    rows = tmp_db.find_related_inquiries("hans1@relay.de", exclude_thread_id="t1",
+                                         include_maybe=True)
     assert [(r["gmail_thread_id"], r["maybe_same"]) for r in rows] == [("t2", 1)]
 
 
 def test_same_name_other_account_not_related(tmp_db):
     _in(tmp_db, "t1", "hans1@relay.de", "Hans", account_id=1)
     _in(tmp_db, "t2", "hans2@relay.de", "Hans", account_id=2)
-    assert tmp_db.find_related_inquiries("hans1@relay.de", exclude_thread_id="t1") == []
+    assert tmp_db.find_related_inquiries("hans1@relay.de", exclude_thread_id="t1",
+                                         include_maybe=True) == []
 
 
 def test_exact_first_then_maybe(tmp_db):
@@ -81,7 +84,8 @@ def test_exact_first_then_maybe(tmp_db):
     _in(tmp_db, "t1", "a@relay.de", "Petra")
     _in(tmp_db, "t2", "b@relay.de", "Petra")
     _in(tmp_db, "t3", "a@relay.de", "Petra")
-    rows = tmp_db.find_related_inquiries("a@relay.de", exclude_thread_id="t1")
+    rows = tmp_db.find_related_inquiries("a@relay.de", exclude_thread_id="t1",
+                                         include_maybe=True)
     assert [(r["gmail_thread_id"], r["maybe_same"]) for r in rows] == [("t3", 0), ("t2", 1)]
 
 
@@ -90,13 +94,15 @@ def test_empty_name_never_matches(tmp_db):
     _in(tmp_db, "t1", "a@relay.de", None)
     _in(tmp_db, "t2", "b@relay.de", None)
     _in(tmp_db, "t3", "c@relay.de", "  ")
-    assert tmp_db.find_related_inquiries("a@relay.de", exclude_thread_id="t1") == []
+    assert tmp_db.find_related_inquiries("a@relay.de", exclude_thread_id="t1",
+                                         include_maybe=True) == []
 
 
 def test_explicit_name_and_account_without_thread(tmp_db):
     _ensure_account(tmp_db)
     _in(tmp_db, "t2", "b@relay.de", "Petra")
-    rows = tmp_db.find_related_inquiries("a@relay.de", display_name="PETRA", account_id=1)
+    rows = tmp_db.find_related_inquiries("a@relay.de", display_name="PETRA", account_id=1,
+                                         include_maybe=True)
     assert [r["gmail_thread_id"] for r in rows] == ["t2"]
 
 
