@@ -1,12 +1,43 @@
 import { initData } from "./tg.js";
 
-// Cloudflare Quick Tunnel — URL ротируется при рестарте `cloudflared tunnel --url ...`.
-// Обнови эту константу + bump cache-bust в index.html если tunnel поменялся.
+// Адрес бэкенда (cloudflared Quick Tunnel → FastAPI :8080). URL туннеля
+// ротируется при рестарте cloudflared. Источники по приоритету:
+//   1. ?api=<url> в адресе Mini App — бот подставляет актуальный туннель в
+//      Menu Button и web_app-кнопки (свежий при каждом открытии);
+//   2. sessionStorage — тот же ?api= в рамках открытого окна;
+//   3. FALLBACK_API_BASE — зашитый URL (его правит tunnel-url-sync в режиме git).
+// Принимаем ТОЛЬКО https://<имя>.trycloudflare.com — ссылка с произвольным
+// ?api= не уведёт initData оператора на любой сервер. Полностью риск снимает
+// только named tunnel со своим доменом (тогда ?api= не нужен вовсе).
 //
-// NB: backend (FastAPI на :8080) должен отдавать Access-Control-Allow-Origin для
-// github.io origin'а — CORSMiddleware уже сконфигурирован в Phase 1.
-// X-Telegram-Init-Data — non-simple header, всегда триггерит preflight.
-export const API_BASE = "https://contrast-push-eligible-neighbor.trycloudflare.com";
+// NB: backend должен отдавать Access-Control-Allow-Origin для github.io
+// (CORSMiddleware). X-Telegram-Init-Data — non-simple header → всегда preflight.
+const FALLBACK_API_BASE = "https://contrast-push-eligible-neighbor.trycloudflare.com";
+const API_BASE_RE = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/;
+const API_BASE_KEY = "kab_api_base";
+
+function resolveApiBase() {
+  let fromUrl = null;
+  try {
+    fromUrl = new URL(location.href).searchParams.get("api");
+  } catch (e) {
+    console.warn("[api] не разобрать location.href:", e);
+  }
+  if (fromUrl) {
+    if (API_BASE_RE.test(fromUrl)) {
+      try { sessionStorage.setItem(API_BASE_KEY, fromUrl); } catch (e) { /* приватный режим — ок, URL уже есть */ }
+      return fromUrl;
+    }
+    console.warn("[api] ?api= отклонён (не *.trycloudflare.com):", fromUrl);
+  }
+  try {
+    const saved = sessionStorage.getItem(API_BASE_KEY);
+    if (saved && API_BASE_RE.test(saved)) return saved;
+  } catch (e) { /* storage недоступен — берём зашитый */ }
+  return FALLBACK_API_BASE;
+}
+
+export const API_BASE = resolveApiBase();
 
 // Понятная инструкция вместо технической ошибки/вечной загрузки, когда
 // Telegram не передал сессию (initData пустой) или сервер её отверг.
