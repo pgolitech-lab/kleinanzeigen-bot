@@ -78,7 +78,7 @@ Mini App: api.js берёт ?api= (строго ^https://[a-z0-9-]+\.trycloudfla
   а адрес не определяется ~10 мин → алерт.
 - OAuth claude CLI: текст алерта про реальные последствия (встают все LLM-функции бота); нечитаемый
   `.credentials.json` → алерт раз в сутки (раньше только строка в лог).
-- Блок 6: если `kab-backup.timer` включён, а свежего снимка в `~/backups/kab/daily/` нет > 36 ч → алерт.
+- Блок 6: если `kab-backup.timer` включён, а метке `~/.local/state/kleinanzeigen-bot/last_backup_ok` > 26 ч → алерт.
 - Исправлен старый баг: `local key="$1" f="$STATE/alert_$key"` — `$key` ещё пуст, все алерты писались в один файл
   `alert_`, дедуп путал разные проблемы, а `clear_alert` его не чистил.
 - `--dry-run`: проверки на **копии** state (боевые счётчики и дедуп не трогаются), рестарты/Telegram/синк туннеля —
@@ -98,6 +98,11 @@ Mini App: api.js берёт ?api= (строго ^https://[a-z0-9-]+\.trycloudfla
 - Не сделано: проба `/api/ma/*` через туннель (сейчас только `/health`). Риск: юнит от root исполняет скрипты из
   `/home/pg/kleinanzeigen-bot/scripts` — кто может писать туда, получает root (как и раньше; при желании —
   копировать скрипт в `/usr/local/lib/kab/` при установке).
+
+## 2a. Логи (`main.py`, из ветки webapp-to-ops)
+
+`apscheduler.executors.default`, `apscheduler.scheduler`, `httpx` → WARNING; в access-лог uvicorn не пишутся успешные
+`/health` и `/api/ma/pipeline` (ошибки ≥ 400 пишутся). `bot_autofix.sh` и `bot_health.sh` на INFO от APScheduler не опираются.
 
 ## 3. Юниты
 
@@ -122,6 +127,10 @@ Mini App: api.js берёт ?api= (строго ^https://[a-z0-9-]+\.trycloudfla
 5. `rclone copy` → `onedrive:kleinanzeigen-bot-backup/{daily,weekly}/` (только добавление) + проверка, что сегодняшний
    файл виден в облаке; в облаке старше 21 дн. (daily) / 70 дн. (weekly) удаляется `rclone delete --min-age`.
    Потеря локальной папки облачные копии не стирает.
+
+6. После полного успеха (снимок + облако) — метка `~/.local/state/kleinanzeigen-bot/last_backup_ok`
+   (env `KAB_BACKUP_MARKER`): строка 1 — unix-время, 2 — имя файла, 3 — remote. **Для api**: `/health` →
+   `backup_age_sec` = now − строка 1 (нет файла / мусор → `null`). `bot_health.sh` алертит при возрасте > 26 ч.
 
 Любой провал шага → exit 1 (юнит `failed`) + сообщение в Telegram через `scripts/notify.sh` (`telegram_bot.notify`);
 если и Telegram не ответил — `logger -p user.crit`. `--dry-run`: снимок и проверка во временной папке, доступность remote

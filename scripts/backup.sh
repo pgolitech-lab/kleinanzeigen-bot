@@ -26,6 +26,9 @@ KEEP_WEEKLY="${KAB_BACKUP_KEEP_WEEKLY:-8}"
 REMOTE_DAILY_AGE="${KAB_BACKUP_REMOTE_DAILY_AGE:-21d}"
 REMOTE_WEEKLY_AGE="${KAB_BACKUP_REMOTE_WEEKLY_AGE:-70d}"
 NOTIFY="$(dirname "$(readlink -f "$0")")/notify.sh"
+# Метка последнего ПОЛНОГО успеха (снимок + облако): строка 1 — unix-время, 2 — имя файла,
+# 3 — remote. Читают /health (поле backup_age_sec, api) и bot_health.sh (алерт > 26 ч).
+MARKER="${KAB_BACKUP_MARKER:-/home/pg/.local/state/kleinanzeigen-bot/last_backup_ok}"
 
 DRY=0
 case "${1:-}" in
@@ -134,5 +137,14 @@ if [ -n "$REMOTE" ]; then
   timeout 300 rclone delete "$REMOTE/weekly" --min-age "$REMOTE_WEEKLY_AGE" --include 'kleinanzeigen-*.db.zst' 2>"$WORK/rclone_err" \
     || log "WARN: чистка старых в $REMOTE/weekly не удалась: $(tail -c 200 "$WORK/rclone_err")"
   log "OK: в облаке $REMOTE/daily/$NAME.zst"
+fi
+
+# 6. Метка успеха — атомарно (tmp + mv), чтобы читатель не увидел полстроки
+mkdir -p "$(dirname "$MARKER")" || fail "не создать каталог метки $MARKER"
+tmp=$(mktemp "$MARKER.XXXXXX") || fail "mktemp для метки не удался"
+if ! { printf '%s\n%s\n%s\n' "$(date +%s)" "$NAME.zst" "${REMOTE:-local-only}" > "$tmp" \
+       && chmod 644 "$tmp" && mv -f "$tmp" "$MARKER"; }; then
+  rm -f "$tmp"
+  fail "бэкап сделан, но метка $MARKER не записана — /health будет считать бэкап старым"
 fi
 exit 0

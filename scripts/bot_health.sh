@@ -11,7 +11,7 @@
 #      иначе self-heal через update_tunnel_url.sh, алерт только если не помогло.
 #   5. OAuth-сессия claude CLI не должна истечь молча — предупредить за WARN_DAYS
 #      до истечения refresh-токена (через неё идут все LLM-вызовы бота).
-#   6. Бэкап БД свежий (если kab-backup.timer включён) — иначе алерт.
+#   6. Бэкап БД свежий (если kab-backup.timer включён): метка last_backup_ok < 26 ч.
 # Watchdog-рестарт — не чаще раза в 30 мин (дальше только алерты).
 # Алерты дедуплицируются (раз в час на сигнатуру); отметка пишется только после доставки.
 # --dry-run: проверки на копии state, без рестартов, Telegram и записи синка туннеля.
@@ -340,14 +340,15 @@ fi
 # --- 6. Бэкап БД свежий? ---
 # backup.sh сам алертит о провале, но не о том, что он вообще не запускался (таймер не
 # включён после переустановки, NUC спал в 03:30 и Persistent не догнал, скрипт убит).
-BACKUP_DIR=/home/pg/backups/kab/daily
-BACKUP_MAX_AGE_H=36
+# Источник — метка last_backup_ok, которую backup.sh пишет после ПОЛНОГО успеха
+# (снимок + облако); её же отдаёт /health как backup_age_sec.
+BACKUP_MARKER=/home/pg/.local/state/kleinanzeigen-bot/last_backup_ok
+BACKUP_MAX_AGE_H=26
 if systemctl is-enabled --quiet kab-backup.timer 2>/dev/null; then
-  newest=$(find "$BACKUP_DIR" -maxdepth 1 -name 'kleinanzeigen-*.db.zst' -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
-  newest=${newest%.*}; age_h=999
-  [[ "$newest" =~ ^[0-9]+$ ]] && age_h=$(( ($(date +%s) - newest) / 3600 ))
+  b_ts=$(read_int "$BACKUP_MARKER" 0); age_h=999
+  [ "$b_ts" -gt 0 ] && age_h=$(( ($(date +%s) - b_ts) / 3600 ))
   if [ "$age_h" -ge "$BACKUP_MAX_AGE_H" ]; then
-    alert backup "stale" "🟥 <b>watchdog</b>: свежего бэкапа БД нет (последний: $([ -n "$newest" ] && echo "${age_h} ч назад" || echo "никогда")) в $BACKUP_DIR. Проверь: systemctl status kab-backup.service, journalctl -t kab-backup."
+    alert backup "stale" "🟥 <b>watchdog</b>: свежего бэкапа БД нет (последний полный: $([ "$b_ts" -gt 0 ] && echo "${age_h} ч назад" || echo "никогда")). Проверь: systemctl status kab-backup.service, journalctl -t kab-backup."
   else
     clear_alert backup
   fi
