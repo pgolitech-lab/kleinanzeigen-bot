@@ -41,6 +41,7 @@ def client():
         mdb.get_thread_autopilot.return_value = None
         mdb.get_account.return_value = _row(name="main", gmail_email="us@gmail.com")
         msched.regenerate_draft.return_value = {"kind": "regenerated", "message": "ok"}
+        mtb._claim_lock.return_value = None  # лок свободен
         from web.app import app
         yield TestClient(app), mdb, mtb, msched
 
@@ -154,3 +155,14 @@ def test_suggest_allowed_after_skip(client):
                headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
     assert r.status_code == 200
     msched.regenerate_draft.assert_called_once_with(42, "regen")
+
+
+def test_suggest_reply_409_when_card_locked_by_other(client):
+    c, mdb, mtb, msched = client
+    mtb._claim_lock.return_value = "@other#1"
+    with patch("web.api_ma.operator_lock") as mol:
+        mol.remaining_min.return_value = 3
+        r = c.post("/api/ma/threads/abc/suggest-reply",
+                   headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert r.status_code == 409
+    msched.regenerate_draft.assert_not_called()

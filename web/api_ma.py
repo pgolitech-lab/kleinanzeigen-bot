@@ -1183,6 +1183,7 @@ def ma_suggest_reply(thread_id: str,
                  "Для нового сообщения используйте «Написать».")
 
     msg_id = latest_in["id"]
+    _claim_or_409(msg_id, actor_from_user(user))  # не перезаписывать черновик, который правит другой
     result = scheduler.regenerate_draft(msg_id, "regen")
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "regenerate failed"))

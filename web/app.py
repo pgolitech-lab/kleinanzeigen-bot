@@ -135,8 +135,13 @@ def health(request: Request) -> dict[str, Any]:
     except Exception as e:
         logger.exception("/health: статус почты недоступен")
         out["mail_status_error"] = type(e).__name__
-    from modules import telegram_bot
-    out.update(telegram_bot.llm_login_status())  # None — проверка ещё не запускалась
+    if _is_local(request):
+        try:
+            from modules import telegram_bot
+            out.update(telegram_bot.llm_login_status())  # None — проверка ещё не запускалась
+        except Exception as e:
+            logger.exception("/health: статус входа LLM недоступен")
+            out["llm_status_error"] = type(e).__name__
     try:
         out["polluted_incoming"] = _polluted_incoming()
     except Exception as e:
