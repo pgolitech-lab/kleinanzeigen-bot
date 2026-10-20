@@ -432,7 +432,9 @@ def thread_events(gmail_thread_id: str) -> list[dict[str, Any]]:
     """
     rows = thread_history(gmail_thread_id)
     events: list[dict[str, Any]] = []
-    SENT_LIKE = {*SENT_STATUSES, "edited", "approved", "pending", "new"}
+    # Только реально ушедшее клиенту. Черновики (pending/new/edited/approved) —
+    # не события переписки: лента их не показывает (B-02, раньше фильтровал api).
+    SENT_LIKE = set(SENT_STATUSES)
 
     for r in rows:
         # Входящее
@@ -448,7 +450,7 @@ def thread_events(gmail_thread_id: str) -> list[dict[str, Any]]:
             })
         # Исходящее (для direction=out — это сама row; для direction=in — наш ответ
         # на этот клиентский inquiry, ушёл позже клиентского письма).
-        # Показываем только если уже отправлено / готово (исключаем новые draft'ы).
+        # Показываем только отправленное (sent / sent_debug / sent_external).
         de_ans = r["de_answer"]
         status = r["status"] or ""
         if de_ans and status in SENT_LIKE:

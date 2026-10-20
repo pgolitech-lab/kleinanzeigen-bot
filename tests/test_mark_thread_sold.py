@@ -81,8 +81,19 @@ def test_mark_thread_sold_closes_thread_pending_rows(tmp_db):
     assert tmp_db.get_message(m_other_pending)["sold_price_eur"] is None
 
 
+def _stock(ad_id: str, qty: int) -> int:
+    """Товар на складе с учётом остатка: приход qty шт., объявление ad_id привязано."""
+    from modules import db_inventory as inv
+    pid = inv.create_product(title=f"Товар {ad_id}")
+    inv.upsert_listing(ad_id=ad_id, product_id=pid, link_method="operator")
+    inv.add_movement(product_id=pid, kind="receipt", qty=qty, occurred_at="2020-01-01T00:00:00")
+    return pid
+
+
 def test_mark_thread_sold_close_other_threads_for_ad(tmp_db):
+    """Последняя штука продана (склад: out_of_stock) → другие треды по ad свёрнуты."""
     _ensure_account(tmp_db)
+    _stock("ad-1", 1)
     m_main = _insert_msg(tmp_db, direction="in", status="pending",
                           gmail_thread_id="thread-A", ad_id="ad-1")
     m_other_thread = _insert_msg(tmp_db, direction="in", status="pending",
@@ -93,6 +104,7 @@ def test_mark_thread_sold_close_other_threads_for_ad(tmp_db):
     result = tmp_db.mark_thread_sold(
         m_main, sold_price_eur=999.0, close_other_threads_for_ad=True,
     )
+    assert result["stock"]["qty_after"] == 0 and result["stock"]["stock_tracked"] is True
     assert result["closed_other_threads"] == ["thread-B"]
     assert tmp_db.get_message(m_other_thread)["status"] == "skipped_sold"
     # Different ad — untouched
@@ -137,6 +149,7 @@ def test_mark_thread_sold_closes_thread_for_pipeline(tmp_db):
 
 def test_mark_thread_sold_closes_other_threads_when_flag_set(tmp_db):
     _ensure_account(tmp_db)
+    _stock("ad-1", 1)
     m_main = _insert_msg(tmp_db, direction="in", status="pending",
                           gmail_thread_id="thread-A", ad_id="ad-1")
     _insert_msg(tmp_db, direction="in", status="pending",
@@ -145,3 +158,56 @@ def test_mark_thread_sold_closes_other_threads_when_flag_set(tmp_db):
                              close_other_threads_for_ad=True)
     assert tmp_db.is_thread_closed("thread-A") is True
     assert tmp_db.is_thread_closed("thread-B") is True
+
+
+def test_close_other_threads_skipped_while_in_stock(tmp_db):
+    """Товар ещё есть (2 шт. → 1) — другие покупатели не сворачиваются."""
+    _ensure_account(tmp_db)
+    _stock("ad-1", 2)
+    m_main = _insert_msg(tmp_db, direction="in", status="pending",
+                         gmail_thread_id="thread-A", ad_id="ad-1")
+    m_other = _insert_msg(tmp_db, direction="in", status="pending",
+                          gmail_thread_id="thread-B", ad_id="ad-1")
+    res = tmp_db.mark_thread_sold(m_main, sold_price_eur=10.0, close_other_threads_for_ad=True)
+    assert res["closed_other_threads"] == [] and res["stock"]["qty_after"] == 1
+    assert tmp_db.get_message(m_other)["status"] == "pending"
+    assert tmp_db.is_thread_closed("thread-B") is False
+
+
+def test_close_other_threads_skipped_when_stock_unknown(tmp_db):
+    """Объявления нет на складе — остаток неизвестен, другие треды не трогаем."""
+    _ensure_account(tmp_db)
+    m_main = _insert_msg(tmp_db, direction="in", status="pending",
+                         gmail_thread_id="thread-A", ad_id="ad-1")
+    m_other = _insert_msg(tmp_db, direction="in", status="pending",
+                          gmail_thread_id="thread-B", ad_id="ad-1")
+    res = tmp_db.mark_thread_sold(m_main, sold_price_eur=10.0, close_other_threads_for_ad=True)
+    assert res["closed_other_threads"] == [] and res["stock"] is None
+    assert tmp_db.get_message(m_other)["status"] == "pending"
+
+
+def test_stock_failure_does_not_roll_back_sale(tmp_db, monkeypatch):
+    _ensure_account(tmp_db)
+    from modules import inventory
+
+    def boom(**kw):
+        raise RuntimeError("склад упал")
+    monkeypatch.setattr(inventory, "record_sale", boom)
+    mid = _insert_msg(tmp_db, direction="in", status="pending",
+                      gmail_thread_id="thread-A", ad_id="ad-1")
+    res = tmp_db.mark_thread_sold(mid, sold_price_eur=10.0)
+    assert res["stock"] is None
+    assert tmp_db.get_message(mid)["status"] == "skipped_sold"
+    assert tmp_db.is_thread_closed("thread-A") is True
+
+
+def test_sale_recorded_in_stock_once(tmp_db):
+    _ensure_account(tmp_db)
+    from modules import db_inventory as inv
+    pid = _stock("ad-1", 3)
+    mid = _insert_msg(tmp_db, direction="in", status="pending",
+                      gmail_thread_id="thread-A", ad_id="ad-1")
+    tmp_db.mark_thread_sold(mid, sold_price_eur=10.0)
+    tmp_db.mark_thread_sold(mid, sold_price_eur=10.0)  # повтор — не списывает второй раз
+    assert inv.stock_qty(pid) == 2
+    assert inv.sale_for_thread("thread-A")["source"] == "thread"

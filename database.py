@@ -594,6 +594,18 @@ def init_db() -> None:
             "ON client_dossier_emails(dossier_id)"
         )
 
+        # Горячие покупатели и SLA (модуль mail, modules/hot_buyer.py / sla.py).
+        #   is_hot / hot_reason — письмо «горячее» (готов брать, торопится) и почему;
+        #   sla_reminded_at — когда оператору напомнили, что письмо ждёт ответа.
+        _add_column_if_missing(conn, "messages", "is_hot", "INTEGER DEFAULT 0")
+        _add_column_if_missing(conn, "messages", "hot_reason", "TEXT")
+        _add_column_if_missing(conn, "messages", "sla_reminded_at", "TEXT")
+        # SLA-джоб каждые 5 мин: входящие в ждущих статусах за последние часы.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_dir_status_created "
+            "ON messages(direction, status, created_at)"
+        )
+
         # thread_flags — операторские флаги тредов: закрепить, непрочитано.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS thread_flags (
@@ -603,6 +615,32 @@ def init_db() -> None:
                 updated_at      TEXT    NOT NULL
             )
         """)
+
+        # Склад (modules/db_inventory.py, сессия stock). Ленивая инициализация там
+        # тоже есть, но схема при старте — надёжнее.
+        from modules.db_inventory import ensure_inventory_schema
+        ensure_inventory_schema(conn)
+
+        # ad_briefs.sold_at больше не источник правды (наличие — на складе).
+        # Три «вечные» отметки, из-за которых бот авто-пропускал письма по ещё
+        # продаваемым объявлениям, — снять один раз (решение владельца 2026-10-20).
+        marker = conn.execute(
+            "SELECT 1 FROM settings WHERE key = 'migr_clear_adbrief_sold_3' AND value = '1'"
+        ).fetchone()
+        if not marker:
+            conn.execute(
+                "UPDATE ad_briefs SET sold_at = NULL, updated_at = ? "
+                "WHERE ad_id IN ('3391997887', '3378070882', '3398862667') "
+                "AND sold_at IS NOT NULL",
+                (datetime.utcnow().isoformat(),),
+            )
+            conn.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES "
+                "('migr_clear_adbrief_sold_3', '1', ?) ON CONFLICT(key) DO UPDATE SET "
+                "value = '1', updated_at = excluded.updated_at",
+                (datetime.utcnow().isoformat(),),
+            )
+            invalidate_settings_cache()
 
 
 # --- ACCOUNTS ---

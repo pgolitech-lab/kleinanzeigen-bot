@@ -77,19 +77,12 @@ def test_hot_schema_has_no_additional_properties():
 AD = " https://www.kleinanzeigen.de/s-anzeige/sitzbank/123456789-223-1"
 
 
-def test_hot_flag_saved_and_fallback_notice(inc, tmp_db, monkeypatch):
-    monkeypatch.setattr(inc, "_MESSAGES_COLUMNS", set())
+def test_hot_flag_saved(inc, tmp_db):
+    # колонки is_hot / hot_reason создаёт init_db (opt/db 754b09e) — пометка идёт в карточку (api)
     body = "Hallo, ich nehme es! Wann kann ich abholen?" + AD
-    inc._process_incoming(ACC, _email(body=body))           # колонок нет → отдельное 🔥-уведомление
-    assert any("Горячий покупатель" in t for t in inc._calls["notify"])
-    with tmp_db.get_conn() as conn:
-        conn.execute("ALTER TABLE messages ADD COLUMN is_hot INTEGER DEFAULT 0")
-        conn.execute("ALTER TABLE messages ADD COLUMN hot_reason TEXT")
-    n = len(inc._calls["notify"])
     inc._process_incoming(ACC, _email(gmail_message_id="<m2@x>", gmail_thread_id="T2", uid="9", body=body))
     row = tmp_db.find_by_gmail_message_id("<m2@x>")
     assert row["is_hot"] == 1 and "nehme" in row["hot_reason"]
-    assert len(inc._calls["notify"]) == n                   # колонка есть → пометка в карточке (api)
 
 
 def test_unsure_checked_by_haiku_after_card(inc, tmp_db, monkeypatch):
@@ -100,13 +93,6 @@ def test_unsure_checked_by_haiku_after_card(inc, tmp_db, monkeypatch):
     monkeypatch.setattr(inc.hot_buyer, "_ask_haiku", lambda t: order.append("haiku") or (True, "встреча"))
     inc._process_incoming(ACC, _email(body="Können Sie morgen um 16 Uhr kommen?" + AD))
     assert order == ["card", "haiku"]
-    assert any("Горячий покупатель" in t for t in inc._calls["notify"])
-
-
-def test_hot_notice_when_card_deferred(inc, tmp_db, monkeypatch):
-    monkeypatch.setattr(inc, "_MESSAGES_COLUMNS", set())
-    monkeypatch.setattr(inc.telegram_bot, "thread_is_busy", lambda tid: True)
-    inc._process_incoming(ACC, _email(body="Ich nehme es!" + AD))
     assert any("Горячий покупатель" in t for t in inc._calls["notify"])
 
 
@@ -159,8 +145,6 @@ def test_sla_skips_answered(sla_env, tmp_db):
 
 
 def test_sla_night_only_hot_and_morning_shift(sla_env, tmp_db):
-    with tmp_db.get_conn() as conn:
-        conn.execute("ALTER TABLE messages ADD COLUMN is_hot INTEGER DEFAULT 0")
     a = _in(tmp_db, 33, NIGHT_UTC, thread="A")              # обычное ночью — молчим
     h = _in(tmp_db, 12, NIGHT_UTC, thread="H", is_hot=1)    # горячее, порог 10 мин
     assert "напомнили про 1" in sla_env.sla_reminders_job(NIGHT_UTC)
@@ -170,8 +154,6 @@ def test_sla_night_only_hot_and_morning_shift(sla_env, tmp_db):
 
 
 def test_sla_persists_reminded_column(sla_env, tmp_db):
-    with tmp_db.get_conn() as conn:
-        conn.execute("ALTER TABLE messages ADD COLUMN sla_reminded_at TEXT")
     a = _in(tmp_db, 33, NOON_UTC, thread="A")
     sla_env.sla_reminders_job(NOON_UTC)
     assert tmp_db.get_message(a)["sla_reminded_at"]
