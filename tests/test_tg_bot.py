@@ -234,7 +234,7 @@ def test_autopilot_one_card_and_batch_reminders_and_morning(tmp_path, monkeypatc
     assert "Автопилот остановлен" in sent[-1][1]["text"]
     tb.send_autopilot_stop_notification(m1, "threat")       # срочная — новая со звуком
     assert [m for m, _ in sent][-2:] == ["sendMessage", "deleteMessage"]
-    assert sent[-1][1]["disable_notification"] is False
+    assert sent[-2][1]["disable_notification"] is False
     sent.clear()
     m2 = database.add_message(acc, "in", gmail_thread_id="U", de_client="x", status="sent",
                               buyer_display_name="Anna", ad_title="Tür")
