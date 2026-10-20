@@ -7,7 +7,37 @@
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-  <link rel="stylesheet" href="css/app.css?v=20261011-fontsize18">
+  <!-- Версии модулей (хэш содержимого) — генерирует scripts/bump_cache.sh.
+       Руками не править: после любой правки web-app/ запустить скрипт. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./js/api.js": "./js/api.js?v=784c83f03f",
+      "./js/app.js": "./js/app.js?v=57b1bc9341",
+      "./js/components/autopilot-form.js": "./js/components/autopilot-form.js?v=46c7b6904b",
+      "./js/components/backbar.js": "./js/components/backbar.js?v=f722122695",
+      "./js/components/compose-form.js": "./js/components/compose-form.js?v=6ec8e450d4",
+      "./js/components/edit-form.js": "./js/components/edit-form.js?v=0e018a15f5",
+      "./js/components/sheet.js": "./js/components/sheet.js?v=51f6359104",
+      "./js/components/tabbar.js": "./js/components/tabbar.js?v=ac9dfeeca4",
+      "./js/router.js": "./js/router.js?v=6f89eb21fd",
+      "./js/screens/client.js": "./js/screens/client.js?v=cc9fe2d61b",
+      "./js/screens/clients.js": "./js/screens/clients.js?v=f842e174c5",
+      "./js/screens/dashboard.js": "./js/screens/dashboard.js?v=dae652bdea",
+      "./js/screens/detected.js": "./js/screens/detected.js?v=14512cc843",
+      "./js/screens/pipeline.js": "./js/screens/pipeline.js?v=efe4661210",
+      "./js/screens/review.js": "./js/screens/review.js?v=c34055e43e",
+      "./js/screens/sales.js": "./js/screens/sales.js?v=55878efa90",
+      "./js/screens/scout.js": "./js/screens/scout.js?v=10aee71903",
+      "./js/screens/settings.js": "./js/screens/settings.js?v=05903f3ffe",
+      "./js/screens/thread.js": "./js/screens/thread.js?v=43078da65c",
+      "./js/tg.js": "./js/tg.js?v=041d4d6879",
+      "./js/utils.js": "./js/utils.js?v=c2db5180f6"
+    }
+  }
+  </script>
+
+  <link rel="stylesheet" href="css/app.css?v=aaf57aee16">
 </head>
 <body>
   <header id="hd">
@@ -18,6 +48,6 @@
     <p class="muted">Загрузка...</p>
   </main>
 
-  <script type="module" src="js/app.js?v=20261011-085636"></script>
+  <script type="module" src="js/app.js?v=57b1bc9341"></script>
 </body>
 </html>
