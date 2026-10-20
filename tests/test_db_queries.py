@@ -576,3 +576,108 @@ def test_inquiry_max_age_other_value_untouched(tmp_db):
     tmp_db.set_setting("inquiry_max_age_days", "3")
     config.bootstrap()
     assert config.inquiry_max_age_days() == 3
+
+
+# --- Уроки: ранжирование и майнинг ----------------------------------------------------
+
+def test_find_relevant_lessons_ranking(tmp_db):
+    tmp_db.upsert_client_dossier(account_id=1, display_name="Petra", summary_md="s",
+                                 emails=["p1@relay", "p2@relay"])
+    other = tmp_db.add_lesson(ad_id="z", account_id=9, lesson_ru="other")
+    acc = tmp_db.add_lesson(ad_id="z", account_id=1, lesson_ru="acc")
+    cat = tmp_db.add_lesson(ad_id="z", account_id=9, category="торг", lesson_ru="cat")
+    dossier = tmp_db.add_lesson(ad_id="z", account_id=9, buyer_email="p2@relay")
+    buyer = tmp_db.add_lesson(ad_id="z", account_id=9, buyer_email="p1@relay")
+    ad = tmp_db.add_lesson(ad_id="ad1", account_id=9)
+    mined = tmp_db.add_lesson(ad_id="ad1", source="mined", source_ref="m1", lesson_ru="m")
+    rows = tmp_db.find_relevant_lessons(ad_id="ad1", account_id=1, limit=10,
+                                        buyer_email="p1@relay", category="торг")
+    assert [r["id"] for r in rows] == [ad, buyer, dossier, cat, acc, other]
+    assert [r["rel_rank"] for r in rows] == [0, 1, 1, 2, 3, 4]
+    # смайненные — только по явному include_mined
+    rows = tmp_db.find_relevant_lessons(ad_id="ad1", limit=10, include_mined=True)
+    assert rows[0]["id"] == mined
+
+
+def test_find_relevant_lessons_old_signature_order(tmp_db):
+    """Без buyer_email/category — прежний порядок: ad → account → прочие, свежие первыми."""
+    o1 = tmp_db.add_lesson(ad_id="z", account_id=9)
+    a1 = tmp_db.add_lesson(ad_id="z", account_id=1)
+    d1 = tmp_db.add_lesson(ad_id="ad1", account_id=9)
+    o2 = tmp_db.add_lesson(ad_id="z", account_id=9, client_lang="de")
+    tmp_db.add_lesson(ad_id="z", account_id=9, client_lang="en")
+    rows = tmp_db.find_relevant_lessons("ad1", 1, "de", limit=10)
+    assert [r["id"] for r in rows] == [d1, a1, o2, o1]
+
+
+def test_mined_lessons_idempotent_and_flag(tmp_db):
+    assert tmp_db.has_mined_lessons("t1") is False
+    a = tmp_db.add_lesson(source="mined", source_ref="t1:торг", gmail_thread_id="t1",
+                          lesson_ru="v1", outcome="sold", category="торг")
+    b = tmp_db.add_lesson(source="mined", source_ref="t1:торг", gmail_thread_id="t1",
+                          lesson_ru="v2", outcome="sold", category="торг")
+    assert a == b
+    assert tmp_db.has_mined_lessons("t1") is True
+    tmp_db.add_lesson(source="operator_edit", gmail_thread_id="t2")
+    assert tmp_db.has_mined_lessons("t2") is False
+    with tmp_db.get_conn() as conn:
+        r = conn.execute("SELECT * FROM lessons WHERE id = ?", (a,)).fetchone()
+    assert (r["lesson_ru"], r["source"], r["source_type"]) == ("v2", "mined", "mined")
+
+
+# --- Досье клиента ---------------------------------------------------------------------
+
+def test_dossier_upsert_by_name_then_email(tmp_db):
+    d1 = tmp_db.upsert_client_dossier(
+        account_id=1, display_name="Hans  Müller", summary_md="v1",
+        facts_json={"ads": ["ad1"]}, thread_ids=["t1"], emails=["h1@relay"], max_msg_id=10)
+    # Тот же человек, новый relay-email — по имени попадает в то же досье.
+    d2 = tmp_db.upsert_client_dossier(
+        account_id=1, display_name="hans müller", summary_md="v2",
+        thread_ids=["t2"], emails=["h2@relay"], max_msg_id=5)
+    assert d1 == d2
+    d = tmp_db.get_dossier_for_email("h2@relay")
+    assert d["summary_md"] == "v2" and d["dossier_max_msg_id"] == 10
+    assert '"ad1"' in d["facts_json"]  # не затёрт None-ом
+    assert d["source_threads_json"] == '["t1", "t2"]'
+    assert tmp_db.list_dossier_emails(d1) == ["h1@relay", "h2@relay"]
+    assert tmp_db.get_dossier(1, "HANS MÜLLER")["id"] == d1
+    assert tmp_db.get_dossier(2, "Hans Müller") is None
+
+
+def test_dossier_email_link_beats_name(tmp_db):
+    """Email уже привязан — обновляем это досье, даже если имя пришло другое."""
+    d1 = tmp_db.upsert_client_dossier(account_id=1, display_name="Petra",
+                                      summary_md="a", emails=["p@relay"])
+    d2 = tmp_db.upsert_client_dossier(account_id=1, display_name="P. Schmidt",
+                                      summary_md="b", emails=["p@relay"])
+    assert d1 == d2
+
+
+def test_dossier_without_name_keyed_by_email(tmp_db):
+    d = tmp_db.upsert_client_dossier(account_id=1, display_name=None,
+                                     summary_md="x", emails=["anon@relay"])
+    assert tmp_db.get_dossier_for_email("anon@relay")["name_key"] == "email:anon@relay"
+    assert tmp_db.get_dossier(1, None) is None
+    with pytest.raises(ValueError):
+        tmp_db.upsert_client_dossier(account_id=1, display_name="", summary_md="x")
+    assert d
+
+
+def test_latest_msg_id_for_emails(tmp_db):
+    _account(tmp_db)
+    assert tmp_db.latest_msg_id_for_emails(["x@relay"]) == 0
+    mid = tmp_db.add_message(1, "in", buyer_name="x@relay", gmail_thread_id="t")
+    tmp_db.add_message(1, "in", buyer_name="y@relay", gmail_thread_id="t2")
+    assert tmp_db.latest_msg_id_for_emails(["x@relay", "z@relay"]) == mid
+
+
+def test_dossier_bad_threads_json_logged(tmp_db, caplog):
+    d = tmp_db.upsert_client_dossier(account_id=1, display_name="X", summary_md="a",
+                                     thread_ids=["t1"])
+    with tmp_db.get_conn() as conn:
+        conn.execute("UPDATE client_dossiers SET source_threads_json='\"abc\"' WHERE id=?", (d,))
+    tmp_db.upsert_client_dossier(account_id=1, display_name="X", summary_md="b",
+                                 thread_ids=["t2"])
+    assert tmp_db.get_dossier(1, "X")["source_threads_json"] == '["t2"]'
+    assert "не список строк" in caplog.text

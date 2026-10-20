@@ -343,11 +343,17 @@ def mark_thread_sold(
 def add_lesson(**fields: Any) -> int:
     """Сохранить пару (плохой_черновик, оператора_исправление). fields = столбцы lessons.
 
+    source_ref должен быть уникален НА УРОК (например f"{thread_id}:{category}"),
+    а не на тред: иначе уроки одного треда молча перезапишут друг друга.
+    source ('mined' | 'operator_edit') без source_type используется как тип.
     Если заданы source_type и source_ref — идемпотентно: повторный вызов с тем же
     источником обновляет существующий урок (created_at сохраняется) и возвращает
     его id, а не плодит дубль. Без источника — обычная вставка, как раньше.
     """
     fields = {**fields, "created_at": datetime.utcnow().isoformat()}
+    # source ('mined' | 'operator_edit') годится и как тип источника для идемпотентности.
+    if fields.get("source") and not fields.get("source_type"):
+        fields["source_type"] = fields["source"]
     if fields.get("source_ref") is not None:
         fields["source_ref"] = str(fields["source_ref"])
     cols = ", ".join(fields.keys())
@@ -366,32 +372,64 @@ def add_lesson(**fields: Any) -> int:
         return row["id"]
 
 
+def has_mined_lessons(gmail_thread_id: str) -> bool:
+    """Разобран ли тред при майнинге истории (есть уроки source='mined')."""
+    if not gmail_thread_id:
+        return False
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM lessons WHERE gmail_thread_id = ? AND source = 'mined' LIMIT 1",
+            (gmail_thread_id,),
+        ).fetchone()
+    return bool(row)
+
+
 def find_relevant_lessons(
     ad_id: Optional[str] = None,
     account_id: Optional[int] = None,
     client_lang: Optional[str] = None,
     limit: int = 5,
+    buyer_email: Optional[str] = None,
+    category: Optional[str] = None,
+    include_mined: bool = False,
 ) -> list[sqlite3.Row]:
     """Топ-N уроков по релевантности.
 
-    Ранжирование (через ORDER BY): сначала уроки по этому же ad_id,
-    затем по этому же account_id, затем общие — внутри групп по recency (DESC id).
+    Ранжирование (rel_rank): 0 — тот же ad_id; 1 — тот же покупатель (buyer_email
+    или любой email того же досье); 2 — та же category; 3 — тот же account_id;
+    4 — прочие. Внутри группы — свежие первыми (id DESC). Без buyer_email/category
+    порядок тот же, что раньше (ad → account → прочие).
+
+    include_mined=False (по умолчанию) — только уроки оператора (source NULL или
+    'operator_edit'): у смайненных заполнен lesson_ru, а не пары bad/good, и
+    промпт, который их не умеет выводить, получил бы пустые слоты вместо правок.
     """
     sql = """
         SELECT *,
-            CASE WHEN ad_id = ? THEN 0
-                 WHEN account_id = ? THEN 1
-                 ELSE 2
+            CASE WHEN ad_id = :ad THEN 0
+                 WHEN :be != '' AND (buyer_email = :be OR buyer_email IN (
+                        SELECT e2.buyer_email
+                          FROM client_dossier_emails e1
+                          JOIN client_dossier_emails e2 ON e2.dossier_id = e1.dossier_id
+                         WHERE e1.buyer_email = :be)) THEN 1
+                 WHEN :cat != '' AND category = :cat THEN 2
+                 WHEN account_id = :acc THEN 3
+                 ELSE 4
             END AS rel_rank
         FROM lessons
         WHERE 1=1
     """
-    params: list[Any] = [ad_id or "", account_id or -1]
+    if not include_mined:
+        sql += " AND (source IS NULL OR source = 'operator_edit')"
+    params: dict[str, Any] = {
+        "ad": ad_id or "", "acc": account_id if account_id is not None else -1,
+        "be": (buyer_email or "").strip(), "cat": (category or "").strip(),
+    }
     if client_lang:
-        sql += " AND (client_lang = ? OR client_lang IS NULL)"
-        params.append(client_lang)
-    sql += " ORDER BY rel_rank ASC, id DESC LIMIT ?"
-    params.append(limit)
+        sql += " AND (client_lang = :lang OR client_lang IS NULL)"
+        params["lang"] = client_lang
+    sql += " ORDER BY rel_rank ASC, id DESC LIMIT :lim"
+    params["lim"] = limit
     with get_conn() as conn:
         return conn.execute(sql, params).fetchall()
 

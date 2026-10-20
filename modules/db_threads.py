@@ -1,12 +1,15 @@
 # Thread-state, history, clients, pipeline queries.
 # Выделено из database.py.
 
+import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from database import DB_PATH, get_conn, norm_name, transaction
+
+_log = logging.getLogger(__name__)
 
 # --- CLOSED THREADS ---
 
@@ -837,3 +840,143 @@ def upsert_client_profile(buyer_email: str, tags: list[str], note: str) -> None:
             """,
             (buyer_email, _json.dumps(tags, ensure_ascii=False), note),
         )
+
+
+# --- CLIENT DOSSIERS ---
+
+def _dossier_name_key(display_name: Optional[str], emails: list[str]) -> str:
+    key = norm_name(display_name)
+    if key:
+        return key
+    if not emails:
+        raise ValueError("досье без имени и без email — нечем идентифицировать клиента")
+    return f"email:{emails[0]}"
+
+
+def upsert_client_dossier(
+    *,
+    account_id: int,
+    display_name: Optional[str],
+    summary_md: str,
+    facts_json: Any = None,
+    thread_ids: Optional[list[str]] = None,
+    emails: Optional[list[str]] = None,
+    model: Optional[str] = None,
+    max_msg_id: Optional[int] = None,
+) -> int:
+    """Создать/обновить досье клиента. Идемпотентно, одна транзакция. Возвращает id.
+
+    Ограничения: при совпадении по email name_key досье не меняется (новое имя
+    видно в display_name, но get_dossier ищет по старому ключу); email глобально
+    уникален и при конфликте переезжает в это досье.
+    Поиск существующего: сначала по любому из emails (связь email → досье точнее
+    совпадения имён), затем по (account_id, norm_name(display_name)). thread_ids
+    объединяются с уже учтёнными; emails привязываются к досье (email, ранее
+    привязанный к другому досье, переезжает сюда). facts_json — dict/list или
+    готовая JSON-строка. max_msg_id → dossier_max_msg_id (не уменьшается).
+    """
+    import json as _json
+    emails = [e.strip() for e in (emails or []) if e and e.strip()]
+    name_key = _dossier_name_key(display_name, emails)
+    if facts_json is not None and not isinstance(facts_json, str):
+        facts_json = _json.dumps(facts_json, ensure_ascii=False)
+    now = datetime.utcnow().isoformat()
+    with transaction() as conn:
+        row = None
+        if emails:
+            row = conn.execute(
+                "SELECT d.* FROM client_dossier_emails e "
+                "JOIN client_dossiers d ON d.id = e.dossier_id "
+                f"WHERE e.buyer_email IN ({','.join('?' * len(emails))}) "
+                "AND d.account_id = ? ORDER BY d.updated_at DESC LIMIT 1",
+                (*emails, account_id),
+            ).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT * FROM client_dossiers WHERE account_id = ? AND name_key = ?",
+                (account_id, name_key),
+            ).fetchone()
+        threads = set(thread_ids or [])
+        if row is not None:
+            try:
+                prev = _json.loads(row["source_threads_json"] or "[]")
+            except ValueError:
+                prev = None
+            if isinstance(prev, list) and all(isinstance(t, str) for t in prev):
+                threads |= set(prev)
+            else:
+                _log.warning("досье %s: source_threads_json не список строк — "
+                             "перезаписываю новыми тредами", row["id"])
+            new_max = max(x for x in (row["dossier_max_msg_id"], max_msg_id, 0) if x is not None)
+            conn.execute(
+                "UPDATE client_dossiers SET display_name = COALESCE(?, display_name), "
+                "summary_md = ?, facts_json = COALESCE(?, facts_json), "
+                "source_threads_json = ?, dossier_max_msg_id = ?, "
+                "model = COALESCE(?, model), updated_at = ? WHERE id = ?",
+                (display_name, summary_md, facts_json,
+                 _json.dumps(sorted(threads)), new_max or None, model, now, row["id"]),
+            )
+            dossier_id = row["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO client_dossiers (account_id, name_key, display_name, summary_md, "
+                "facts_json, source_threads_json, dossier_max_msg_id, model, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (account_id, name_key, display_name, summary_md, facts_json,
+                 _json.dumps(sorted(threads)), max_msg_id, model, now, now),
+            )
+            dossier_id = cur.lastrowid
+        for e in emails:
+            conn.execute(
+                "INSERT INTO client_dossier_emails (buyer_email, dossier_id, added_at) "
+                "VALUES (?, ?, ?) ON CONFLICT(buyer_email) DO UPDATE SET "
+                "dossier_id = excluded.dossier_id",
+                (e, dossier_id, now),
+            )
+    return dossier_id
+
+
+def get_dossier_for_email(buyer_email: Optional[str]) -> Optional[sqlite3.Row]:
+    """Досье, к которому привязан email покупателя, или None."""
+    if not buyer_email or not buyer_email.strip():
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT d.* FROM client_dossier_emails e "
+            "JOIN client_dossiers d ON d.id = e.dossier_id WHERE e.buyer_email = ?",
+            (buyer_email.strip(),),
+        ).fetchone()
+
+
+def get_dossier(account_id: int, display_name: Optional[str]) -> Optional[sqlite3.Row]:
+    """Досье по имени в аккаунте (norm_name). None если имени нет или досье нет."""
+    key = norm_name(display_name)
+    if not key:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM client_dossiers WHERE account_id = ? AND name_key = ?",
+            (account_id, key),
+        ).fetchone()
+
+
+def list_dossier_emails(dossier_id: int) -> list[str]:
+    with get_conn() as conn:
+        return [r["buyer_email"] for r in conn.execute(
+            "SELECT buyer_email FROM client_dossier_emails WHERE dossier_id = ? "
+            "ORDER BY added_at, buyer_email", (dossier_id,),
+        ).fetchall()]
+
+
+def latest_msg_id_for_emails(emails: list[str]) -> int:
+    """MAX(messages.id) по письмам этих покупателей (0 если нет). Сравнить с
+    dossier_max_msg_id: больше — значит есть новые письма, досье пора пересчитать."""
+    emails = [e for e in emails if e]
+    if not emails:
+        return 0
+    with get_conn() as conn:
+        row = conn.execute(
+            f"SELECT MAX(id) AS m FROM messages WHERE buyer_name IN ({','.join('?' * len(emails))})",
+            emails,
+        ).fetchone()
+    return row["m"] or 0
