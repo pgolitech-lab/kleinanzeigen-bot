@@ -15,6 +15,7 @@ const client   = () => import("./screens/client.js");
 const settings = () => import("./screens/settings.js");
 const sales    = () => import("./screens/sales.js");
 const detected = () => import("./screens/detected.js");
+const market   = () => import("./screens/market.js");
 const scout    = () => import("./screens/scout.js");
 
 const more     = () => import("./screens/more.js");
@@ -36,6 +37,8 @@ const ROUTES = [
   { pattern: /^#\/sales\/?$/,             screen: sales,    root: true, title: "Продажи", params: () => ({}) },
   { pattern: /^#\/(?:stock|listings)\/?$/, screen: stock,  root: true, list: "stock", title: "Склад", params: () => ({}) },
   { pattern: /^#\/stock\/questions\/?$/,  screen: stock,  title: "Тот же товар?", params: () => ({ view: "questions" }) },
+  { pattern: /^#\/stock\/market\/?$/,     screen: market, title: "Дубли и перевыкладывание", params: () => ({}) },
+  { pattern: /^#\/stock\/types\/?$/,      screen: stock,  title: "Типы и себестоимость", params: () => ({ view: "types" }) },
   { pattern: /^#\/stock\/month\/?$/,      screen: stock,  title: "Отчёт за месяц", params: () => ({ view: "month" }) },
   { pattern: /^#\/stock\/(\d+)\/?$/,       screen: stock,  list: "stock", title: "Товар", params: m => ({ id: m[1] }), key: p => p.id },
   { pattern: /^#\/scout\/?$/,             screen: scout,    title: "Рынок", params: () => ({}) },
@@ -46,7 +49,7 @@ const ROUTES = [
   { pattern: /^#\/client\/(.+)$/,         screen: client, list: "clients", title: "Клиент", params: m => ({ email: decodeURIComponent(m[1]) }), key: p => p.email },
   { pattern: /^#\/accounts\/?$/,          screen: accounts, title: "Аккаунты", params: () => ({}) },
   { pattern: /^#\/settings\/?$/,          screen: settings, title: "Настройки", params: () => ({}) },
-  { pattern: /^#\/review\/(.+)$/,         screen: review, list: "pipeline", title: "Открываю…", params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
+  { pattern: /^#\/(?:review|send)\/(.+)$/,         screen: review, list: "pipeline", title: "Открываю…", params: m => ({ msg_id: decodeURIComponent(m[1]) }) },
 ];
 
 // Экраны-списки для левой панели (широкий экран)

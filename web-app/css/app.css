@@ -28,7 +28,7 @@
   --grad: linear-gradient(135deg, var(--accent), var(--accent2));
   --shadow: 0 14px 34px -14px rgba(0, 0, 0, .7), 0 2px 8px -3px rgba(0, 0, 0, .45);
   --shadow-sm: 0 4px 14px -6px rgba(0, 0, 0, .55);
-  --out-bg: linear-gradient(140deg, color-mix(in srgb, var(--accent) 86%, #000), color-mix(in srgb, var(--accent2) 76%, #000));
+  --out-bg: linear-gradient(140deg, color-mix(in srgb, var(--accent) 86%, #1c2128), color-mix(in srgb, var(--accent2) 76%, #1c2128));
   --out-text: #fff;
   --out-sub: rgba(255, 255, 255, .74);
   --r-lg: 22px;
@@ -57,6 +57,18 @@
   --amb: var(--warn);
   --blu: var(--link);
   color-scheme: dark;
+}
+/* тёмная тема — мягкий серо-синий, а не чёрный (цвета Telegram для фона игнорируем: у него бывает #000) */
+:root:not([data-theme="light"]) {
+  --bg: #1c2128;
+  --bg2: #222933;
+  --card: #262e39;
+  --text: #dde2ea;
+  --hint: #8f9aab;
+  --sub: #a7b0be;
+  --glass: color-mix(in srgb, #1c2128 78%, transparent);
+  --shadow: 0 14px 34px -14px rgba(8, 11, 16, .55), 0 2px 8px -3px rgba(8, 11, 16, .35);
+  --shadow-sm: 0 4px 14px -6px rgba(8, 11, 16, .45);
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -333,12 +345,12 @@ body.kb #tabbar { display: none; }
 /* ---------- bottom sheet ---------- */
 #sheet-ov {
   position: fixed; inset: 0; z-index: 1050;
-  background: rgba(0, 0, 0, .5);
+  background: rgba(12, 16, 22, .5);
   opacity: 0; pointer-events: none; transition: opacity .18s;
 }
 #sheet-ov.on { opacity: 1; pointer-events: auto; }
 #sheet {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 1051;
+  position: fixed; bottom: var(--kb, 0px); left: 0; right: 0; z-index: 1051;
   transform: translateY(105%); transition: transform .22s;
   background: var(--sur);
   border: 1px solid var(--line); border-bottom: 0;
@@ -676,19 +688,19 @@ pre.payload {
 .av.md { --s: 40px; }
 .av.xl { --s: 88px; box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--acc), 0 18px 40px -12px hsl(var(--h) 70% 40% / .55); }
 .flag { display: inline-block; flex: none; width: 19px; height: 13px; border-radius: 3px; vertical-align: -1px; background: var(--line2); }
-.f-de { background: linear-gradient(#111 0 33.3%, #dd1f1f 33.3% 66.6%, #ffcc00 66.6%); }
-.f-pl { background: linear-gradient(#fafafa 0 50%, #dc143c 50%); }
-.f-nl { background: linear-gradient(#ae1c28 0 33.3%, #fafafa 33.3% 66.6%, #21468b 66.6%); }
-.f-fr { background: linear-gradient(90deg, #0055a4 0 33.3%, #fafafa 33.3% 66.6%, #ef4135 66.6%); }
-.f-it { background: linear-gradient(90deg, #009246 0 33.3%, #fafafa 33.3% 66.6%, #ce2b37 66.6%); }
-.f-ru { background: linear-gradient(#fafafa 0 33.3%, #0039a6 33.3% 66.6%, #d52b1e 66.6%); }
-.f-uk { background: linear-gradient(#0057b7 0 50%, #ffd700 50%); }
-.f-ro { background: linear-gradient(90deg, #002b7f 0 33.3%, #fcd116 33.3% 66.6%, #ce1126 66.6%); }
-.f-cs { background: linear-gradient(160deg, #11457e 0 30%, transparent 30%), linear-gradient(#fafafa 0 50%, #d7141a 50%); }
-.f-es { background: linear-gradient(#aa151b 0 25%, #f1bf00 25% 75%, #aa151b 75%); }
-.f-en { background: radial-gradient(circle at 50% 50%, #c8102e 0 18%, transparent 19%), linear-gradient(#012169, #012169); }
-.f-tr { background: radial-gradient(circle 3.2px at 47% 50%, #e30a17 98%, transparent 100%), radial-gradient(circle 4px at 39% 50%, #fff 98%, transparent 100%), #e30a17; }
-.f-txt { width: auto; padding: 0 3px; font-size: 9px; line-height: 13px; font-weight: 800; color: var(--text); }
+.flag.f-de { background: linear-gradient(#111 0 33.3%, #dd1f1f 33.3% 66.6%, #ffcc00 66.6%); }
+.flag.f-pl { background: linear-gradient(#fafafa 0 50%, #dc143c 50%); }
+.flag.f-nl { background: linear-gradient(#ae1c28 0 33.3%, #fafafa 33.3% 66.6%, #21468b 66.6%); }
+.flag.f-fr { background: linear-gradient(90deg, #0055a4 0 33.3%, #fafafa 33.3% 66.6%, #ef4135 66.6%); }
+.flag.f-it { background: linear-gradient(90deg, #009246 0 33.3%, #fafafa 33.3% 66.6%, #ce2b37 66.6%); }
+.flag.f-ru { background: linear-gradient(#fafafa 0 33.3%, #0039a6 33.3% 66.6%, #d52b1e 66.6%); }
+.flag.f-uk { background: linear-gradient(#0057b7 0 50%, #ffd700 50%); }
+.flag.f-ro { background: linear-gradient(90deg, #002b7f 0 33.3%, #fcd116 33.3% 66.6%, #ce1126 66.6%); }
+.flag.f-cs { background: linear-gradient(160deg, #11457e 0 30%, transparent 30%), linear-gradient(#fafafa 0 50%, #d7141a 50%); }
+.flag.f-es { background: linear-gradient(#aa151b 0 25%, #f1bf00 25% 75%, #aa151b 75%); }
+.flag.f-en { background: radial-gradient(circle at 50% 50%, #c8102e 0 18%, transparent 19%), linear-gradient(#012169, #012169); }
+.flag.f-tr { background: radial-gradient(circle 3.2px at 47% 50%, #e30a17 98%, transparent 100%), radial-gradient(circle 4px at 39% 50%, #fff 98%, transparent 100%), #e30a17; }
+.flag.f-txt { width: auto; padding: 0 3px; font-size: 9px; line-height: 13px; font-weight: 800; color: var(--text); }
 
 .lang-badge {
   display: inline-flex; align-items: center; gap: 2px; padding: 3px 9px; border-radius: 999px;
@@ -1243,7 +1255,7 @@ em.good { color: var(--good); }
 .sales { display: flex; flex-direction: column; gap: 10px; }
 .s-hero {
   padding: 16px; border-radius: var(--r-lg); color: #fff;
-  background: linear-gradient(140deg, color-mix(in srgb, var(--good) 80%, #000), color-mix(in srgb, var(--accent) 70%, #000));
+  background: linear-gradient(140deg, color-mix(in srgb, var(--good) 80%, #1c2128), color-mix(in srgb, var(--accent) 70%, #1c2128));
   box-shadow: var(--shadow);
 }
 :root[data-theme="light"] .s-hero { background: linear-gradient(140deg, #18a96a, #3b6cf0); }
@@ -1445,3 +1457,30 @@ em.good { color: var(--good); }
 .dash { display: flex; flex-direction: column; gap: 8px; }
 .r-unit.need { border-color: var(--warn); }
 .srow.no-link { cursor: default; }
+
+/* ===== варианты ответа (/variants) ===== */
+.variants { display: flex; flex-direction: column; gap: 10px; }
+.var { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.var-h { display: flex; justify-content: space-between; gap: 8px; }
+.var-t { margin: 0; white-space: pre-wrap; }
+.var-ru, .var-meta { margin: 0; color: var(--hint); white-space: pre-wrap; }
+.pchip.vchip { border-color: var(--accent); color: var(--accent); }
+
+/* склад: типы, комплект, партия */
+.ty-card{padding:12px;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:12px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+.ty-m{opacity:.7}
+.ty-row,.kit-row{display:flex;align-items:center;gap:8px;padding:6px 0}
+.ty-l,.kr-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ty-v{width:90px}.kr-q{width:70px}
+.r-totalrow{display:flex;flex-direction:column;gap:4px;margin:8px 0}
+.r-hint{opacity:.7}
+.kit-warn{opacity:.75}
+
+/* рынок-советник */
+.mk-card{padding:12px;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:12px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px}
+.mk-card.bad{border-color:#d9534f}.mk-card.warn{border-color:#e0a800}
+.mk-ad{display:flex;flex-direction:column;padding:4px 0;color:inherit;text-decoration:none}
+.mk-m,.mk-win,.mk-note{opacity:.7}
+.mk-copy{text-align:left;display:flex;flex-direction:column;gap:2px;padding:8px 10px;margin:4px 0;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:10px;background:none;color:inherit;font:inherit;white-space:pre-wrap}
+.mk-why,.mk-steps{margin:0;padding-left:18px}
+.mk-verdict{font-weight:600}

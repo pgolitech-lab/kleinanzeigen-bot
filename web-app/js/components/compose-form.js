@@ -7,7 +7,9 @@ import { api, LLM_TIMEOUT_MS } from "../api.js";
 import { el, sendOutcome } from "../utils.js";
 import { tg, confirm as tgConfirm } from "../tg.js";
 
-export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
+// prefill — готовый предпросмотр от ИИ ({ru_text, translated, back_ru, target_lang}): оператор
+// видит и может поправить текст, отправка — тем же шагом подтверждения
+export function buildComposeForm({ threadId, onSubmitComplete, onCancel, prefill = null }) {
   const form = el(`
     <div class="compose-form border-top pt-3 mt-3">
       <div class="text-muted small mb-2 fw-semibold">✉️ Написать клиенту (на русском — переведём)</div>
@@ -51,6 +53,14 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel }) {
     if (!text) { showErr("Текст не может быть пустым"); return null; }
     if (text.length > 4000) { showErr("Слишком длинный текст (макс. 4000)"); return null; }
     return text;
+  }
+
+  if (prefill?.translated) {
+    textarea.value = prefill.ru_text ?? "";
+    dePrev.value = prefill.translated;
+    backPrev.textContent = prefill.back_ru ?? "";
+    lastPreview = { ru_text: prefill.ru_text || prefill.back_ru || prefill.translated, target_lang: prefill.target_lang ?? "de" };
+    previewBox.classList.remove("d-none");
   }
 
   // Правка исходного RU-текста делает предпросмотр неактуальным — обязателен повторный перевод.
