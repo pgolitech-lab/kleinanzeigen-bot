@@ -74,17 +74,23 @@ TUNNEL_URL_FILE = Path(os.environ.get(
 _TUNNEL_RE = re.compile(r"^https://[a-z0-9-]+\.trycloudflare\.com$")
 
 
+_tunnel_last_problem: list[Optional[str]] = [None]  # чтобы не писать один и тот же WARNING на каждую кнопку
+
+
 def tunnel_url() -> Optional[str]:
     """Адрес API для MA из TUNNEL_URL_FILE (читается на каждый вызов). None — нет/битый файл."""
+    problem = None
     try:
         url = TUNNEL_URL_FILE.read_text(encoding="utf-8").strip()
+        if not _TUNNEL_RE.fullmatch(url):
+            problem = f"в {TUNNEL_URL_FILE} не адрес trycloudflare: {url[:100]!r}"
     except OSError as e:
-        logger.warning("tunnel_url: не прочитать %s: %s", TUNNEL_URL_FILE, e)
-        return None
-    if not _TUNNEL_RE.fullmatch(url):
-        logger.warning("tunnel_url: в %s не адрес trycloudflare: %r", TUNNEL_URL_FILE, url[:100])
-        return None
-    return url
+        problem = f"не прочитать {TUNNEL_URL_FILE}: {e}"
+    if problem != _tunnel_last_problem[0]:
+        if problem:
+            logger.warning("tunnel_url: %s — кнопки MA пойдут без api=", problem)
+        _tunnel_last_problem[0] = problem
+    return None if problem else url
 
 
 def _ma_deep_link(start_param: str) -> str:
@@ -579,13 +585,6 @@ def check_llm_login_job() -> str:
         if _notify_sent("🟥 <b>Нет входа в подписку Claude</b> — черновики и переводы не генерируются.\n"
                         f"{_html(msg)}\nНа сервере под пользователем сервиса: <code>claude auth login</code>"):
             st["alerted_at"] = now
-    st["ok"] = False
-    return msg
-    if st["ok"] or not st["alerted_at"] or now - st["alerted_at"] >= LLM_LOGIN_REMIND_SEC:
-        logger.error("LLM: нет входа в подписку Claude: %s", msg)
-        notify("🟥 <b>Нет входа в подписку Claude</b> — черновики и переводы не генерируются.\n"
-               f"{_html(msg)}\nНа сервере под пользователем сервиса: <code>claude auth login</code>")
-        st["alerted_at"] = now
     st["ok"] = False
     return msg
 
