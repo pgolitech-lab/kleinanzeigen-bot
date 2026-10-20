@@ -4,6 +4,7 @@
 #   • /api/logs, /api/status, /debug/run-job/{id} — служебное, ТОЛЬКО с самого сервера
 #     (127.0.0.1, не через туннель). Старая Jinja-морда удалена 2026-10-20 — UI оператора = MA.
 
+import logging
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -18,6 +19,8 @@ import scheduler as sched_mod
 from web.api_ma import invalidate_pipeline_cache, router as ma_router
 
 # Документация OpenAPI наружу не нужна (и через туннель её не видно); локально — тоже лишнее
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Kleinanzeigen Bot", docs_url=None, redoc_url=None, openapi_url=None)
 
 app.add_middleware(
@@ -84,7 +87,7 @@ def _polluted_incoming() -> Optional[int]:
     return _polluted_cache["value"]
 
 
-def _mail_status() -> dict[str, Any]:
+def _mail_status(detailed: bool) -> dict[str, Any]:
     """Возраст последнего удачного опроса почты + состояние очереди (scheduler модуля mail).
 
     poll_age_sec=None при poll_tracking=True — с запуска ещё ни одного удачного опроса.
@@ -101,6 +104,9 @@ def _mail_status() -> dict[str, Any]:
     if callable(status):
         st = status()
         q = st.get("queue") or {}
+        if not detailed:  # через туннель — без разбивки по аккаунтам
+            out["mail"] = {"worker_alive": q.get("worker_alive"), "queue_len": q.get("queue_len")}
+            return out
         out["mail"] = {
             "last_pass_sec": st.get("last_pass_sec"),
             "last_errors": st.get("last_errors"),
@@ -114,7 +120,7 @@ def _mail_status() -> dict[str, Any]:
 
 
 @app.get("/health")
-def health() -> dict[str, Any]:
+def health(request: Request) -> dict[str, Any]:
     """Liveness + сигналы для мониторинга. HTTP 200, пока процесс жив (watchdog смотрит код).
 
     - polling_paused: опрос почты на паузе (/pause) — это не зависание.
@@ -122,7 +128,19 @@ def health() -> dict[str, Any]:
     - polluted_incoming: входящие с неочищенным relay-шаблоном Kleinanzeigen (0 — норма;
       стабильно >0 — регресс parser._strip_relay_template). Кэш 10 мин.
     """
-    return {"status": "ok", **_mail_status(), "polluted_incoming": _polluted_incoming()}
+    out: dict[str, Any] = {"status": "ok"}
+    # Сбой диагностики не должен превращать /health в 500: watchdog рестартит по коду ответа
+    try:
+        out.update(_mail_status(detailed=_is_local(request)))
+    except Exception as e:
+        logger.exception("/health: статус почты недоступен")
+        out["mail_status_error"] = type(e).__name__
+    try:
+        out["polluted_incoming"] = _polluted_incoming()
+    except Exception as e:
+        logger.exception("/health: polluted_incoming недоступен")
+        out["polluted_incoming"] = None
+    return out
 
 
 # ============================================================

@@ -86,3 +86,14 @@ def test_health_uses_scheduler_poll_status(_no_db_config):
     assert body["polling_paused"] is True
     assert body["mail"]["worker_alive"] is True and body["mail"]["queue_len"] == 2
     assert body["mail"]["accounts"]["1"]["fails_in_row"] == 0
+    # через туннель — без разбивки по аккаунтам
+    with patch.object(scheduler, "last_poll_ok_at", lambda: time.time(), create=True), \
+         patch.object(scheduler, "poll_status", lambda: st, create=True):
+        pub = local.get("/health", headers=TUNNEL).json()
+    assert pub["mail"] == {"worker_alive": True, "queue_len": 2}
+
+
+def test_health_survives_diagnostics_failure(_no_db_config):
+    _no_db_config.polling_paused.side_effect = RuntimeError("db locked")
+    r = local.get("/health")
+    assert r.status_code == 200 and r.json()["mail_status_error"] == "RuntimeError"

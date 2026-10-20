@@ -6,6 +6,7 @@ existing scheduler.* helpers — никакой бизнес-логики.
 Все endpoint'ы требуют валидной Telegram initData через verify_init_data_dep.
 """
 from __future__ import annotations
+from concurrent.futures import Future
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -13,6 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -53,7 +55,7 @@ _PIPELINE_PREVIEW_CHARS = 200
 # Короткий кэш pipeline_threads: дашборд MA параллельно грузит /dashboard и /pipeline —
 # один тяжёлый запрос на двоих. Любой POST /api/ma/* сбрасывает кэш (web/app.py).
 _PIPELINE_TTL_SEC = 3.0
-_pipeline_cache: dict[str, Any] = {"rows": None, "at": 0.0, "gen": 0}
+_pipeline_cache: dict[str, Any] = {"rows": None, "at": 0.0, "gen": 0, "inflight": None}
 _pipeline_lock = threading.Lock()  # только на чтение/запись словаря, не на время SQL
 
 
@@ -64,15 +66,31 @@ def invalidate_pipeline_cache() -> None:
 
 
 def _pipeline_rows() -> list:
+    """pipeline_threads с кэшем: параллельные запросы ждут один SQL (single-flight)."""
     with _pipeline_lock:
-        rows, gen = _pipeline_cache["rows"], _pipeline_cache["gen"]
-        if rows is not None and time.monotonic() - _pipeline_cache["at"] <= _PIPELINE_TTL_SEC:
-            return rows
-    rows = db.pipeline_threads()
+        c = _pipeline_cache
+        if c["rows"] is not None and time.monotonic() - c["at"] <= _PIPELINE_TTL_SEC:
+            return c["rows"]
+        fut = c["inflight"]
+        leader = fut is None
+        if leader:
+            fut = c["inflight"] = Future()
+            gen = c["gen"]
+    if not leader:
+        return fut.result(timeout=60)
+    try:
+        rows = db.pipeline_threads()
+    except BaseException as e:
+        with _pipeline_lock:
+            _pipeline_cache["inflight"] = None
+        fut.set_exception(e)
+        raise
     with _pipeline_lock:
-        # Пока шёл запрос, POST мог сбросить кэш — тогда результат не кладём (он мог устареть)
+        # Пока шёл запрос, POST мог сбросить кэш — тогда результат не кладём (мог устареть)
         if _pipeline_cache["gen"] == gen:
             _pipeline_cache.update(rows=rows, at=time.monotonic())
+        _pipeline_cache["inflight"] = None
+    fut.set_result(rows)
     return rows
 
 
@@ -174,18 +192,25 @@ def _related_match(row: Any) -> dict[str, Any]:
     }
 
 
+def _db_has_include_maybe() -> bool:
+    try:
+        return "include_maybe" in inspect.signature(db.find_related_inquiries).parameters
+    except (TypeError, ValueError):  # мок в тестах
+        return True
+
+
 def _related(buyer_email: "str | None", display_name: "str | None", *,
              exclude_thread_id: "str | None" = None, account_id: "int | None" = None) -> dict[str, Any]:
     """Другие треды клиента: `matches` — точно он (тот же email), `maybe_same` — возможно тот же
     покупатель (то же имя в том же аккаунте: relay-email Kleinanzeigen свой на каждое объявление)."""
     if not buyer_email:
         return {"buyer_display_name": display_name, "matches": [], "maybe_same": []}
-    try:
+    if _db_has_include_maybe():
         rows = db.find_related_inquiries(
             buyer_email, exclude_thread_id=exclude_thread_id, limit=10,
             display_name=display_name, account_id=account_id, include_maybe=True)
-    except TypeError:
-        # TODO(api): убрать после слияния opt/db (там появился include_maybe)
+    else:
+        # TODO(api): убрать ветку после слияния opt/db (там появился include_maybe)
         rows = db.find_related_inquiries(buyer_email, exclude_thread_id=exclude_thread_id, limit=10)
     exact, maybe = [], []
     for r in rows:
@@ -658,6 +683,7 @@ def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
+    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     b = body or TranslateDraftBody()
@@ -756,6 +782,15 @@ def ma_sold(msg_id: int, body: SoldBody,
     }
 
 
+# Строка уже отправлена/закрыта — регенерация превратила бы её обратно в черновик
+_FINAL_STATUSES = {"sent", "sent_debug", "skipped", "skipped_sold", "archived", "sending"}
+
+
+def _ensure_draft_editable(row: Any) -> None:
+    if row["status"] in _FINAL_STATUSES:
+        raise HTTPException(409, f"сообщение уже в статусе {row['status']} — черновик не меняем")
+
+
 def _run_regenerate(res: "dict[str, Any]") -> None:
     """Регенерация идёт через drafts.regenerate_draft* — с полным контекстом (история треда,
     бриф объявления, уроки) и сохранением deal_brief; здесь только проверка результата."""
@@ -784,6 +819,7 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
+    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft(msg_id, body.strategy))
@@ -803,6 +839,7 @@ def ma_edit_ru(msg_id: int, body: EditTextBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
+    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     target_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
@@ -823,6 +860,7 @@ def ma_edit_de(msg_id: int, body: EditTextBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
+    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     source_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
@@ -849,6 +887,7 @@ def ma_price(msg_id: int, body: PriceBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
+    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft_with_price(msg_id, body.eur))
@@ -863,6 +902,7 @@ def ma_instruction(msg_id: int, body: InstructionBody,
     if row is None:
         raise HTTPException(404, "message not found")
     actor = actor_from_user(user)
+    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft_with_instruction(msg_id, body.text))
