@@ -52,6 +52,8 @@ backups/
 *.key
 credentials*.json
 service-account*.json
+age.key
+*.age
 
 # Скриншоты Mini App из qa / ux-lazy — на них имена и переписка покупателей
 docs/optimization/ui/*.png

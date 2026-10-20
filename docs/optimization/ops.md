@@ -124,11 +124,29 @@ Mini App: api.js берёт ?api= (строго ^https://[a-z0-9-]+\.trycloudfla
 4. `~/backups/kab/daily/kleinanzeigen-YYYYMMDD.db.zst` — 14 последних дней; `~/backups/kab/weekly/` — 8 последних (новый
    недельный, если последнему > 6 дней). Имя = дата: повторный запуск в тот же день перезаписывает снимок, а не вытесняет
    историю. Ротация по количеству файлов, не по возрасту: после недели выключенного NUC старые снимки не пропадут разом.
-5. `rclone copy` → `onedrive:kleinanzeigen-bot-backup/{daily,weekly}/` (только добавление) + проверка, что сегодняшний
-   файл виден в облаке; в облаке старше 21 дн. (daily) / 70 дн. (weekly) удаляется `rclone delete --min-age`.
+5. **Шифрование (решение владельца)**: `age -e -R ~/.config/kab-backup/age.pub` → `.db.zst.age`, затем проверка —
+   расшифровка приватным ключом `~/.config/kab-backup/age.key` побайтно совпадает с `.db.zst`. В облако уходит
+   **только** `.db.zst.age`: нет age, публичного или приватного ключа, сбой шифрования или проверки → exit 1 + алерт,
+   в облако ничего не отправляется.
+6. `rclone copy` → `onedrive:kleinanzeigen-bot-backup/{daily,weekly}/` (только добавление) + проверка, что сегодняшний
+   файл виден в облаке. Недельный — самый свежий локальный weekly, если его `.age` в облаке ещё нет. В облаке старше
+   21 дн. (daily) / 70 дн. (weekly) удаляется `rclone delete --min-age`. Каждый прогон удаляет из облака незашифрованные
+   `*.db.zst` (старые бэкапы до шифрования) и проверяет, что их не осталось; если остались — алерт.
    Потеря локальной папки облачные копии не стирает.
 
-6. После полного успеха (снимок + облако) — метка `~/.local/state/kleinanzeigen-bot/last_backup_ok`
+Локальные снимки в `~/backups/kab/` остаются **незашифрованными** `.db.zst` (права 600, каталог 700). На NUC и так лежит
+открытая рабочая БД: кто читает `~/backups`, тот прочтёт и `kleinanzeigen.db`, так что шифрование локальных копий
+защиты не добавит. Зато восстановление после поломки БД (самый частый случай) не зависит от ключа.
+
+Ключ age: пара создана 2026-10-20 на NUC (`age-keygen`), каталог `~/.config/kab-backup/` (700):
+`age.key` — приватный (600), `age.pub` — публичный (`age1xxhe3qqvt6tekkgdn42gqxuaangqyzh6yrs9rm0kwq9lz9rj73yqd3uugs`).
+**Без копии приватного ключа вне NUC облачный бэкап бесполезен**: если диск NUC умрёт, расшифровать будет нечем.
+Владельцу сохранить `age.key` в менеджер паролей (Bitwarden/1Password, защищённая заметка) или на флешку в сейф —
+но **не в OneDrive** рядом с бэкапами. Как забрать с NUC, на своём компьютере:
+`scp pg@192.168.88.28:.config/kab-backup/age.key ./kab-backup-age.key` (после переноса в менеджер — удалить файл)
+или на NUC `cat ~/.config/kab-backup/age.key` и скопировать три строки целиком.
+
+7. После полного успеха (снимок + облако) — метка `~/.local/state/kleinanzeigen-bot/last_backup_ok`
    (env `KAB_BACKUP_MARKER`): строка 1 — unix-время, 2 — имя файла, 3 — remote. **Для api**: `/health` →
    `backup_age_sec` = now − строка 1 (нет файла / мусор → `null`). `bot_health.sh` алертит при возрасте > 26 ч.
 
@@ -137,8 +155,11 @@ Mini App: api.js берёт ?api= (строго ^https://[a-z0-9-]+\.trycloudfla
 (`rclone lsjson`), без записи. Env для теста: `KAB_DB`, `KAB_BACKUP_DIR`, `KAB_BACKUP_REMOTE` (пусто = без облака;
 можно локальный путь).
 
-Проверено: `--dry-run` на проде (снимок ok, `onedrive:` доступен); полный прогон в /tmp с локальным remote — ротация
-16→14, недельный создаётся/не дублируется, файл в «облаке»; несуществующий remote → exit 1.
+Проверено: `--dry-run` на проде (снимок, шифрование и расшифровка ok, `onedrive:` доступен); полный прогон в /tmp с
+локальным remote — ротация 16→14, недельный создаётся/не дублируется, открытые `.db.zst` в «облаке» удалены;
+несуществующий remote, нет публичного ключа, чужой приватный ключ → exit 1. Боевой прогон 2026-10-20 12:05: в OneDrive
+только `daily/` и `weekly/kleinanzeigen-20261020.db.zst.age`, открытые копии удалены; скачанный `.age` расшифрован,
+`integrity_check = ok`, 2350 строк в `messages`.
 
 **rclone на NUC уже установлен (v1.60.1) и remote `onedrive:` настроен** (personal, 1 ТБ свободно) — одноразовая
 настройка не нужна. Инструкция ниже — если токен протухнет (`rclone lsd onedrive:` → `invalid_grant` / `token expired`;
@@ -161,19 +182,21 @@ Mini App: api.js берёт ?api= (строго ^https://[a-z0-9-]+\.trycloudfla
 8. Проверка на NUC: `rclone lsd onedrive:` и `~/kleinanzeigen-bot/scripts/backup.sh --dry-run` → «onedrive:… доступен».
 
 Токен хранится в `~/.config/rclone/rclone.conf` (владелец pg, права 600) — это доступ ко всему OneDrive; в репо не попадает.
-**Вопрос владельцу — шифрование.** Снимок сжимается, но не шифруется: при утечке OneDrive-аккаунта утекут App
-Password'ы всех 5 Gmail, токен бота и переписка покупателей. Рекомендую шифровать: rclone `crypt` поверх OneDrive
-(ниже) или `age` перед загрузкой. Сейчас по умолчанию — без шифрования, как решено. Как включить: шифровать бэкапы поверх OneDrive remote'ом `crypt` (`rclone config` → `n` → тип
-`crypt` → remote `onedrive:kleinanzeigen-bot-backup-crypt`) и указать его в `KAB_BACKUP_REMOTE` в юните. Пароль crypt
-тогда нужно хранить отдельно от NUC — без него бэкап не расшифровать.
 
 ### Восстановление из бэкапа
 
 ```bash
+# Новый NUC: sudo apt install age zstd sqlite3 rclone; ключ владельца → ~/.config/kab-backup/age.key (chmod 600);
+# rclone config — см. «Переавторизация OneDrive». Затем:
 # 0. Выбрать снимок: локально или скачать из облака
 ls -lt ~/backups/kab/daily/ ~/backups/kab/weekly/ | head
 rclone lsl onedrive:kleinanzeigen-bot-backup/daily/ | sort -k2,3 | tail      # если NUC/диск потерян
-rclone copy onedrive:kleinanzeigen-bot-backup/daily/kleinanzeigen-YYYYMMDD.db.zst /tmp/restore/
+# из облака — только зашифрованные .age; нужен приватный ключ age.key (на NUC или копия владельца)
+mkdir -p /tmp/restore && chmod 700 /tmp/restore
+rclone copy onedrive:kleinanzeigen-bot-backup/daily/kleinanzeigen-YYYYMMDD.db.zst.age /tmp/restore/
+age -d -i ~/.config/kab-backup/age.key -o /tmp/restore/kleinanzeigen-YYYYMMDD.db.zst \
+    /tmp/restore/kleinanzeigen-YYYYMMDD.db.zst.age
+# (локальный снимок из ~/backups/kab/ не зашифрован — сразу к шагу 1)
 
 # 1. Распаковать и проверить ДО остановки бота
 zstd -d /tmp/restore/kleinanzeigen-YYYYMMDD.db.zst -o /tmp/restore/kleinanzeigen.db
