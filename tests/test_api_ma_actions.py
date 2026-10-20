@@ -51,6 +51,7 @@ def client():
          patch("web.api_ma.telegram_bot") as mtb, \
          patch("web.api_ma.operator_lock") as mol, \
          patch("web.api_ma.scheduler") as msched, \
+         patch("web.api_ma.config.send_mode", return_value="disabled"), \
          patch("web.api_ma.claude") as mclaude:
         mc.telegram_bot_token.return_value = TEST_BOT_TOKEN
         mc.telegram_authorized_ids.return_value = {"999"}
@@ -647,3 +648,11 @@ def test_instruction_empty_422(client):
                  json={"text": ""},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 422
+
+
+def test_send_reports_kind_and_send_mode(client):
+    """Фронт честно пишет, что произошло: kind от send_one + режим отправки."""
+    c, mdb, mtb, msched, mclaude = client
+    msched.send_one.return_value = {"kind": "not_sent_disabled", "message": "выключено"}
+    body = c.post("/api/ma/messages/123/send", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()
+    assert body["kind"] == "not_sent_disabled" and body["send_mode"] == "disabled"

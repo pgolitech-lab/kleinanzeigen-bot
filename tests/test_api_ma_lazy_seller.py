@@ -42,28 +42,22 @@ def _thread(mdb, brief=None, ad_price="450 €", status="pending", sent_at=None)
     conn.execute.return_value.fetchone.return_value = None  # в очереди ничего
 
 
-def test_sold_price_required_and_stock_recorded(client):
+def test_sold_price_required_and_stock_from_db(client):
     c, mdb = client
     _thread(mdb)
     assert c.post("/api/ma/threads/t1/sold", json={}, headers=H()).status_code == 422
     assert c.post("/api/ma/threads/t1/sold", json={"price_eur": 0}, headers=H()).status_code == 422
-    with patch("modules.inventory.record_sale",
-               return_value={"product_id": 5, "qty_after": 2, "stock_tracked": True, "created": True}) as rs:
-        r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300, "note": "забрал сам"}, headers=H())
+    mdb.mark_thread_sold.return_value = {"thread_id": "t1", "ad_id": "a", "closed_other_threads": [],
+                                         "stock": {"product_id": 5, "qty_after": 2, "stock_tracked": True}}
+    with patch("modules.inventory.record_sale") as rs:
+        r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300, "note": "забрал сам",
+                                                    "close_other_threads_for_ad": True}, headers=H())
     assert r.status_code == 200
     assert r.json()["stock"] == {"product_id": 5, "qty_after": 2, "stock_tracked": True}
+    assert r.json()["others_kept_stock_left"] == 2  # другие треды не закрыты — на складе ещё 2
+    rs.assert_not_called()  # db.mark_thread_sold списывает сам — повторно не зовём
     assert mdb.mark_thread_sold.call_args.kwargs["sold_price_eur"] == 300.0
-    assert rs.call_args.kwargs["source"] == "thread" and rs.call_args.kwargs["gmail_thread_id"] == "t1"
     assert "забрал сам" in mdb.update_message.call_args.kwargs["extra_notes"]
-
-
-def test_sold_stock_failure_does_not_fail_sale(client):
-    c, mdb = client
-    _thread(mdb)
-    with patch("modules.inventory.record_sale", side_effect=RuntimeError("db locked")):
-        r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
-    assert r.status_code == 200 and r.json()["stock"] is None
-    mdb.mark_thread_sold.assert_called_once()
 
 
 def test_sold_on_answered_thread_keeps_sent_row(client):

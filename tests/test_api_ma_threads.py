@@ -209,3 +209,17 @@ def test_draft_not_shown_in_feed_as_sent(client):
     ]
     ev = c.get("/api/ma/threads/t1", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()["events"]
     assert [e["text"] for e in ev] == ["Hallo", "Sent", "Site"]
+
+
+def test_open_has_deal_and_dossier(client):
+    c, mdb = client
+    _open_thread_setup(mdb)
+    mdb.get_dossier_for_email.return_value = {"summary_ru": "постоянный клиент"}
+    mdb.pipeline_threads.return_value = []
+    from web.api_ma import invalidate_pipeline_cache
+    invalidate_pipeline_cache()
+    res = c.post("/api/ma/threads/t1/open", json={"acquire": False},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()
+    assert res["dossier"] == {"summary_ru": "постоянный клиент"}
+    assert res["deal"]["ad_price_eur"] == 1500 and res["deal"]["offer_eur"] is None
+    mdb.get_dossier_for_email.assert_called_once_with("osman@x.com")
