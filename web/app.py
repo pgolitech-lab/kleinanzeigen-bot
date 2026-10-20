@@ -16,12 +16,25 @@ from fastapi.responses import JSONResponse
 import config
 import log_buffer
 import scheduler as sched_mod
-from web.api_ma import invalidate_pipeline_cache, router as ma_router
+from contextlib import asynccontextmanager
+
+from web.api_ma import invalidate_pipeline_cache, resume_send_queue, router as ma_router
 
 # Документация OpenAPI наружу не нужна (и через туннель её не видно); локально — тоже лишнее
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Kleinanzeigen Bot", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Отложенные отправки, пережившие рестарт (status='send_queued'), — продолжить или вернуть
+    try:
+        resume_send_queue()
+    except Exception:
+        logger.exception("resume_send_queue упал — письма в send_queued остались, проверьте вручную")
+    yield
+
+
+app = FastAPI(title="Kleinanzeigen Bot", docs_url=None, redoc_url=None, openapi_url=None,
+              lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,

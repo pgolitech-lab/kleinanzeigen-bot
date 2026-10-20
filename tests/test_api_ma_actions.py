@@ -79,7 +79,7 @@ def test_send_success(client):
     body = res.json()
     assert body["ok"] is True
     msched.send_one.assert_called_once_with(123)
-    mtb._release_lock.assert_called_once_with(123)
+    mtb._release_lock.assert_called_once_with(123, "@pgtest#999")  # только свой лок
 
 
 def test_send_learns_lesson_in_background_only_when_sent(client, monkeypatch):

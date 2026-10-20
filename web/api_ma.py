@@ -40,7 +40,7 @@ _CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
 _SENT_STATUSES = frozenset(db.SENT_STATUSES)  # ушло клиенту (в т.ч. sent_external — с сайта)
 # Строка уже отвечена/закрыта: перезапись черновика затёрла бы отправленный клиенту текст
 # (инцидент аудита №45: «Предложить» переводил sent → edited и затирал de_answer).
-_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "skipped_sold", "archived"}
+_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "send_queued", "skipped_sold", "archived"}
 
 
 def _already_sent(row) -> bool:
@@ -60,6 +60,8 @@ def _is_answered(row) -> bool:
 
 
 def _ensure_draft_editable(row) -> None:
+    if row["status"] == "send_queued":
+        raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
     if _is_answered(row):
         raise HTTPException(
             409, f"Сообщение уже отправлено или закрыто ({row['status']}) — черновик не меняем. "
@@ -644,6 +646,8 @@ class SendBody(BaseModel):
     text: "str | None" = Field(None, max_length=4000)
     # явное подтверждение оператора «отправить как есть» несмотря на языковой mismatch
     force: bool = False
+    # >0 — отложенная отправка: окно «Отменить» в MA; по таймеру — обычная отправка
+    delay_sec: int = Field(0, ge=0, le=60)
 
     @field_validator("mode")
     @classmethod
@@ -663,6 +667,8 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     if _already_sent(row):
         raise HTTPException(409, f"Письмо по этому сообщению уже отправлено ({row['status']}) — "
                                  "повторно не шлём. Для нового ответа используйте «Написать».")
+    if row["status"] == SEND_QUEUED:
+        raise HTTPException(409, "Письмо уже в очереди на отправку")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -693,6 +699,14 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
                 "Подтвердите отправку «как есть» или выберите «Перевести и отправить».",
             )
 
+    if b.delay_sec > 0:
+        return _enqueue_send(msg_id, actor, b.delay_sec)
+    return _send_now(msg_id, actor)
+
+
+def _send_now(msg_id: int, actor: str) -> "dict[str, Any]":
+    """SMTP-отправка (все guard'ы пройдены вызывающим) + закрыть старые черновики треда +
+    снять лок + урок в фоне. Ошибка SMTP → HTTPException(500)."""
     result = scheduler.send_one(msg_id)
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "send failed"))
@@ -703,7 +717,8 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     # «Отправить», и оператор думает, что письмо не ушло (инцидент 2026-07-20).
     # Более новые входящие (id > msg_id) не трогаем — это неотвеченные вопросы.
     # Та же логика, что в /threads/{id}/compose.
-    thread_id = row["gmail_thread_id"] if "gmail_thread_id" in row.keys() else None
+    fresh = db.get_message(msg_id)
+    thread_id = (fresh["gmail_thread_id"] if fresh is not None else None) or None
     closed_drafts: list[int] = []
     if thread_id:
         with db.get_conn() as conn:
@@ -721,14 +736,135 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
                     (thread_id, msg_id),
                 )
 
-    telegram_bot._release_lock(msg_id)
+    telegram_bot._release_lock(msg_id, actor)
 
-    fresh = db.get_message(msg_id)
     status = fresh["status"] if fresh else "sent"
     if status in ("sent", "sent_debug"):
         # Оператор переписал черновик LLM → урок для следующих ответов (Sonnet, в фоне; ошибка — в лог)
         _LEARN_POOL.submit(_learn_from_sent, msg_id)
     return {"ok": True, "status": status, "closed_drafts": closed_drafts}
+
+
+# ── Отложенная отправка ───────────────────────────────────────────────────
+# Строка ждёт в status='send_queued' (её нельзя править/перегенерировать/слать повторно);
+# job id = msg_id. Срок и прежний статус — в settings['ma_send_queue'] (JSON), чтобы
+# очередь пережила рестарт: resume_send_queue() из старта приложения (web/app.py).
+SEND_QUEUED = "send_queued"
+SEND_QUEUE_KEY = "ma_send_queue"
+SEND_QUEUE_MAX_LATE_SEC = 600  # после рестарта: просрочено сильнее — не шлём, возвращаем в черновики
+_send_queue: dict[int, dict[str, Any]] = {}  # msg_id -> {due, prev, actor, timer}
+_send_queue_lock = threading.RLock()
+
+
+def _persist_send_queue() -> None:
+    data = {str(k): {kk: v[kk] for kk in ("due", "prev", "actor")} for k, v in _send_queue.items()}
+    db.set_setting(SEND_QUEUE_KEY, json.dumps(data))
+
+
+def _schedule_send(msg_id: int, due: float, prev: str, actor: str) -> None:
+    timer = threading.Timer(max(0.0, due - time.time()), _fire_queued_send, args=(msg_id,))
+    timer.daemon = True
+    _send_queue[msg_id] = {"due": due, "prev": prev, "actor": actor, "timer": timer}
+    timer.start()
+
+
+def _enqueue_send(msg_id: int, actor: str, delay_sec: int) -> "dict[str, Any]":
+    row = db.get_message(msg_id)
+    prev = row["status"]
+    with db.get_conn() as conn:
+        cur = conn.execute("UPDATE messages SET status=? WHERE id=? AND status=?",
+                           (SEND_QUEUED, msg_id, prev))
+    if cur.rowcount == 0:
+        raise HTTPException(409, "Статус письма изменился — обновите экран")
+    due = time.time() + delay_sec
+    with _send_queue_lock:
+        _schedule_send(msg_id, due, prev, actor)
+        _persist_send_queue()
+    logger.info("отложенная отправка msg=%s через %d с (%s)", msg_id, delay_sec, actor)
+    return {"ok": True, "queued": True, "job_id": msg_id, "status": SEND_QUEUED,
+            "send_at": datetime.utcfromtimestamp(due).isoformat(timespec="seconds")}
+
+
+def _return_to_draft(msg_id: int, prev: str) -> bool:
+    """send_queued → прежний статус. False — строка уже не в очереди (ушла / изменена)."""
+    with db.get_conn() as conn:
+        cur = conn.execute("UPDATE messages SET status=? WHERE id=? AND status=?",
+                           (prev, msg_id, SEND_QUEUED))
+    return cur.rowcount > 0
+
+
+def _fire_queued_send(msg_id: int) -> None:
+    """Таймер: отправить, если не отменили. Ошибка — ERROR + уведомление операторам."""
+    with _send_queue_lock:
+        job = _send_queue.pop(msg_id, None)
+        if job is None:
+            return  # отменили
+        _persist_send_queue()
+        if not _return_to_draft(msg_id, job["prev"]):
+            logger.warning("отложенная отправка msg=%s: строка уже не в очереди — пропуск", msg_id)
+            return
+    try:
+        row = db.get_message(msg_id)
+        if row is None or _already_sent(row):
+            logger.warning("отложенная отправка msg=%s: уже отправлено/нет строки — пропуск", msg_id)
+            return
+        _send_now(msg_id, job["actor"])
+        logger.info("отложенная отправка msg=%s выполнена", msg_id)
+    except Exception as e:
+        detail = e.detail if isinstance(e, HTTPException) else str(e)
+        logger.error("отложенная отправка msg=%s не удалась: %s", msg_id, detail)
+        telegram_bot.run_in_background(
+            telegram_bot.notify,
+            f"🟥 <b>Письмо не отправлено</b> (отложенная отправка): {telegram_bot._html(str(detail))[:300]}",
+            f"review_{msg_id}", "📋 Открыть", "send_failed")
+
+
+@router.post("/send/{job_id}/cancel")
+def ma_send_cancel(job_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Отменить отложенную отправку (job_id = msg_id). Уже ушло — 409."""
+    with _send_queue_lock:
+        job = _send_queue.pop(job_id, None)
+        if job is None:
+            raise HTTPException(409, "Отменить нельзя: письмо уже отправляется или отправлено")
+        job["timer"].cancel()
+        _persist_send_queue()
+        if not _return_to_draft(job_id, job["prev"]):
+            raise HTTPException(409, "Отменить нельзя: письмо уже отправляется или отправлено")
+    logger.info("отложенная отправка msg=%s отменена (%s)", job_id, actor_from_user(user))
+    return {"ok": True, "cancelled": True, "status": job["prev"]}
+
+
+def resume_send_queue() -> None:
+    """При старте: письма, оставшиеся в очереди. Срок ещё не вышел или вышел недавно — отправить
+    по расписанию; давно просрочены (сервис лежал) — вернуть в черновики и сообщить операторам."""
+    raw = config.get(SEND_QUEUE_KEY) or "{}"
+    try:
+        saved = {int(k): v for k, v in json.loads(raw).items()}
+    except (ValueError, AttributeError):
+        logger.error("очередь отложенной отправки нечитаема: %r — все send_queued вернутся в черновики", raw[:200])
+        saved = {}
+    with db.get_conn() as conn:
+        queued = [r["id"] for r in conn.execute(
+            "SELECT id FROM messages WHERE status=?", (SEND_QUEUED,)).fetchall()]
+    now = time.time()
+    returned: list[int] = []
+    with _send_queue_lock:
+        for msg_id in queued:
+            job = saved.get(msg_id)
+            if job and now - float(job["due"]) <= SEND_QUEUE_MAX_LATE_SEC:
+                _schedule_send(msg_id, float(job["due"]), job["prev"], job["actor"])
+            else:
+                _return_to_draft(msg_id, (job or {}).get("prev") or "edited")
+                returned.append(msg_id)
+        _persist_send_queue()
+    if queued:
+        logger.info("очередь отправки после старта: продолжено %d, возвращено в черновики %s",
+                    len(queued) - len(returned), returned)
+    if returned:
+        telegram_bot.run_in_background(
+            telegram_bot.notify,
+            f"⚠️ <b>После перезапуска не отправлено писем: {len(returned)}</b> — вернул в черновики, "
+            "отправьте ещё раз.", "pipeline", "📥 Входящие", "send_requeue")
 
 
 # Свой однопоточный пул: Sonnet через CLI — десятки секунд, не занимать пул Telegram-уведомлений
