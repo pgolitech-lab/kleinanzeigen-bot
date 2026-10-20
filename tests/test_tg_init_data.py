@@ -40,8 +40,29 @@ def test_bad_hash_raises_401(patched_config):
     assert "hash" in ei.value.detail.lower()
 
 
+def test_two_hour_old_init_data_still_valid(patched_config):
+    """Оператор работает в открытой MA дольше часа — сессия не теряется."""
+    init = make_init_data(TEST_USER_AUTHORIZED, auth_date=int(time.time()) - 2 * 3600)
+    assert tg_init_data.verify_init_data(init)["id"] == 999
+
+
+def test_empty_bot_token_returns_503(patched_config):
+    patched_config.telegram_bot_token.return_value = ""
+    with pytest.raises(HTTPException) as ei:
+        tg_init_data.verify_init_data(make_init_data(TEST_USER_AUTHORIZED))
+    assert ei.value.status_code == 503
+
+
+def test_hash_mismatch_does_not_log_expected_hash(patched_config, caplog):
+    init = make_init_data(TEST_USER_AUTHORIZED)
+    good = dict(p.split("=", 1) for p in init.split("&"))["hash"]
+    with pytest.raises(HTTPException):
+        tg_init_data.verify_init_data(init.replace(good, "0" * 64))
+    assert good[:8] not in caplog.text
+
+
 def test_expired_auth_date_raises_401(patched_config):
-    expired = int(time.time()) - 3700  # >1 hour
+    expired = int(time.time()) - tg_init_data.AUTH_DATE_MAX_AGE_SEC - 100
     init = make_init_data(TEST_USER_AUTHORIZED, auth_date=expired)
     with pytest.raises(HTTPException) as ei:
         tg_init_data.verify_init_data(init)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hmac
 import hashlib
 import json
+import logging
 import time
 from urllib.parse import parse_qs
 
@@ -17,20 +18,30 @@ from fastapi import Header, HTTPException
 import config
 
 
-AUTH_DATE_MAX_AGE_SEC = 3600  # 1 час
+# initData подписывается Telegram один раз при открытии Mini App и не обновляется, пока окно
+# открыто. При 1 ч оператор через час работы получал «сессия потеряна». 24 ч: initData ходит
+# только по HTTPS в заголовке; украденная строка дала бы те же сутки, что и серверный токен сессии.
+AUTH_DATE_MAX_AGE_SEC = 24 * 3600
+
+logger = logging.getLogger(__name__)
 
 
 def verify_init_data(raw: str) -> dict:
     """Валидирует initData строку, возвращает user dict.
 
     Raises HTTPException:
+      - 503 если в настройках нет токена бота (проверить подпись нечем)
       - 401 если hash не совпал, отсутствует user, или auth_date устарел
       - 403 если user.id не в config.telegram_authorized_ids()
     """
+    bot_token = config.telegram_bot_token()
+    if not bot_token:
+        logger.error("initData: не задан telegram_bot_token — Mini App недоступна")
+        raise HTTPException(503, "bot token not configured")
+
     parsed = parse_qs(raw, strict_parsing=False, keep_blank_values=True)
     if "hash" not in parsed or "user" not in parsed or "auth_date" not in parsed:
-        import logging as _lg
-        _lg.getLogger("init_data_debug").warning("401 missing fields keys=%s", list(parsed.keys()))
+        logger.warning("initData 401: нет обязательных полей, keys=%s", sorted(parsed.keys()))
         raise HTTPException(401, "init_data malformed: missing required field")
 
     received_hash = parsed.pop("hash")[0]
@@ -43,25 +54,18 @@ def verify_init_data(raw: str) -> dict:
     # Future auth_date с small clock-skew tolerance считаем валидным;
     # past — только в пределах AUTH_DATE_MAX_AGE_SEC.
     if auth_date > now + 60 or now - auth_date > AUTH_DATE_MAX_AGE_SEC:
-        import logging as _lg
-        _lg.getLogger("init_data_debug").warning("401 expired auth_date=%s now=%s diff=%s", auth_date, int(now), int(now)-auth_date)
+        logger.warning("initData 401: auth_date вне окна, возраст %d с", int(now) - auth_date)
         raise HTTPException(401, "init_data expired or future-dated")
 
     # data-check-string: k=v\nk=v... отсортированных по ключу.
     data_check = "\n".join(f"{k}={v[0]}" for k, v in sorted(parsed.items()))
-
-    bot_token = config.telegram_bot_token()
     secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     expected_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
 
-    # Bug fix: non-ASCII hash crashes compare_digest with TypeError → guard first.
-    if not received_hash.isascii():
-        import logging as _lg
-        _lg.getLogger("init_data_debug").warning("401 hash mismatch got=%s expected=%s", received_hash[:16], expected_hash[:16])
-        raise HTTPException(401, "init_data: hash mismatch")
-    if not hmac.compare_digest(expected_hash, received_hash):
-        import logging as _lg
-        _lg.getLogger("init_data_debug").warning("401 hash compare fail got=%s expected=%s url_keys=%s", received_hash[:16], expected_hash[:16], list(parsed.keys()))
+    # non-ASCII hash роняет compare_digest TypeError'ом → проверяем заранее.
+    # Ни полученный, ни ожидаемый hash не логируем: ожидаемый — валидная подпись.
+    if not received_hash.isascii() or not hmac.compare_digest(expected_hash, received_hash):
+        logger.warning("initData 401: подпись не совпала, keys=%s", sorted(parsed.keys()))
         raise HTTPException(401, "init_data: hash mismatch")
 
     try:
@@ -69,19 +73,19 @@ def verify_init_data(raw: str) -> dict:
     except (json.JSONDecodeError, IndexError):
         raise HTTPException(401, "init_data: cannot parse user")
 
-    # Bug fix: user field must be a JSON object, not a scalar/array.
+    # user должен быть JSON-объектом, а не скаляром/массивом.
     if not isinstance(user, dict):
         raise HTTPException(401, "init_data: user field is not an object")
 
-    # Bug fix: telegram_authorized_ids() returns set[str], user["id"] is int — stringify.
+    # telegram_authorized_ids() возвращает set[str], user["id"] — int.
     if str(user.get("id")) not in config.telegram_authorized_ids():
         raise HTTPException(403, "user not authorized")
 
     return user
 
 
-async def verify_init_data_dep(
+def verify_init_data_dep(
     x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data"),
 ) -> dict:
-    """FastAPI dependency. Возвращает user dict."""
+    """FastAPI dependency (sync — FastAPI зовёт её в threadpool: читает настройки из БД)."""
     return verify_init_data(x_telegram_init_data)

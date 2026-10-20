@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -29,6 +30,7 @@ from modules.tg_init_data import verify_init_data_dep, verify_init_data
 
 
 router = APIRouter(prefix="/api/ma", tags=["Mini App"])
+logger = logging.getLogger(__name__)
 
 _CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
 _ALLOWED_TAGS = {"Серьёзный", "Торгуется", "Тянет время", "Мошенник"}
@@ -1832,13 +1834,26 @@ def ma_scout_query_delete(query_id: int,
     db.delete_scout_query(query_id)
 
 
+_scout_verify_lock = threading.Lock()
+
+
 @router.post("/scout/verify")
 def ma_scout_verify(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Запустить Haiku-проверку типа непроверенных объявлений в фоне."""
-    import threading
+    """Запустить Haiku-проверку типа непроверенных объявлений в фоне (не более одной сразу)."""
     from modules import scout as _scout
-    threading.Thread(target=_scout.verify_listings, daemon=True).start()
-    return {"started": True}
+    if not _scout_verify_lock.acquire(blocking=False):
+        return {"started": False, "running": True}
+
+    def _run() -> None:
+        try:
+            _scout.verify_listings()
+        except Exception:
+            logger.exception("scout verify_listings упал")
+        finally:
+            _scout_verify_lock.release()
+
+    threading.Thread(target=_run, daemon=True, name="scout-verify").start()
+    return {"started": True, "running": True}
 
 
 class ScoutCorrectBody(BaseModel):
