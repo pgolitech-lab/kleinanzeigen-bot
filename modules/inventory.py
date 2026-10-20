@@ -754,6 +754,12 @@ def set_stock(product_id: int, qty: int, *, note: Optional[str] = None,
     Возвращает id движения или None, если остаток уже такой."""
     if qty < 0:
         raise ValueError("остаток не может быть отрицательным")
+    # Оператор считает склад уже без только что проданной штуки — перенести свежие «Продано»
+    # до корректировки, иначе джоб запишет их после неё и спишет второй раз
+    try:
+        sync_sales()
+    except Exception:  # noqa: BLE001
+        logger.exception("склад: sync_sales перед инвентаризацией товара %s упал", product_id)
     with transaction() as conn:
         p = conn.execute("SELECT stock_tracked FROM inv_products WHERE id = ?", (int(product_id),)).fetchone()
         if p is None:
@@ -872,11 +878,10 @@ def _dt(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
     try:
-        d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return datetime.fromisoformat(inv.norm_ts(s))
     except ValueError:
         logger.warning("склад: нераспознанная дата %r", s)
         return None
-    return d.replace(tzinfo=None) if d.tzinfo else d
 
 
 def _fifo(movements: list[Any], default_cost: Optional[float],
@@ -1098,7 +1103,9 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
                        {product_id, title, movement_id, date, qty_in, unit_cost, invested, sold,
                         left, revenue, payback: 'paid' | 'not_yet' | 'unknown', payback_pct}
       products       — по товару: продано шт., выручка, себестоимость, прибыль за месяц
-    Остаток «на конец месяца» считается по движениям до границы (поздние не учитываются).
+    Остаток «на конец месяца» считается по движениям до границы (поздние не учитываются); его
+    оценка по цене объявления / минимуму — по ТЕКУЩИМ ценам товара (истории цен нет), единицы без
+    цены — в units_without_list_price / units_without_min_price.
     """
     if not (1 <= int(month) <= 12):
         raise ValueError("месяц 1..12")
@@ -1113,7 +1120,8 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
                            "revenue": 0.0, "cogs": 0.0, "profit": 0.0, "sales": 0, "sold_qty": 0,
                            "sales_without_price": 0, "sales_without_cost": 0, "sales_with_profit": 0,
                            "stock_end": {"qty": 0, "cost": 0.0, "units_without_cost": 0,
-                                         "list_value": 0.0, "min_value": 0.0, "tracked_products": 0},
+                                         "list_value": 0.0, "min_value": 0.0, "tracked_products": 0,
+                                         "units_without_list_price": 0, "units_without_min_price": 0},
                            "lots": [], "products": []}
     for pid, mv_all in moves.items():
         p = products.get(pid)
@@ -1181,8 +1189,15 @@ def monthly_report(year: int, month: int, *, now: Optional[datetime] = None) -> 
                             se["units_without_cost"] += l["left"]
                         else:
                             se["cost"] += l["left"] * l["cost"]
-                se["list_value"] += qty_end * (p["list_price_eur"] or 0)
-                se["min_value"] += qty_end * (p["min_price_eur"] or 0)
+                # Цены — текущие цены товара (истории цен нет)
+                if p["list_price_eur"]:
+                    se["list_value"] += qty_end * p["list_price_eur"]
+                else:
+                    se["units_without_list_price"] += qty_end
+                if p["min_price_eur"]:
+                    se["min_value"] += qty_end * p["min_price_eur"]
+                else:
+                    se["units_without_min_price"] += qty_end
     for k in ("invested", "revenue", "cogs", "profit"):
         out[k] = _r(out[k])
     if out["sales"] and not out["sales_with_profit"]:
@@ -1325,6 +1340,13 @@ def apply_seed(plan: dict[str, Any]) -> dict[str, int]:
             stats["skipped_known"] += len(g.ads) - len(fresh)
             if known_pids:
                 gid2pid[g.gid] = known_pids[-1]
+                for other in sorted(set(known_pids) - {known_pids[-1]}):
+                    # Объявления одной группы уже на разных товарах — спросить, не слить ли
+                    ad = next(a for a, l in zip(g.ads, known)
+                              if l is not None and _follow_merge(l["product_id"]) == other)
+                    if inv.add_link_question(ad_id=ad.ad_id, product_id=other, suggested_product_id=known_pids[-1],
+                                             score=1.0, reason="тот же заголовок, но уже разные товары"):
+                        stats["questions"] += 1
             if not fresh:
                 continue
             if known_pids:
@@ -1446,9 +1468,17 @@ def list_product_profiles(include_archived: bool = False) -> list[dict[str, Any]
 _TEXT_PRICE_RE = re.compile(r'(\d{1,3}(?:[.\s]\d{3})+|\d{2,6})\s*(?:,-|,00)?\s*(?:€|eur\b|euro\b)', re.IGNORECASE)
 
 
+_NOT_ITEM_PRICE_RE = re.compile(r'versand|porto|liefer|shipping|доставк|kaution', re.IGNORECASE)
+
+
 def _prices_in(text: Optional[str]) -> list[float]:
+    """Цены в тексте письма: без процитированной истории («> …») и без доставки/залога."""
+    lines = [ln for ln in (text or "").splitlines() if not ln.lstrip().startswith(">")]
+    body = "\n".join(lines)
     out = []
-    for m in _TEXT_PRICE_RE.finditer(text or ""):
+    for m in _TEXT_PRICE_RE.finditer(body):
+        if _NOT_ITEM_PRICE_RE.search(body[max(0, m.start() - 25):m.start()]):
+            continue
         v = float(re.sub(r'[.\s]', "", m.group(1)))
         if v > 0:
             out.append(v)
@@ -1466,7 +1496,6 @@ def suggest_sale_price(gmail_thread_id: str) -> dict[str, Any]:
       ad_price    — цена объявления (из письма, иначе товара на складе).
     Возвращает {"price_eur": float|None, "source": str|None, "candidates": [{"source", "price_eur"}]}.
     """
-    from database import SENT_STATUSES_SQL
     import json
     cands: list[dict[str, Any]] = []
 
@@ -1494,7 +1523,8 @@ def suggest_sale_price(gmail_thread_id: str) -> dict[str, Any]:
         if isinstance(brief, dict) and brief.get("negotiated_price_eur"):
             add("deal_brief", brief["negotiated_price_eur"])
             break
-    ours = inv.iter_rows(f"SELECT de_answer FROM messages WHERE gmail_thread_id = ? AND status IN {SENT_STATUSES_SQL} "
+    # sent_debug (redirect на отладочный ящик) клиент не видел — не считаем
+    ours = inv.iter_rows("SELECT de_answer FROM messages WHERE gmail_thread_id = ? AND status IN ('sent', 'sent_external') "
                          "AND de_answer IS NOT NULL ORDER BY COALESCE(sent_at, created_at) DESC, id DESC LIMIT 1",
                          (tid,))
     if ours and _prices_in(ours[0]["de_answer"]):
@@ -1506,7 +1536,7 @@ def suggest_sale_price(gmail_thread_id: str) -> dict[str, Any]:
     ad = inv.iter_rows("SELECT ad_id, ad_price FROM messages WHERE gmail_thread_id = ? AND ad_id IS NOT NULL "
                        "ORDER BY created_at DESC, id DESC LIMIT 1", (tid,))
     if ad:
-        add("ad_price", parse_price(ad[0]["ad_price"]) or ad_context(ad[0]["ad_id"])["list_price_eur"])
+        add("ad_price", parse_price(ad[0]["ad_price"]) or ad_context_safe(ad[0]["ad_id"])["list_price_eur"])
     best = cands[0] if cands else None
     return {"price_eur": best["price_eur"] if best else None, "source": best["source"] if best else None,
             "candidates": cands}

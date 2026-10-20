@@ -14,7 +14,7 @@
 # другие модули НЕ должны из этого делать вывод «нет в наличии».
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 import database
@@ -124,6 +124,26 @@ def ensure_schema() -> None:
 
 def _now() -> str:
     return datetime.utcnow().isoformat()
+
+
+def norm_ts(value: Optional[str]) -> str:
+    """Дата/время движения → naive UTC ISO «YYYY-MM-DDTHH:MM:SS[.ffffff]».
+
+    Остаток и FIFO сравнивают occurred_at как строки, поэтому формат один на всё:
+    «2026-10-01» → «2026-10-01T12:00:00» (как ручная продажа в MA), пробел вместо «T» — ок,
+    смещение часового пояса переводится в UTC. Пусто → сейчас. Мусор → ValueError."""
+    if value is None or not str(value).strip():
+        return _now()
+    raw = str(value).strip()
+    if len(raw) == 10 and raw.count("-") == 2:
+        raw += "T12:00:00"
+    try:
+        d = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"не понял дату: {value!r}") from None
+    if d.tzinfo is not None:
+        d = d.astimezone(timezone.utc).replace(tzinfo=None)
+    return d.isoformat()
 
 
 # ─── товары ───────────────────────────────────────────────────────────────────
@@ -318,7 +338,7 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
                                        created_at, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (int(product_id), kind, qty, unit_cost_eur, unit_price_eur, source, gmail_thread_id,
-              message_id, ad_id, note, occurred_at or now, now, created_by))
+              message_id, ad_id, note, norm_ts(occurred_at), now, created_by))
         if kind in ("receipt", "adjust"):
             c.execute("UPDATE inv_products SET stock_tracked = 1, updated_at = ? WHERE id = ?",
                       (now, int(product_id)))
@@ -347,12 +367,20 @@ def update_sale_price(movement_id: int, price_eur: Optional[float]) -> None:
 
 
 def void_movement(movement_id: int, reason: str) -> bool:
+    """Отменить движение. Если отменили последний приход/корректировку — учёт товара выключается
+    (иначе остаток 0 выглядел бы как «нет в наличии»)."""
     ensure_schema()
-    with get_conn() as conn:
+    with transaction() as conn:
         cur = conn.execute(
             "UPDATE inv_movements SET voided_at = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL",
             (_now(), reason, int(movement_id)),
         )
+        if cur.rowcount:
+            conn.execute("""
+                UPDATE inv_products SET stock_tracked = EXISTS(
+                    SELECT 1 FROM inv_movements r WHERE r.product_id = inv_products.id
+                       AND r.voided_at IS NULL AND r.kind IN ('receipt', 'adjust'))
+                 WHERE id = (SELECT product_id FROM inv_movements WHERE id = ?)""", (int(movement_id),))
     return cur.rowcount > 0
 
 
@@ -371,7 +399,8 @@ def list_movements(product_id: Optional[int] = None, *, include_voided: bool = F
     sql = "SELECT * FROM inv_movements"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY occurred_at, id"
+    # При равном времени приход/корректировка раньше продажи — иначе FIFO возьмёт оценку вместо партии
+    sql += " ORDER BY occurred_at, CASE WHEN kind IN ('receipt', 'adjust') THEN 0 ELSE 1 END, id"
     with get_conn() as conn:
         return conn.execute(sql, args).fetchall()
 

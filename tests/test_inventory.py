@@ -552,3 +552,61 @@ def test_suggest_sale_price(inv):
     assert (out["price_eur"], out["source"]) == (340.0, "deal_brief")
     assert [c["source"] for c in out["candidates"]] == ["deal_brief", "our_text", "buyer_text", "ad_price"]
     assert inv.suggest_sale_price("nope") == {"price_eur": None, "source": None, "candidates": []}
+
+
+# ─── после второго ревью: даты, повторная инвентаризация, отмена прихода ──────
+
+def test_norm_ts_formats():
+    from modules.db_inventory import norm_ts
+    assert norm_ts("2026-10-01") == "2026-10-01T12:00:00"
+    assert norm_ts("2026-10-05 15:00:00") == "2026-10-05T15:00:00"
+    assert norm_ts("2026-10-31T23:30:00-02:00") == "2026-11-01T01:30:00"
+    assert norm_ts("2026-10-01T12:00:00.123456") == "2026-10-01T12:00:00.123456"
+    with pytest.raises(ValueError):
+        norm_ts("вчера")
+
+
+def test_space_dated_sale_counts_after_receipt(inv):
+    pid = inv.inv.create_product(title="Tisch")
+    inv.receive(pid, 2, 10.0, occurred_at="2026-10-05T08:00:00")
+    inv.record_sale(product_id=pid, price_eur=50, gmail_thread_id="a", occurred_at="2026-10-05 15:00:00")
+    assert inv.inv.stock_qty(pid) == 1
+    m = inv.monthly_report(2026, 10)
+    assert m["received_qty"] == 2 and m["sold_qty"] == 1
+
+
+def test_recount_does_not_double_count_pending_sale(inv):
+    import database as db
+    r = inv.link_listing("101", title="Klapptisch Opel Zafira Life", price=250)
+    inv.set_stock(r["product_id"], 5)
+    _msg(db, ad_id="101", title="Klapptisch Opel Zafira Life", price="250 €", thread="t2",
+         status="skipped_sold", sold_price=230.0, sold_at=datetime.utcnow().isoformat())
+    inv.set_stock(r["product_id"], 4)          # оператор пересчитал уже без проданной
+    inv.sync_sales()
+    assert inv.inv.stock_qty(r["product_id"]) == 4
+
+
+def test_void_last_receipt_turns_tracking_off(inv):
+    r = inv.link_listing("100", title="Klapptisch Traveller", price=300)
+    mid = inv.receive(r["product_id"], 1, 10.0)
+    assert inv.inv.void_movement(mid, "ошибка ввода")
+    assert inv.ad_context("100")["stock"] == "unknown"
+
+
+def test_same_time_receipt_before_sale_in_fifo(inv):
+    pid = inv.inv.create_product(title="Gurt", unit_cost_eur=1.0)
+    t = "2026-10-01T10:00:00"
+    inv.record_sale(product_id=pid, price_eur=50, gmail_thread_id="a", occurred_at=t)
+    inv.receive(pid, 1, 20.0, occurred_at=t)
+    it = inv.report()["products"][0]
+    assert it["cogs"] == 20.0 and it["qty"] == 0
+
+
+def test_suggest_price_ignores_quotes_and_shipping(inv):
+    import database as db
+    _msg(db, ad_id="1", title="Klapptisch", price="400 €", thread="t1")
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET de_client = ? WHERE gmail_thread_id='t1'",
+                     ("Ok, 300 € passt. Versand 15 € dazu?\n> Unser Preis: 380 €",))
+    out = inv.suggest_sale_price("t1")
+    assert out["source"] == "buyer_text" and out["price_eur"] == 300.0

@@ -9,7 +9,7 @@
     python3 scripts/inventory_seed.py --llm                 # сомнительные пары сначала спросить у Haiku
     python3 scripts/inventory_seed.py --db kleinanzeigen.db --apply   # записать (рядом — бэкап)
 
---apply требует явный --db, делает копию БД рядом (*.bak-inventory-<время>) и пишет (таблицы inv_*: товары, объявления, вопросы, продажи как движения).
+--apply требует явный --db, делает копию БД в /home/pg/backups (<имя>-pre-inventory-<время>.db) и пишет (таблицы inv_*: товары, объявления, вопросы, продажи как движения).
 Остатки и себестоимость не выдумываются — их вносит оператор (stock_tracked=0 до инвентаризации).
 """
 from __future__ import annotations
@@ -93,7 +93,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", type=Path, help="путь к БД (по умолчанию прод — только для dry-run)")
     ap.add_argument("--apply", action="store_true",
-                    help="записать в --db (обязателен явный --db; перед записью делается копия рядом)")
+                    help="записать в --db (обязателен явный --db; перед записью — копия в /home/pg/backups)")
     ap.add_argument("--llm", action="store_true", help="сомнительные пары спросить у Haiku")
     ap.add_argument("--out", type=Path, help="куда записать отчёт (markdown)")
     args = ap.parse_args()
@@ -108,7 +108,11 @@ def main() -> int:
         return 2
     tmp_copy: Path | None = None
     if args.apply:
-        backup = src.with_name(f"{src.name}.bak-inventory-{datetime.now():%Y%m%d-%H%M%S}")
+        # Бэкап — вне репозитория (он публичный): /home/pg/backups, иначе рядом с расширением .db
+        # (*.db в .gitignore). В БД пароли Gmail, токен бота и переписка покупателей.
+        bdir = Path("/home/pg/backups")
+        bdir = bdir if bdir.is_dir() else src.parent
+        backup = bdir / f"{src.stem}-pre-inventory-{datetime.now():%Y%m%d-%H%M%S}.db"
         with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as s, sqlite3.connect(backup) as d:
             s.backup(d)
         print(f"бэкап перед записью: {backup}")
