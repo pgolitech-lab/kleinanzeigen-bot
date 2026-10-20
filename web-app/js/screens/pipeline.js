@@ -1,9 +1,9 @@
 // 📥 Входящие — единый инбокс всех аккаунтов (редизайн 2026-07-15).
 // Карточки с цветной полоской аккаунта, чипы состояний вместо эмодзи,
 // фильтры-чипы, тёмная bulk-панель. Логика API/поллинга без изменений.
-import { api } from "../api.js?v=20261011-085636";
-import { el, berlinTime, setLoading, setError, accountColor, chip } from "../utils.js?v=20261011-085636";
-import { confirmSheet } from "../components/sheet.js?v=20261011-085636";
+import { api } from "../api.js";
+import { el, berlinTime, setLoading, setError, accountColor, chip } from "../utils.js";
+import { confirmSheet } from "../components/sheet.js";
 
 const state = { account: "", status: "all" };
 const sel = { active: false, ids: new Set() };
@@ -247,11 +247,22 @@ function renderWith(mount, data) {
   }
 }
 
+let _paintSeq = 0;
+
 async function paint(mount) {
   if (!_cachedData) {
+    const seq = ++_paintSeq;
+    let data;
     try {
-      _cachedData = await api("/api/ma/pipeline");
-    } catch (e) { setError(mount, e.message ?? String(e)); return; }
+      data = await api("/api/ma/pipeline");
+    } catch (e) {
+      if (mount.isConnected && seq === _paintSeq) setError(mount, e.message ?? String(e));
+      return;
+    }
+    // Ушли с экрана, пока шёл запрос, или уже ушёл более свежий запрос
+    // (таймер + ручное ↻) — устаревший ответ не рисуем и не кэшируем.
+    if (!mount.isConnected || seq !== _paintSeq) return;
+    _cachedData = data;
   }
   renderWith(mount, _cachedData);
 }
@@ -263,17 +274,21 @@ export async function render(mount, params) {
   _cachedData = null;
   setLoading(mount, "Загружаю входящие…");
   await paint(mount);
+  // Пока грузились, оператор ушёл на другой экран — таймеры не заводим
+  // (раньше hashchange-обработчик ещё не был повешен, и опрос продолжал
+  // перерисовывать #app поверх треда).
+  if (!mount.isConnected) return;
 
-  _timer = setInterval(async () => {
+  const refresh = async () => {
+    if (!mount.isConnected) { teardown(); return; }
     // не дёргаем список пока оператор выбирает карточки
     if (document.visibilityState === "visible" && !sel.active) {
       _cachedData = null;
       await paint(mount);
     }
-  }, REFRESH_MS);
-  _visHandler = async () => {
-    if (document.visibilityState === "visible" && !sel.active) { _cachedData = null; await paint(mount); }
   };
+  _timer = setInterval(refresh, REFRESH_MS);
+  _visHandler = refresh;
   document.addEventListener("visibilitychange", _visHandler);
   _hashHandler = () => {
     if (!location.hash.startsWith("#/pipeline") && location.hash !== "#/" && location.hash !== "") teardown();

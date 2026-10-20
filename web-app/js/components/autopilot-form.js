@@ -1,7 +1,7 @@
 // Autopilot start form (floor + notify mode + preview) + status block с действием.
 
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20261011-085636";
-import { el } from "../utils.js?v=20261011-085636";
+import { api, LLM_TIMEOUT_MS } from "../api.js";
+import { el } from "../utils.js";
 
 
 export function buildAutopilotForm({threadId, onSubmitComplete, onCancel}) {
@@ -155,34 +155,4 @@ export function buildAutopilotForm({threadId, onSubmitComplete, onCancel}) {
   });
 
   return form;
-}
-
-
-export function buildAutopilotStatus({autopilotState, onStop, onStart}) {
-  /**
-   * autopilotState: {active, messages_sent, floor_eur, notify_mode} | null
-   */
-  const block = el(`
-    <div class="autopilot-status border rounded p-2 mt-2">
-      <div class="ap-info"></div>
-      <div class="ap-actions mt-2"></div>
-    </div>
-  `);
-
-  const info = block.querySelector(".ap-info");
-  const actions = block.querySelector(".ap-actions");
-
-  if (autopilotState?.active) {
-    info.textContent = `🤖 Активен · ${autopilotState.messages_sent ?? 0}/20 · floor ${autopilotState.floor_eur ?? "?"}€ · ${autopilotState.notify_mode ?? "?"}`;
-    const stopBtn = el(`<button class="btn btn-sm btn-danger">🛑 Остановить автопилот</button>`);
-    stopBtn.addEventListener("click", onStop);
-    actions.appendChild(stopBtn);
-  } else {
-    info.textContent = "🚀 Автопилот не активен";
-    const startBtn = el(`<button class="btn btn-sm btn-outline-primary">🚀 Запустить</button>`);
-    startBtn.addEventListener("click", onStart);
-    actions.appendChild(startBtn);
-  }
-
-  return block;
 }

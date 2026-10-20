@@ -1,8 +1,8 @@
 // 🔎 Разведка рынка — Mini App экран.
 // Подвкладки: Машины / Запчасти / Запросы. Данные из /api/ma/scout/*.
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20261011-085636";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20261011-085636";
-import { openLink } from "../tg.js?v=20261011-085636";
+import { api, LLM_TIMEOUT_MS } from "../api.js";
+import { el, esc, berlinTime, setLoading, setError, eur } from "../utils.js";
+import { openLink } from "../tg.js";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -27,10 +27,8 @@ const S = {
   showRemoved: false,       // показывать снятые (нет в выдаче > scout_stale_days)
 };
 
-function eur(v) {
-  if (v === null || v === undefined) return "—";
-  return Math.round(v).toLocaleString("de-DE") + " €";
-}
+// Цены рынка — без центов (средние бывают дробными)
+const eurRound = v => eur(v == null ? null : Math.round(v));
 
 // --- карточки объявлений ---
 function _cardShell(item, kind, rerender, specs) {
@@ -46,7 +44,7 @@ function _cardShell(item, kind, rerender, specs) {
   const t = card.querySelector(".title");
   t.textContent = item.title || "(без названия)";
   t.addEventListener("click", () => item.url && openLink(item.url));
-  card.querySelector(".price").textContent = eur(item.price_eur) + (item.negotiable ? " VB " : " ");
+  card.querySelector(".price").textContent = eurRound(item.price_eur) + (item.negotiable ? " VB " : " ");
   card.querySelector(".specs").textContent = "· " + specs.join(" · ");
   card.querySelector(".loc").textContent =
     `📍 ${item.plz || ""} ${item.city || ""}${item.bundesland ? " (" + item.bundesland + ")" : ""}` +
@@ -304,7 +302,7 @@ function renderLandsView(container, kind) {
     row.querySelector(".land").textContent = `🗺 ${g.land}`;
     row.querySelector(".sub").textContent = `${g.cities} городов`;
     row.querySelector(".cnt").textContent = g.count;
-    row.querySelector(".price").textContent = g.min != null ? `${eur(g.min)}–${eur(g.max)}` : "";
+    row.querySelector(".price").textContent = g.min != null ? `${eurRound(g.min)}–${eurRound(g.max)}` : "";
     if (g.land !== "— неизвестно —") row.addEventListener("click", () => open(g.land));
     else row.classList.add("disabled");
     list.appendChild(row);
@@ -371,7 +369,7 @@ function renderCitiesView(container, kind) {
       row.querySelector(".plz").textContent = g.plzText;
       row.querySelector(".cnt").textContent = g.count;
       row.querySelector(".price").textContent =
-        g.min != null ? `${eur(g.min)}–${eur(g.max)}` : "";
+        g.min != null ? `${eurRound(g.min)}–${eurRound(g.max)}` : "";
       row.addEventListener("click", () => {
         S.city[kind] = g.city; S.view[kind] = "listings";
         renderCityDrill(container, kind);
@@ -563,20 +561,35 @@ async function renderQueriesTab(container) {
   container.replaceChildren(root);
 }
 
+// Один активный опрос статуса; останавливается, когда statusEl ушёл из DOM
+// (сменили вкладку/экран). Раньше цепочка setTimeout жила вечно и каждое
+// «▶ Запустить» добавляло ещё одну.
+let _pollTimer = null;
 function pollStatus(statusEl) {
+  clearTimeout(_pollTimer);
+  _pollTimer = null;
+  if (!statusEl.isConnected) return;
+  const again = ms => { _pollTimer = setTimeout(() => pollStatus(statusEl), ms); };
   api("/api/ma/scout/status").then(s => {
+    if (!statusEl.isConnected) return;
     if (s.running) {
       statusEl.textContent = `⏳ идёт прогон… (машин ${s.counts.cars}, з/ч ${s.counts.parts})`;
-      setTimeout(() => pollStatus(statusEl), 5000);
+      again(5000);
     } else {
       // прогон завершён — сбросить кэши и перерисовать
       S.cars = null; S.parts = null;
       const sum = s.summary || {};
       statusEl.textContent = `✅ готово: машин ${s.counts.cars}, з/ч ${s.counts.parts}` +
         (sum.errors && sum.errors.length ? ` (ошибок ${sum.errors.length})` : "");
-      api("/api/ma/scout/overview").then(ov => { S.overview = ov; });
+      api("/api/ma/scout/overview").then(ov => { S.overview = ov; })
+        .catch(e => console.warn("[scout] overview refresh failed:", e));
     }
-  }).catch(() => setTimeout(() => pollStatus(statusEl), 8000));
+  }).catch(e => {
+    console.warn("[scout] status poll failed:", e);
+    if (!statusEl.isConnected) return;
+    statusEl.textContent = "⚠️ статус прогона недоступен, повторяю…";
+    again(8000);
+  });
 }
 
 // --- основной render ---
@@ -658,6 +671,6 @@ export async function render(mount, params) {
   S.city = { car: null, part: null };
   try {
     S.overview = await api("/api/ma/scout/overview");
-  } catch (e) { setError(mount, e.message ?? String(e)); return; }
-  renderShell(mount);
+  } catch (e) { if (mount.isConnected) setError(mount, e.message ?? String(e)); return; }
+  if (mount.isConnected) renderShell(mount);
 }

@@ -49,12 +49,6 @@ export function accountColor(id) {
   return _ACCT_COLORS[(isNaN(n) ? 0 : n) % _ACCT_COLORS.length];
 }
 
-export function accountBadge(id, name) {
-  const b = el(`<span class="acct"></span>`);
-  b.style.backgroundColor = accountColor(id);
-  b.textContent = name ?? `acc${id}`;
-  return b;
-}
 
 // Чип состояния: kind ∈ red|grn|amb|blu|mut (см. .chip в app.css)
 export function chip(kind, label) {

@@ -2,14 +2,14 @@
 // (DE клиенту / RU идея / RU перевод) + плавающий док действий внизу.
 // Второстепенные действия — в «⋯»-меню (bottom-sheet), подтверждения — confirmSheet.
 // Логика локов, send-пайплайна (edit-ru → edit-de → send) и deep-link сохранена.
-import { api, LLM_TIMEOUT_MS } from "../api.js?v=20261011-085636";
-import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js?v=20261011-085636";
-import { setTitle } from "../components/backbar.js?v=20261011-085636";
-import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js?v=20261011-085636";
-import { buildEditForm } from "../components/edit-form.js?v=20261011-085636";
-import { buildComposeForm } from "../components/compose-form.js?v=20261011-085636";
-import { buildAutopilotForm } from "../components/autopilot-form.js?v=20261011-085636";
-import { initData } from "../tg.js?v=20261011-085636";
+import { api, API_BASE, LLM_TIMEOUT_MS } from "../api.js";
+import { el, berlinTime, setLoading, setError, accountColor } from "../utils.js";
+import { setTitle } from "../components/backbar.js";
+import { openSheet, closeSheet, menuSheet, confirmSheet } from "../components/sheet.js";
+import { buildEditForm } from "../components/edit-form.js";
+import { buildComposeForm } from "../components/compose-form.js";
+import { buildAutopilotForm } from "../components/autopilot-form.js";
+import { initData } from "../tg.js";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 
@@ -263,6 +263,10 @@ async function tryReleaseLock(msgId) {
 }
 
 export async function render(mount, params, opts = {}) {
+  // Перерисовка из обработчика, завершившегося уже после ухода с экрана
+  // (mount отцеплен роутером) — ничего не делаем: иначе сняли бы лок
+  // текущего экрана и захватили новый, которого никто не отпустит.
+  if (!mount.isConnected) return;
   // Cleanup: release предыдущий lock (если был на другом thread)
   if (_heldMsgId !== null) {
     await tryReleaseLock(_heldMsgId);
@@ -307,6 +311,13 @@ export async function render(mount, params, opts = {}) {
     if (latestPendingMsgId !== null) {
       try {
         const lockRes = await api(`/api/ma/messages/${latestPendingMsgId}/lock/acquire`, {method: "POST"});
+        if (!mount.isConnected) {
+          // Оператор ушёл, пока брали лок, — сразу отдаём, чтобы не висел 5 мин.
+          // Но не если новый экран уже держит тот же msg (повторное открытие
+          // того же треда): иначе сняли бы лок у активного экрана.
+          if (_heldMsgId !== latestPendingMsgId) tryReleaseLock(latestPendingMsgId);
+          return;
+        }
         acquired = true;
         _heldMsgId = latestPendingMsgId;
         ourActor = lockRes.holder;
@@ -323,10 +334,11 @@ export async function render(mount, params, opts = {}) {
       }
     }
 
+    if (!mount.isConnected) return;
     renderThread(mount, params, data, latestPendingMsgId, review, acquired, acquireError, ourActor, opts);
 
   } catch (e) {
-    setError(mount, e.message ?? String(e));
+    if (mount.isConnected) setError(mount, e.message ?? String(e));
   }
 }
 
@@ -906,9 +918,11 @@ window.addEventListener("hashchange", () => {
 // (text/plain, без preflight); backend валидирует её тем же HMAC. Раньше
 // beacon бил в /lock/release без заголовка, ловил 422 и лок висел до
 // auto-expire 5 мин — блокировал других операторов после закрытия MA.
+// URL обязательно абсолютный (${API_BASE}): страница живёт на github.io,
+// относительный путь уходил на Pages (404), а не на бэкенд.
 window.addEventListener("pagehide", () => {
   if (_heldMsgId !== null && navigator.sendBeacon) {
     const blob = new Blob([initData()], {type: "text/plain"});
-    navigator.sendBeacon(`/api/ma/messages/${_heldMsgId}/lock/release-beacon`, blob);
+    navigator.sendBeacon(`${API_BASE}/api/ma/messages/${_heldMsgId}/lock/release-beacon`, blob);
   }
 });

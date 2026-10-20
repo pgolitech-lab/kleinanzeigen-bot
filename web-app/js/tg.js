@@ -14,16 +14,8 @@ export function initData() {
   return tg?.initData ?? "";
 }
 
-export function user() {
-  return tg?.initDataUnsafe?.user ?? null;
-}
-
 export function startParam() {
   return tg?.initDataUnsafe?.start_param ?? null;
-}
-
-export function close() {
-  tg?.close();
 }
 
 // Диалог подтверждения перед необратимым действием (напр. отправка письма клиенту).

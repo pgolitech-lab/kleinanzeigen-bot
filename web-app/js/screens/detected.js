@@ -1,10 +1,5 @@
-import { api } from "../api.js?v=20261011-085636";
-import { el, esc, berlinTime, setLoading, setError } from "../utils.js?v=20261011-085636";
-
-function eur(n) {
-  if (n == null) return "—";
-  return n.toLocaleString("de-DE", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + "€";
-}
+import { api } from "../api.js";
+import { el, esc, berlinTime, setLoading, setError, eur } from "../utils.js";
 
 function confidenceBadge(conf) {
   const map = {
