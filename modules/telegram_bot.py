@@ -459,7 +459,10 @@ def send_autopilot_stop_notification(msg_id: int, reason: str) -> None:
     text = (f"{head} · #{msg_id}\n"
             f"Причина: {info[0]} {info[1]}\n"
             f"Отправлено: <code>{sent_count}/{config.autopilot_message_cap()}</code>")
-    notify(text, f"thread_{_safe(msg, 'gmail_thread_id') or ''}", label="📋 Открыть тред")
+    # Остановка, требующая человека (угроза, готов купить, просит контакты), — со звуком и ночью
+    urgent = reason in ("threat", "ready_to_buy", "wants_contact")
+    notify(text, f"thread_{_safe(msg, 'gmail_thread_id') or ''}", label="📋 Открыть тред",
+           kind="autopilot_stop", urgent=urgent)
 
 
 def send_autopilot_progress(msg_id: int, count: int) -> None:

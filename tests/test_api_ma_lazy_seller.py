@@ -46,6 +46,7 @@ def test_sold_price_required_and_stock_recorded(client):
     c, mdb = client
     _thread(mdb)
     assert c.post("/api/ma/threads/t1/sold", json={}, headers=H()).status_code == 422
+    assert c.post("/api/ma/threads/t1/sold", json={"price_eur": 0}, headers=H()).status_code == 422
     with patch("modules.inventory.record_sale",
                return_value={"product_id": 5, "qty_after": 2, "stock_tracked": True, "created": True}) as rs:
         r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300, "note": "забрал сам"}, headers=H())
@@ -73,7 +74,9 @@ def test_sold_on_answered_thread_keeps_sent_row(client):
     mdb.add_manual_sale.return_value = {"msg_id": 99, "thread_id": "manual-x"}
     with patch("modules.inventory.record_sale", return_value={"product_id": None}) as rs:
         r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
-    assert rs.call_args.kwargs["source"] == "operator"  # тред не «продан» в messages — sync не снимет
+    # склад — под синтетическим тредом продажи и как manual: sync_sales не спишет второй раз
+    assert rs.call_args.kwargs["source"] == "manual"
+    assert rs.call_args.kwargs["gmail_thread_id"] == "manual-x"
     assert r.status_code == 200 and r.json()["separate_sale"] == {"msg_id": 99, "thread_id": "manual-x"}
     mdb.mark_thread_sold.assert_not_called()
     assert mdb.add_manual_sale.call_args.kwargs["sold_price_eur"] == 300.0

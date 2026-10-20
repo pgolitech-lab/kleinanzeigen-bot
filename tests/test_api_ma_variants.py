@@ -1,4 +1,4 @@
-"""Чипы цены: варианты параллельно, кэш по версии треда, применение выбранного."""
+"""Чипы цены через drafts.variants (llm): кэш по версии треда, применение, карта ошибок."""
 from __future__ import annotations
 from unittest.mock import patch
 
@@ -11,6 +11,12 @@ from tests.conftest import make_init_data, TEST_BOT_TOKEN
 TEST_USER = {"id": 999, "first_name": "Pg", "username": "pgtest"}
 H = lambda: {"X-Telegram-Init-Data": make_init_data(TEST_USER)}  # noqa: E731
 
+RES = {"variants": [{"tone": "hold", "price_eur": 400, "ru_answer": "держим", "client_answer": "Bleibt 400",
+                     "ru_translation": "Остаётся 400"},
+                    {"tone": "minus5", "price_eur": 380, "ru_answer": "уступим", "client_answer": "380 ok",
+                     "ru_translation": "380 ок"}],
+       "dropped": [{"tone": "floor", "reason": "минимум не задан"}], "base_price_eur": 400, "floor_eur": None}
+
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
@@ -21,59 +27,47 @@ def env(tmp_path, monkeypatch):
                                de_answer="Hallo", client_lang="de", ad_price="400 €")
     from web import api_ma
     api_ma._variant_cache.clear()
-    calls = []
-
-    def fake_regen(row, instruction, **kw):
-        calls.append(instruction)
-        return {"client_answer": f"DE:{instruction[:12]}", "ru_answer": "RU", "ru_translation": "RT",
-                "deal_brief": {"summary_ru": "торг"}, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}
-
-    with patch("modules.tg_init_data.config") as mc, \
-         patch.object(api_ma.claude, "regenerate_with_instruction", fake_regen), \
-         patch.object(api_ma, "telegram_bot") as mtb:
+    with patch("modules.tg_init_data.config") as mc, patch.object(api_ma, "telegram_bot") as mtb, \
+         patch("modules.drafts.variants", return_value=RES) as dv:
         mc.telegram_bot_token.return_value = TEST_BOT_TOKEN
         mc.telegram_authorized_ids.return_value = {"999"}
         mtb._claim_lock.return_value = None
         from web.app import app
-        yield TestClient(app), mid, calls
+        yield TestClient(app), mid, dv
 
 
-def test_variants_prices_and_cache(env):
-    c, mid, calls = env
-    v = c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).json()["variants"]
-    by = {x["tone"]: x for x in v}
-    assert [x["tone"] for x in v] == ["hold", "minus5", "floor", "decline"]
-    assert by["hold"]["price_eur"] == 400 and by["minus5"]["price_eur"] == 380
-    assert by["floor"]["price_eur"] == 360  # −10 % по умолчанию
-    assert by["decline"]["price_eur"] is None and all(x["error"] is None for x in v)
-    assert len(calls) == 4
-    v2 = c.post(f"/api/ma/messages/{mid}/variants", json={"tones": ["hold"]}, headers=H()).json()["variants"]
-    assert v2[0]["cached"] is True and len(calls) == 4
-    assert database.get_message(mid)["de_answer"] == "Hallo"  # варианты в БД не пишутся
+def test_variants_cached_and_shape(env):
+    c, mid, dv = env
+    r = c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).json()
+    assert [v["tone"] for v in r["variants"]] == ["hold", "minus5"] and r["dropped"][0]["tone"] == "floor"
+    assert r["variants"][1] == {"tone": "minus5", "price_eur": 380, "client_text": "380 ok", "ru_text": "уступим",
+                                "ru_translation": "380 ок", "error": None, "cached": False}
+    r2 = c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).json()
+    assert r2["variants"][0]["cached"] is True and dv.call_count == 1
+    assert database.get_message(mid)["de_answer"] == "Hallo"
 
 
-def test_apply_variant_and_stale(env):
-    c, mid, calls = env
-    c.post(f"/api/ma/messages/{mid}/variants", json={"tones": ["minus5", "hold"]}, headers=H())
-    r = c.post(f"/api/ma/messages/{mid}/variants/minus5/apply", headers=H())
-    assert r.status_code == 200
+def test_apply_and_stale(env):
+    c, mid, dv = env
+    c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H())
+    assert c.post(f"/api/ma/messages/{mid}/variants/minus5/apply", headers=H()).status_code == 200
     row = database.get_message(mid)
-    assert row["status"] == "edited" and row["de_answer"].startswith("DE:")
-    # тред изменился → старый вариант не применяется
+    assert row["status"] == "edited" and row["de_answer"] == "380 ok"
     assert c.post(f"/api/ma/messages/{mid}/variants/hold/apply", headers=H()).status_code == 409
 
 
+@pytest.mark.parametrize("exc,code", [("suggest", 409), ("lookup", 404), ("limit", 503), ("llm", 502)])
+def test_error_mapping(env, exc, code):
+    c, mid, dv = env
+    from modules import claude, llm
+    dv.side_effect = {"suggest": claude.SuggestError("нет цены"), "lookup": LookupError("нет письма"),
+                      "limit": llm.LLMLimitError("limit"), "llm": llm.LLMError("timeout")}[exc]
+    r = c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H())
+    assert r.status_code == code
+
+
 def test_variants_refused_for_sent(env):
-    c, mid, calls = env
+    c, mid, dv = env
     database.update_message(mid, status="sent", sent_at="x")
     assert c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).status_code == 409
-    assert calls == []
-
-
-def test_minus5_never_below_min_price(env):
-    c, mid, calls = env
-    database.update_message(mid, ad_id="AD1")
-    from modules.db_sales import set_ad_min_price
-    set_ad_min_price("AD1", 390)
-    by = {x["tone"]: x for x in c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).json()["variants"]}
-    assert by["floor"]["price_eur"] == 390 and by["minus5"]["price_eur"] == 390
+    dv.assert_not_called()

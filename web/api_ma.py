@@ -915,7 +915,7 @@ def _alert_send_failed(msg_id: int, detail: str) -> None:
     telegram_bot.run_in_background(
         telegram_bot.notify,
         f"🟥 <b>Письмо не отправлено</b> (отложенная отправка): {telegram_bot._html(detail)[:300]}",
-        f"review_{msg_id}", "📋 Открыть", "send_failed")
+        f"review_{msg_id}", "📋 Открыть", "send_failed", True)
 
 
 def _fire_queued_send(msg_id: int) -> None:
@@ -1101,13 +1101,13 @@ def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[st
 
 
 class SoldBody(BaseModel):
-    price_eur: float = Field(..., ge=0, lt=1000000)
+    price_eur: float = Field(..., gt=0, lt=1000000)
     close_other_threads_for_ad: bool = False
 
 
 class ThreadSoldBody(BaseModel):
     # Цена обязательна (склад/прибыль); фронт предзаполняет из GET /threads/{id}/sale-price
-    price_eur: float = Field(..., ge=0, lt=1000000)
+    price_eur: float = Field(..., gt=0, lt=1000000)
     note: str = Field("", max_length=500)
     close_other_threads_for_ad: bool = False
 
@@ -1154,10 +1154,11 @@ def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
                 db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
     finally:
         telegram_bot._release_lock(msg_id, actor)
+    # Продажа отдельной строкой (тред уже отвечен) живёт под своим тредом manual-… — склад пишем под ним
+    # и с source='manual', как его увидит sync_sales (иначе джоб списал бы товар второй раз)
     stock = _record_stock_sale(
-        price=float(price), thread_id=thread_id, msg_row=latest_in,
-        # продажа отдельной строкой: тред не «продан» в messages — sync_sales не должен её снимать
-        source="operator" if sale_ref else "thread", actor=actor)
+        price=float(price), thread_id=sale_ref["thread_id"] if sale_ref else thread_id, msg_row=latest_in,
+        source="manual" if sale_ref else "thread", actor=actor)
     return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price),
             "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref,
             "stock": stock}
@@ -1189,16 +1190,18 @@ def ma_sold(msg_id: int, body: SoldBody,
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
-    result = db.mark_thread_sold(
-        msg_id,
-        sold_price_eur=body.price_eur,
-        close_other_threads_for_ad=body.close_other_threads_for_ad,
-    )
+    try:
+        result = db.mark_thread_sold(
+            msg_id,
+            sold_price_eur=body.price_eur,
+            close_other_threads_for_ad=body.close_other_threads_for_ad,
+        )
+    finally:
+        telegram_bot._release_lock(msg_id, actor)
     sold_row = db.get_message(msg_id)
     stock = _record_stock_sale(price=float(body.price_eur), thread_id=sold_row["gmail_thread_id"] or "",
                                msg_row=sold_row, source="thread", actor=actor) \
         if sold_row is not None and sold_row["gmail_thread_id"] else None
-    telegram_bot._release_lock(msg_id, actor)
     return {
         "ok": True,
         "status": "skipped_sold",
@@ -1245,14 +1248,28 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
 
 
 # ──────────────────────── ЧИПЫ ЦЕНЫ (варианты ответа) ────────────────────────
-# Несколько черновиков с разной ценовой позицией — параллельно (каждый — обычная регенерация
-# с полным контекстом треда), кэш на (msg_id, тон, версия треда). Ничего не пишут в БД;
-# выбранный вариант применяет POST /variants/{tone}/apply.
+# drafts.variants (llm): все тоны одним вызовом, цены считает код, ниже пола варианты отбрасываются.
+# Кэш на (msg_id, версия треда); выбранный вариант применяет POST /variants/{tone}/apply.
 _TONES = ("hold", "minus5", "floor", "decline")
-_VARIANT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="price-variants")
 _variant_cache: dict[tuple, dict[str, Any]] = {}
 _variant_cache_lock = threading.Lock()
-_VARIANT_CACHE_MAX = 200
+_VARIANT_CACHE_MAX = 100
+
+
+def _suggest_call(fn, *args, **kwargs):
+    """Функции подсказок llm: ошибки → понятные HTTP-коды с текстом для оператора."""
+    from modules import llm
+    try:
+        return fn(*args, **kwargs)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except claude.SuggestError as e:  # нельзя по данным: письмо обработано, нет цены/факта
+        raise HTTPException(409, str(e))
+    except llm.LLMLimitError as e:
+        raise HTTPException(503, str(e))
+    except llm.LLMError as e:
+        logger.warning("подсказка LLM не построена: %s", e)
+        raise HTTPException(502, f"LLM не ответил: {e}")
 
 
 class VariantsBody(BaseModel):
@@ -1267,44 +1284,6 @@ class VariantsBody(BaseModel):
         return list(dict.fromkeys(v))
 
 
-def _round5(x: float) -> int:
-    return int(round(x / 5.0) * 5)
-
-
-def _variant_prices(row: Any) -> dict[str, "int | None"]:
-    """Цена для каждого тона: hold — цена объявления; floor — минимум (ad_briefs.min_price_eur,
-    иначе минимум автопилота, иначе цена − max_discount_percent); minus5 — −5 %, но не ниже минимума;
-    decline — без цены."""
-    listed = _parse_listed_price_eur(row["ad_price"])
-    if not listed:
-        return {"hold": None, "minus5": None, "floor": None, "decline": None}
-    floor = None
-    brief = db.get_ad_brief(row["ad_id"]) if row["ad_id"] else None
-    if brief is not None and "min_price_eur" in brief.keys() and brief["min_price_eur"]:
-        floor = float(brief["min_price_eur"])
-    if floor is None:
-        ap = db.get_thread_autopilot(row["gmail_thread_id"]) if row["gmail_thread_id"] else None
-        if ap is not None and ap["floor_price_eur"]:
-            floor = float(ap["floor_price_eur"])
-    if floor is None:
-        floor = listed * (1 - config.max_discount_percent() / 100)
-    floor_p = _round5(min(floor, listed))
-    return {"hold": _round5(listed), "minus5": max(_round5(listed * 0.95), floor_p),
-            "floor": floor_p, "decline": None}
-
-
-def _variant_instruction(tone: str, price: "int | None") -> str:
-    return {
-        "hold": f"Держи цену {price} €: вежливо, но твёрдо откажи в скидке и коротко обоснуй ценность "
-                "(состояние, комплектность). Цену не снижай.",
-        "minus5": f"Предложи уступку до {price} € как жест доброй воли ради быстрой сделки. "
-                  f"Ниже {price} € не опускайся, это предел.",
-        "floor": f"Назови последнюю цену {price} € — ниже не продадим. Коротко и вежливо, без торга дальше.",
-        "decline": "Вежливо откажи: на предложенную покупателем цену не согласны, встречную цену не называй. "
-                   "Коротко, без грубости, оставь дверь открытой.",
-    }[tone]
-
-
 def _thread_version(row: Any) -> tuple:
     """Версия треда для кэша: любое новое письмо/правка/отправка даёт другую версию."""
     hist = db.thread_history(row["gmail_thread_id"]) if row["gmail_thread_id"] else []
@@ -1314,66 +1293,56 @@ def _thread_version(row: Any) -> tuple:
 @router.post("/messages/{msg_id}/variants")
 def ma_variants(msg_id: int, body: "VariantsBody | None" = None,
                 user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Черновики под ценовые тоны (чипы «держу / −5 % / минимум / отказ»), параллельно. В БД не пишет."""
+    """Черновики под ценовые тоны (чипы «держу / −5 % / минимум / отказ»). В БД не пишет."""
+    from modules import drafts
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     tones = (body or VariantsBody()).tones
-    prices = _variant_prices(row)
-    version = _thread_version(row)
-    out: dict[str, dict[str, Any]] = {}
-    futures = {}
-    for tone in tones:
-        key = (msg_id, tone, prices[tone], version)
-        with _variant_cache_lock:
-            hit = _variant_cache.get(key)
-        if hit is not None:
-            out[tone] = {**hit, "cached": True}
-        elif tone != "decline" and prices[tone] is None:
-            out[tone] = {"tone": tone, "price_eur": None, "error": "в объявлении нет цены", "cached": False}
-        else:
-            futures[tone] = (key, _VARIANT_POOL.submit(
-                claude.regenerate_with_instruction, row, _variant_instruction(tone, prices[tone])))
-    for tone, (key, fut) in futures.items():
-        try:
-            res = fut.result(timeout=180)
-        except Exception as e:
-            logger.exception("вариант %s для msg=%s не сгенерирован", tone, msg_id)
-            out[tone] = {"tone": tone, "price_eur": prices[tone], "error": str(e)[:300], "cached": False}
-            continue
-        if not (res.get("client_answer") or "").strip():
-            logger.error("вариант %s для msg=%s: LLM вернул пустой текст", tone, msg_id)
-            out[tone] = {"tone": tone, "price_eur": prices[tone], "error": "пустой ответ LLM", "cached": False}
-            continue
-        item = {"tone": tone, "price_eur": prices[tone], "error": None,
-                "client_text": res.get("client_answer", ""), "ru_text": res.get("ru_answer", ""),
-                "ru_translation": res.get("ru_translation", ""), "result": res}
+    key = (msg_id, tuple(tones), _thread_version(row))
+    with _variant_cache_lock:
+        res = _variant_cache.get(key)
+    cached = res is not None
+    if res is None:
+        res = _suggest_call(drafts.variants, msg_id, tones)
         with _variant_cache_lock:
             if len(_variant_cache) >= _VARIANT_CACHE_MAX:
                 _variant_cache.pop(next(iter(_variant_cache)))
-            _variant_cache[key] = item
-        out[tone] = {**item, "cached": False}
-    return {"msg_id": msg_id, "variants": [
-        {k: v for k, v in out[t].items() if k != "result"} for t in tones]}
+            _variant_cache[key] = res
+    return {
+        "msg_id": msg_id,
+        "variants": [{"tone": v["tone"], "price_eur": v.get("price_eur"), "client_text": v["client_answer"],
+                      "ru_text": v.get("ru_answer"), "ru_translation": v.get("ru_translation"),
+                      "error": None, "cached": cached} for v in res.get("variants", [])],
+        "dropped": res.get("dropped", []),
+        "base_price_eur": res.get("base_price_eur"),
+        "floor_eur": res.get("floor_eur"),
+    }
 
 
 @router.post("/messages/{msg_id}/variants/{tone}/apply")
 def ma_variant_apply(msg_id: int, tone: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Сделать выбранный вариант черновиком (как перегенерация: status edited, deal_brief, llm_draft_*)."""
+    """Сделать выбранный вариант черновиком (как перегенерация: status edited, llm_draft_*)."""
     if tone not in _TONES:
         raise HTTPException(404, "unknown tone")
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
-    key = (msg_id, tone, _variant_prices(row)[tone], _thread_version(row))
+    version = _thread_version(row)
+    variant = None
     with _variant_cache_lock:
-        item = _variant_cache.get(key)
-    if item is None:
+        for (mid, _tones, ver), res in reversed(list(_variant_cache.items())):
+            if mid == msg_id and ver == version:
+                variant = next((v for v in res.get("variants", []) if v["tone"] == tone), None)
+                if variant:
+                    break
+    if variant is None:
         raise HTTPException(409, "Вариант устарел (в треде что-то изменилось) — запросите варианты заново")
     _claim_or_409(msg_id, actor_from_user(user))
-    scheduler._save_regen_result(msg_id, row, item["result"])
+    # Стоимость генерации уже учтена при запросе вариантов — здесь не прибавляем второй раз
+    scheduler._save_regen_result(msg_id, row, {**variant, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0})
     return _message_review_dict(msg_id)
 
 
@@ -1699,42 +1668,24 @@ def ma_thread_wait(thread_id: str, body: "WaitBody | None" = None,
     return data
 
 
-def _preview_in_client_lang(thread_id: str, ru_text: str) -> dict[str, Any]:
-    """RU-текст → язык покупателя треда + обратный перевод; формат как /compose-preview,
-    отправка — обычным /compose (оператор видит и может поправить)."""
-    history = db.thread_history(thread_id)
-    if not history:
-        raise HTTPException(404, "thread not found")
-    last_in = next((r for r in reversed(history) if r["direction"] == "in"), history[-1])
-    lang = _client_lang(last_in)
-    if lang == "ru":
-        return {"translated": ru_text, "back_ru": ru_text, "target_lang": "ru", "ru_text": ru_text}
-    translated, back = _translate_with_back(ru_text, lang, context=last_in["ad_title"])
-    if not translated.strip():
-        raise HTTPException(502, "перевод вернулся пустым")
-    return {"translated": translated, "back_ru": back, "target_lang": lang, "ru_text": ru_text}
+def _preview_from_llm(res: "dict[str, Any]", **extra: Any) -> "dict[str, Any]":
+    """Ответ подсказки llm в формате /compose-preview (отправка — обычным /compose)."""
+    return {"translated": res["client_answer"], "back_ru": res.get("ru_translation") or "",
+            "target_lang": res.get("client_lang") or "de",
+            "ru_text": res.get("ru_answer") or res.get("ru_translation") or "", **extra}
 
 
 @router.post("/threads/{thread_id}/followup")
 def ma_thread_followup(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Напоминание молчащему покупателю: готовый текст на его языке (не отправляет — через /compose)."""
-    history = db.thread_history(thread_id)
-    if not history:
-        raise HTTPException(404, "thread not found")
-    ad = next((r["ad_title"] for r in reversed(history) if r["ad_title"]), None) or "товар"
-    ru = (f"Здравствуйте! Хотел уточнить, актуален ли ещё ваш интерес к «{ad}»? "
-          "Если остались вопросы — с радостью отвечу. Если решили иначе, дайте, пожалуйста, знать.")
-    return _preview_in_client_lang(thread_id, ru)
+    """Напоминание молчащему покупателю (llm, с историей треда): текст на его языке, не отправляет."""
+    from modules import drafts
+    res = _suggest_call(drafts.followup_ping, thread_id)
+    return _preview_from_llm(res, days_silent=res.get("days_silent"), anchor_msg_id=res.get("anchor_msg_id"))
 
 
-# ── Быстрые ответы: справка аккаунта (город, часы, доставка, оплата) ──
-_QUICK_KINDS = ("city", "hours", "delivery", "payment")
-_QUICK_TEMPLATES = {
-    "city": "Товар находится здесь: {v}. Можно посмотреть и забрать на месте.",
-    "hours": "Посмотреть и забрать можно {v}. Напишите, когда вам удобно.",
-    "delivery": "Доставка: {v}.",
-    "payment": "Оплата: {v}.",
-}
+# ── Быстрые ответы: справка аккаунта (доставка, самовывоз, оплата) ──
+_QUICK_INFO_KEYS = ("delivery", "pickup", "payment")
+_QUICK_KINDS = ("available", "last_price", "delivery", "pickup", "payment")
 
 
 def _quick_key(account_id: int) -> str:
@@ -1750,14 +1701,13 @@ def _quick_info(account_id: int) -> dict[str, str]:
     except ValueError as e:
         logger.error("справка быстрых ответов аккаунта %s повреждена (%s): %r", account_id, e, raw[:200])
         raise HTTPException(500, "Справка быстрых ответов повреждена — заполните её заново в «Аккаунты»")
-    return {k: str(data.get(k) or "") for k in _QUICK_KINDS}
+    return {k: str(data.get(k) or "") for k in _QUICK_INFO_KEYS}
 
 
 class QuickInfoBody(BaseModel):
-    city: "str | None" = Field(None, max_length=300)
-    hours: "str | None" = Field(None, max_length=300)
-    delivery: "str | None" = Field(None, max_length=500)
-    payment: "str | None" = Field(None, max_length=300)
+    delivery: "str | None" = Field(None, max_length=500)  # «DHL 10 €, 2–3 дня»
+    pickup: "str | None" = Field(None, max_length=300)    # «Köln-Lindenthal, вечером после 18»
+    payment: "str | None" = Field(None, max_length=300)   # «наличными или PayPal»
 
 
 @router.get("/accounts/{account_id}/quick-info")
@@ -1770,14 +1720,14 @@ def ma_quick_info_get(account_id: int, user: dict = Depends(verify_init_data_dep
 @router.post("/accounts/{account_id}/quick-info")
 def ma_quick_info_set(account_id: int, body: QuickInfoBody,
                       user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
-    """Справка для быстрых ответов (по-русски; на язык покупателя переводится при вставке)."""
+    """Факты продавца для быстрых ответов (по-русски; LLM формулирует на языке покупателя)."""
     if db.get_account(account_id) is None:
         raise HTTPException(404, "account not found")
     try:
         info = _quick_info(account_id)
     except HTTPException:
-        info = {k: "" for k in _QUICK_KINDS}  # повреждена (ERROR уже в логе) — сохранение её чинит
-    for k in _QUICK_KINDS:
+        info = {k: "" for k in _QUICK_INFO_KEYS}  # повреждена (ERROR уже в логе) — сохранение её чинит
+    for k in _QUICK_INFO_KEYS:
         v = getattr(body, k)
         if v is not None:
             info[k] = v.strip()
@@ -1798,16 +1748,14 @@ class QuickBody(BaseModel):
 
 @router.post("/messages/{msg_id}/quick")
 def ma_quick(msg_id: int, body: QuickBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Быстрый ответ (город/часы/доставка/оплата) из справки аккаунта — на языке покупателя.
-    Ничего не пишет: фронт вставляет в черновик или отправляет через /compose."""
+    """Быстрый ответ (есть в наличии / последняя цена / доставка / самовывоз / оплата) на языке
+    покупателя (llm, Haiku). Ничего не пишет: фронт вставляет в черновик или шлёт через /compose."""
+    from modules import drafts
     row = db.get_message(msg_id)
     if row is None:
         raise HTTPException(404, "message not found")
-    value = _quick_info(row["account_id"])[body.kind]
-    if not value:
-        raise HTTPException(400, "В справке аккаунта это не заполнено — заполните в «Аккаунты»")
-    ru = _QUICK_TEMPLATES[body.kind].format(v=value)
-    return {"kind": body.kind, **_preview_in_client_lang(row["gmail_thread_id"], ru)}
+    res = _suggest_call(drafts.quick_reply, msg_id, body.kind, _quick_info(row["account_id"]))
+    return _preview_from_llm(res, kind=body.kind)
 
 
 @router.post("/threads/{thread_id}/suggest-reply")
