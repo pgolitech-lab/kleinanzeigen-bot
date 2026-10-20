@@ -58,7 +58,7 @@ def test_write_result_lessons_and_dossier(tmp_db, monkeypatch):
     rows = tmp_db.thread_history("t1")
     saved: list[dict] = []
     dossiers: list[tuple] = []
-    monkeypatch.setattr(tmp_db, "upsert_client_dossier", lambda *a: dossiers.append(a), raising=False)
+    monkeypatch.setattr(tmp_db, "upsert_client_dossier", lambda **k: dossiers.append(k))
     monkeypatch.setattr("modules.llm_memory.save_lesson", lambda **f: saved.append(f) or len(saved))
     person = _person(tmp_db)
     res = {"person": person, "max_id": mid, "by_ref": {"T1": ("t1", rows)}, "model": "m",
@@ -67,19 +67,40 @@ def test_write_result_lessons_and_dossier(tmp_db, monkeypatch):
                 "lessons": [{"situation_ru": "торг", "lesson_ru": "Держи цену"}]},
                {"ref": "T9", "outcome": "open", "final_price_eur": None, "lessons": []}]}}
     assert ml.write_result(res) == 1
-    assert saved[0]["source_type"] == "history_review" and saved[0]["source_ref"] == "t1#1"
-    acc, name, summary, facts, tids, emails, model = dossiers[0]
-    assert (acc, name, summary, tids, emails) == (1, "Jan", "Купил консоль", ["t1"], ["b@r"])
-    assert '"sold"' in facts
+    assert saved[0]["source"] == "mined" and saved[0]["source_ref"] == "t1:1"
+    d = dossiers[0]
+    assert (d["account_id"], d["display_name"], d["summary_md"], d["thread_ids"], d["emails"], d["max_msg_id"]) \
+        == (1, "Jan", "Купил консоль", ["t1"], ["b@r"], mid)
+    assert d["facts_json"] == {"outcome": "sold"}
 
 
 def test_write_result_fails_loud_when_lesson_not_saved(tmp_db, monkeypatch):
     tmp_db.add_message(1, "in", gmail_thread_id="t1", buyer_name="b@r", de_client="x")
     monkeypatch.setattr("modules.llm_memory.save_lesson", lambda **f: None)
-    monkeypatch.setattr(tmp_db, "upsert_client_dossier", lambda *a: None, raising=False)
+    monkeypatch.setattr(tmp_db, "upsert_client_dossier", lambda **k: None)
     res = {"person": _person(tmp_db), "max_id": 1, "by_ref": {"T1": ("t1", tmp_db.thread_history("t1"))},
            "model": "m", "data": {"dossier_ru": "d", "facts": {}, "threads": [
                {"ref": "T1", "outcome": "open", "final_price_eur": None,
                 "lessons": [{"situation_ru": "s", "lesson_ru": "l"}]}]}}
     with pytest.raises(RuntimeError, match="не сохранён"):
         ml.write_result(res)
+
+
+def test_write_result_real_db_idempotent_and_visible(tmp_db):
+    from modules import llm_memory
+    llm_memory._COLS_CACHE.clear()
+    mid = tmp_db.add_message(1, "in", gmail_thread_id="t1", buyer_name="b@r", buyer_display_name="Jan",
+                             ad_id="A1", de_client="x")
+    res = {"person": _person(tmp_db), "max_id": mid, "by_ref": {"T1": ("t1", tmp_db.thread_history("t1"))},
+           "model": "m", "data": {"dossier_ru": "Купил консоль", "facts": {"outcome": "sold"}, "threads": [
+               {"ref": "T1", "outcome": "sold", "final_price_eur": 180,
+                "lessons": [{"situation_ru": "торг", "lesson_ru": "Держи цену"},
+                            {"situation_ru": "доставка", "lesson_ru": "Сразу проси адрес"}]}]}}
+    assert ml.write_result(res) == 2
+    assert ml.write_result(res) == 2  # повтор — upsert по source_ref, не дубли
+    with tmp_db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lessons WHERE source = 'mined'").fetchone()[0] == 2
+    assert not ml.needs_review(res["person"])
+    assert tmp_db.get_dossier_for_email("b@r")["summary_md"] == "Купил консоль"
+    lessons = llm_memory.lessons_for(tmp_db.get_message(mid))
+    assert {ls["lesson_ru"] for ls in lessons} == {"Держи цену", "Сразу проси адрес"}
