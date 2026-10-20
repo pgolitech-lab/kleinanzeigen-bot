@@ -11,7 +11,7 @@
 | `modules/market_advisor.py` | логика и функции для api / бота |
 | `modules/scout.py` | правка: строки выдачи несут `page` / `pos` / `is_top`; `parse_top_flags(html)`; после каждого part-запроса `_record_market` пишет прогон в `market_*` (ошибка — только `logger.exception`, прогон scout не падает) |
 | `scripts/market_report.py` | отчёт по копии БД: `python3 scripts/market_report.py --db <путь> [--limit 10] [--llm] [--out f.md]` — источник открывается read-only и копируется во временный файл |
-| `tests/test_market_advisor.py` | 36 тестов |
+| `tests/test_market_advisor.py` | 42 теста |
 
 ## Таблицы (`ensure_market_schema`)
 | Таблица | Что |
@@ -47,12 +47,13 @@
 
 | Вызов | Для чего | Ключевые поля ответа |
 |---|---|---|
-| `ma.advise_price(product_id=None, ad_id=None, title=None, price_eur=None, description=None, item_id=None)` | блок «Рынок» в карточке товара/треда, предзаполнение min | `status` ok/few_data/not_found, `p25`/`median`/`p75`, `recommended_eur`, `min_eur`+`min_basis`, `delta_pct`, `verdict` above/below/in_market, `verdict_ru`, `similar[≤5]` {ad_id,title,price_eur,city,url,active,price_change}, `n`, `excluded_own` |
+| `ma.advise_price(product_id=None, ad_id=None, title=None, price_eur=None, description=None, item_id=None)` | блок «Рынок» в карточке товара/треда, предзаполнение min | `status` ok/few_data/not_found, `p25`/`median`/`p75`, `recommended_eur`, `min_eur`+`min_basis`, `min_note_ru` (почему минимум такой: себестоимость + маржа, выше рынка), `cost_floor_eur`, `market_stale`/`market_stale_days`, `delta_pct`, `verdict` above/below/in_market, `verdict_ru`, `similar[≤5]` {ad_id,title,price_eur,city,url,active,price_change}, `n`, `excluded_own` |
 | `ma.rank_report(product_id=None, ad_id=None, item_id=None, days=14)` | экран «Позиции» | `items[]` {item_id, title, status, status_ru, best{keywords,page,pos,organic_pos,ad_id,at}, queries[{keywords, latest, trend, history[]}], days_quiet, live_ads}, `checked_at`, `last_error` {at,keywords,error}\|None |
 | `ma.repost_suggestions(limit=5, with_text=True, use_llm=True)` | утро / «Склад» / экран «Перепост» | `[]` {item_id, title, priority, action repost/remove_duplicates, reasons_ru[], old_ad, window{now,start,end,label_ru}, text{title,description,price_eur,changes_ru,source}, price{current,suggested,advice_ru}, duplicates, steps_ru[]} |
 | `ma.visibility_tips(product_id=None, ad_id=None, item_id=None, use_llm=True)` | кнопка «Как стать заметнее» | `missing_terms[]` {term, share, is_model, in_our_description}, `leaders.above[]`/`leaders.fast[]`, `title_len`, `leader_first_lines[]`, `suggestions{titles[], first_lines[], notes_ru[], source llm/cache/rules}`, `warning` |
 | `ma.duplicates_report()` | предупреждение о дублях (бот + экран) | `groups[]` {item_id, title, level danger/warn, score, n_live, accounts[], reasons_ru[], keep, remove[], message_ru «опасно: снимите 2 из 3 — …», uncertain[]}, `danger`, `warn`, `ads_to_remove` |
 | `ma.summary_lines()` | 0–3 строки в утреннюю сводку / итог дня | `list[str]` (без HTML — экранировать на стороне бота); первой строкой — «Рынок: данные устарели…», если так |
+| `ma.health_info()` | плашка «почему пусто / данные старые» (дубли, перепост, цена) | `{scout_last_run, age_days, stale, reason}`; тот же блок лежит в `advise_price.data_health`, `rank_report.data_health`, `duplicates_report.data_health`; для `repost_suggestions` (список) api вызывает `health_info()` сам |
 | `ma.data_health()` | плашка «данные устарели» на экранах | `str` (что устарело) или `None` |
 | `ma.own_items()` | список товаров для выбора на экране | `[]` {item_id, product_id, title, category, price_eur, min_price_eur, unit_cost_eur, stock_qty, live_ads, ads[]} |
 

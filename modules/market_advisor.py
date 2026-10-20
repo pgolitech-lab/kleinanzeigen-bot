@@ -795,6 +795,8 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
             "item_id", "product_id", "title", "price_eur", "unit_cost_eur", "min_price_eur")},
         "p25": None, "median": None, "p75": None, "recommended_eur": None, "min_eur": None,
         "min_basis": None, "delta_pct": None, "verdict": None, "market_stale_days": stale,
+        "market_stale": bool(stale is not None and stale > STALE_MARKET_DAYS),
+        "cost_floor_eur": None, "min_note_ru": None, "data_health": health_info(ctx),
     }
     if not item:
         res["item"] = {"item_id": None, "product_id": None, "title": title, "price_eur": price_eur,
@@ -807,13 +809,16 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
         margin_pct = DEFAULT_MARGIN_PCT
     cost = item.get("unit_cost_eur") if item else None
     cost_floor = _round_price(cost * (1 + margin_pct / 100)) if cost else None
+    res["cost_floor_eur"] = cost_floor
+    stale_note = (f" (рынок не обновлялся {int(stale)} дн. — scout стоит?)" if res["market_stale"] else "")
     if len(prices) < MIN_COMPARABLE:
         res["status"] = "few_data"
         res["verdict_ru"] = f"мало данных: сопоставимых объявлений {len(prices)} — смотрите ссылки"
-        if stale is not None and stale > 3:
-            res["verdict_ru"] += f" (рынок не обновлялся {int(stale)} дн. — scout стоит?)"
+        res["verdict_ru"] += stale_note
         if cost_floor:
             res["min_eur"], res["min_basis"] = cost_floor, "cost_only"
+            res["min_note_ru"] = (f"минимум {int(cost_floor)} € = себестоимость {int(cost)} € + маржа "
+                                  f"{margin_pct:g} % (рынок не оценён — мало данных)")
         return res
     p25, med, p75 = _percentile(prices, 0.25), statistics.median(prices), _percentile(prices, 0.75)
     res.update({"p25": round(p25), "median": round(med), "p75": round(p75)})
@@ -824,8 +829,15 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
         res["min_eur"], res["min_basis"] = cost_floor, "cost"
     else:
         res["min_eur"], res["min_basis"] = _round_price(p25), "p25"
+    if res["min_basis"] == "cost":
+        res["min_note_ru"] = f"минимум {int(cost_floor)} € = себестоимость {int(cost)} € + маржа {margin_pct:g} %"
+        if cost_floor > med:
+            res["min_note_ru"] += (f"; это выше рынка (медиана {round(med)} €, P25 {round(p25)} €) — "
+                                   "по рыночной цене товар убыточен или без маржи")
     if res["recommended_eur"] < res["min_eur"]:
         res["recommended_eur"] = res["min_eur"]  # себестоимость с маржой выше рынка
+        res["recommended_note_ru"] = (f"рынок ниже вашего минимума: по медиане было бы {round(med)} €, "
+                                      f"но не ниже {int(res['min_eur'])} €")
     if price_eur:
         delta = (price_eur - med) / med * 100
         res["delta_pct"] = round(delta)
@@ -837,6 +849,7 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
             res["verdict"], res["verdict_ru"] = "in_market", "в рынке"
     else:
         res["verdict_ru"] = "нашей цены нет — ориентир по рынку"
+    res["verdict_ru"] += stale_note
     return res
 
 
@@ -969,14 +982,18 @@ def run_rank_check(force: bool = False, max_queries: int = RANK_MAX_QUERIES,
                                             query_ref=q["id"], rows=[], pages=0, error="0 карточек",
                                             started_at=started)
                     continue
-                if stats.get("partial_error"):
+                partial = bool(stats.get("partial_error"))
+                if partial:
                     res["errors"].append(f"{q['keywords']}: {stats['partial_error']}")
                 _insert_new_market_listings(rows)
                 db_market.record_scrape(source="market", keywords=q["keywords"], category=q["category"],
                                         query_ref=q["id"], rows=rows, pages=stats["pages"],
                                         error=stats.get("partial_error"), started_at=started)
-                db_market.touch_market_query(q["id"])
-                res["ran"] += 1
+                if partial:
+                    res["partial"] = res.get("partial", 0) + 1  # замер неполный: «ran» не растёт
+                else:
+                    db_market.touch_market_query(q["id"])
+                    res["ran"] += 1
                 res["pages"] += stats["pages"]
                 res["cards"] += len(rows)
                 time.sleep(random.uniform(*page_delay))
@@ -1017,7 +1034,7 @@ def _rank_rows(ctx: _Ctx, ad_ids: set[str], titles: list[str], days: int) -> dic
                  # флаг TOP распознан плохо — «органическое» место не считаем
                  "organic_pos": best["organic_pos"] if best and (r.get("top_known") or 0) >= 0.9 else None,
                  "ad_id": best["ad_id"] if best else None,
-                 "searched_pages": r["pages"], "total": r["cards"]}
+                 "searched_pages": r["pages"], "total": r["cards"], "partial": bool(r.get("error"))}
         e = by_kw.setdefault(r["keywords"], {"keywords": r["keywords"], "history": []})
         e["history"].append(point)
     for e in by_kw.values():
@@ -1049,8 +1066,9 @@ def _rank_status(by_kw: dict[str, dict[str, Any]],
         return "stale", None
     found = [p for p in latest if p["pos"]]
     if not found:
-        complete = [p for p in latest if p["searched_pages"] >= RANK_MAX_PAGES
-                    or p["total"] < p["searched_pages"] * PAGE_SIZE]
+        # прогон с ошибкой (часть страниц не загрузилась) полным не считаем — иначе ложное «пропало»
+        complete = [p for p in latest if not p.get("partial") and (
+            p["searched_pages"] >= RANK_MAX_PAGES or p["total"] < p["searched_pages"] * PAGE_SIZE)]
         return ("missing", None) if complete else ("no_data", None)
     best = min(found, key=lambda p: p["organic_pos"] or p["pos"])
     pos = best["organic_pos"] or best["pos"]
@@ -1112,7 +1130,7 @@ def rank_report(product_id: Optional[int] = None, ad_id: Optional[str] = None,
     last_error = None
     if failed and (checked is None or failed[0]["started_at"] > checked):
         last_error = {"at": failed[0]["started_at"], "keywords": failed[0]["keywords"], "error": failed[0]["error"]}
-    return {"items": out, "checked_at": checked, "last_error": last_error}
+    return {"items": out, "checked_at": checked, "last_error": last_error, "data_health": health_info(ctx)}
 
 
 def _days_quiet(ctx: _Ctx, it: dict[str, Any]) -> Optional[float]:
@@ -1403,7 +1421,8 @@ def duplicates_report(now: Optional[datetime] = None, _ctx: Optional[_Ctx] = Non
     Возвращает {"groups": [{item_id, product_id, title, level: "danger"|"warn", score, n_live,
                 accounts: [id], reasons_ru: [..], keep: ad_view, remove: [ad_view],
                 message_ru: «опасно: снимите 2 из 3 — 3537…(Аккаунт, Город), …», uncertain: [ad_id]}],
-                "danger": int, "warn": int, "ads_to_remove": int}
+                "danger": int, "warn": int, "ads_to_remove": int,
+       "data_health": {scout_last_run, age_days, stale, reason} — при stale «дублей нет» не доказательство}
     ad_view: {ad_id, title, price_eur, url, account_id, account, city, plz, live, last_seen_at,
               first_seen_at, inquiries, last_inquiry_at}
     """
@@ -1416,7 +1435,7 @@ def duplicates_report(now: Optional[datetime] = None, _ctx: Optional[_Ctx] = Non
     groups.sort(key=lambda g: (g["level"] != "danger", -g["score"]))
     return {"groups": groups, "danger": sum(1 for g in groups if g["level"] == "danger"),
             "warn": sum(1 for g in groups if g["level"] == "warn"),
-            "ads_to_remove": sum(len(g["remove"]) for g in groups)}
+            "ads_to_remove": sum(len(g["remove"]) for g in groups), "data_health": health_info(ctx)}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1468,6 +1487,15 @@ _REPOST_SCHEMA: dict[str, Any] = {
         "changes_ru": {"type": "string", "description": "что изменено, 1 строка по-русски"},
     },
 }
+
+
+def _as_list(v: Any) -> list[str]:
+    """changes_ru — всегда список строк (LLM и старый кэш отдают строку)."""
+    if v is None or v == "":
+        return []
+    if isinstance(v, str):
+        return [v.strip()] if v.strip() else []
+    return [str(x).strip() for x in v if str(x).strip()]
 _REPOST_SYSTEM = (
     "Ты готовишь текст для повторной публикации объявления о б/у автозапчасти на Kleinanzeigen.de. "
     "Новый текст НЕ должен быть точной копией старого (иначе площадка считает дублем): перефразируй "
@@ -1480,19 +1508,21 @@ _REPOST_SYSTEM = (
 
 def repost_text(it: dict[str, Any], *, price_eur: Optional[float], missing_terms: Iterable[str] = (),
                 use_llm: bool = True) -> dict[str, Any]:
-    """Готовый текст перепоста: {title, description, price_eur, changes_ru, source: llm|cache|rules,
+    """Готовый текст перепоста: {title, description, price_eur, changes_ru: list[str], source: llm|cache|rules,
     warning: str|None — показать оператору (LLM недоступен, нет описания, текст почти как старый)}."""
     title = it["title"]
     desc = it.get("description") or ""
     rules = _rule_repost(it, list(missing_terms))
     base = {"price_eur": price_eur}
     if not use_llm or not desc:
-        return {**rules, **base}  # без описания LLM нечего перефразировать — warning в rules
+        why = "описания нет, LLM нечего перефразировать" if not desc else "LLM не запрашивался"
+        return _norm_text({**rules, **base, "warning": "; ".join(x for x in (why, rules["warning"]) if x)})
     key = "rep:" + db_market.text_hash(title, desc[:800], ",".join(missing_terms))
-    cached = db_market.cache_get(key, max_age_days=7) or \
-        db_market.cache_get(f"rep_last:{it['item_id']}", max_age_days=1)
+    # rep_last привязан к хэшу заголовка+описания: после правки описания старый текст не отдаём
+    last_key = f"rep_last:{it['item_id']}:" + db_market.text_hash(title, desc[:800])
+    cached = db_market.cache_get(key, max_age_days=7) or db_market.cache_get(last_key, max_age_days=1)
     if cached:
-        return {**cached, **base, "source": "cache", "warning": None}
+        return _norm_text({**cached, **base, "source": "cache", "warning": None})
     try:
         from modules import claude_utils
         user = (f"Старый заголовок: {title}\nСтарое описание:\n{desc[:1500]}\n\n"
@@ -1501,20 +1531,35 @@ def repost_text(it: dict[str, Any], *, price_eur: Optional[float], missing_terms
             label="market_repost", model=claude_utils.smart_model(), system=_REPOST_SYSTEM, user=user,
             schema=_REPOST_SCHEMA, max_tokens=1500, nonempty=("title", "description"))
         data["title"] = data["title"].strip()[:TITLE_MAX]
+        data["changes_ru"] = _as_list(data.get("changes_ru"))
         if match_key(data["title"]) == match_key(title) and data["description"].strip() == desc.strip():
             raise ValueError("LLM вернул тот же текст")
         db_market.cache_set(key, "repost", data)
-        db_market.cache_set(f"rep_last:{it['item_id']}", "repost", data)
-        return {**data, **base, "source": "llm", "warning": None}
+        db_market.cache_set(last_key, "repost", data)
+        return _norm_text({**data, **base, "source": "llm", "warning": None})
     except Exception as e:  # noqa: BLE001
         logger.warning("market: LLM-текст перепоста не получен: %s — текст по правилам", e)
-        return {**rules, **base, "warning": "; ".join(x for x in (f"LLM недоступен: {e}", rules["warning"]) if x)}
+        return _norm_text({**rules, **base, "warning": "; ".join(
+            x for x in (f"LLM недоступен: {e}", rules["warning"]) if x)})
+
+
+def _norm_text(t: dict[str, Any]) -> dict[str, Any]:
+    """Контракт ответа: changes_ru — список; warning/source есть всегда."""
+    t["changes_ru"] = _as_list(t.get("changes_ru"))
+    t.setdefault("source", "rules")
+    t.setdefault("warning", None)
+    return t
 
 
 _FIRST_WORD = {"sitzbank": "Sitzbank", "einzelsitz": "Einzelsitz", "sitze": "Sitze", "fahrersitze": "Sitz",
                "komplettsatz": "Sitze", "tisch": "Tisch", "ahk": "Anhängerkupplung", "sitzschienen": "Sitzschienen",
                "raeder": "Felgen", "gurte": "Gurte", "leuchten": "Leuchten", "dach": "Dachreling"}
 _COND_WORD = {"neu": "neu", "gebraucht": "gebraucht", "defekt": "defekt"}
+
+
+def _same_words(a: str, b: str) -> bool:
+    """Заголовки из одних и тех же слов (порядок не важен) — для площадки почти дубль."""
+    return sorted(set(tokens(a))) == sorted(set(tokens(b)))
 
 
 def _rule_repost(it: dict[str, Any], missing_terms: list[str]) -> dict[str, Any]:
@@ -1536,8 +1581,10 @@ def _rule_repost(it: dict[str, Any], missing_terms: list[str]) -> dict[str, Any]
         title = f"{it['title']} {_COND_WORD[f['condition']]}"[:TITLE_MAX]
     if title == it["title"] and len(words) > 1:
         title = " ".join(words[1:] + words[:1])  # хотя бы другой порядок слов
-    if title == it["title"]:
-        warnings.append("заголовок не удалось изменить — поправьте руками")
+    if _same_words(title, it["title"]):
+        # тот же набор слов в другом порядке площадка считает дублем — готовый заголовок не отдаём
+        title = ""
+        warnings.append(f"заголовок не удалось изменить — придумайте свой (старый: «{it['title']}»)")
     parts = []
     if f.get("material") == "leder":
         parts.append("Leder")
@@ -1552,7 +1599,7 @@ def _rule_repost(it: dict[str, Any], missing_terms: list[str]) -> dict[str, Any]
         description = f"{first}.\n\n{desc}" if first else desc
         warnings.append("текст почти как старый — перефразируйте пару предложений")
     return {"title": title, "description": description,
-            "changes_ru": "порядок слов заголовка и первая строка описания изменены (без LLM)",
+            "changes_ru": ["порядок слов заголовка и первая строка описания изменены (без LLM)"],
             "source": "rules", "warning": "; ".join(warnings) or None}
 
 
@@ -1666,6 +1713,26 @@ def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text
 # СВОДКА И ДЖОБЫ
 # ══════════════════════════════════════════════════════════════════════════════
 
+STALE_MARKET_DAYS = 3  # рынок (scout) старше — советы по цене помечаются «протухшим рынком»
+
+
+def health_info(ctx: Optional[_Ctx] = None) -> dict[str, Any]:
+    """Для экранов: почему «пусто» и насколько свежи данные.
+    {scout_last_run (ISO|None), age_days (float|None), stale (bool), reason (str|None)}."""
+    ctx = ctx or _Ctx()
+    last = max((m["last_seen_at"] for m in ctx.market.values() if m["ek"] == "part" and m["last_seen_at"]),
+               default=None)
+    age = _iso_age_days(last, ctx.now)
+    stale = age is None or age > STALE_MARKET_DAYS
+    reason = None
+    if age is None:
+        reason = "данных рынка нет — scout ещё не собирал запчасти"
+    elif stale:
+        reason = f"рынок не обновлялся {int(age)} дн. — scout стоит? Пустые «дубли» и «перевыкладывать нечего» могут быть из-за этого"
+    return {"scout_last_run": last, "age_days": None if age is None else round(age, 1),
+            "stale": stale, "reason": reason}
+
+
 def data_health(ctx: Optional[_Ctx] = None) -> Optional[str]:
     """Почему советы могут быть пустыми: устаревшие данные. None — всё в порядке.
     Пишет WARNING в лог; вызывается в сводке и доступна api (`/market/*` → поле health)."""
@@ -1724,7 +1791,7 @@ def market_rank_job() -> str:
     if r["skipped"]:
         return f"market: пропуск — {r['skipped']}"
     if r["ran"] == 0:
-        # Запросы есть, но ни один не дал карточек — блокировка или новая вёрстка.
+        # Запросы есть, но ни один не дал полной выдачи (или только частичные) — блокировка или новая вёрстка.
         logger.error("market: прогон позиций без единой выдачи: %s", "; ".join(r["errors"])[:1000])
         return f"market: ни один запрос не дал выдачи, ошибок {len(r['errors'])}"
     msg = f"market: запросов {r['ran']}, страниц {r['pages']}, карточек {r['cards']}"
