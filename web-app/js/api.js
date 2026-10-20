@@ -56,7 +56,7 @@ const DEFAULT_TIMEOUT_MS = 30000;
 // они легитимно идут дольше 30с. Передаётся явно в такие call-sites.
 export const LLM_TIMEOUT_MS = 120000;
 
-export async function api(path, { method = "GET", body = null, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function api(path, { method = "GET", body = null, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal = null } = {}) {
   const url = `${API_BASE}${path}`;
   const id = initData();
   // initData пустой — Telegram потерял контекст WebApp (обычно при смене сети
@@ -81,11 +81,13 @@ export async function api(path, { method = "GET", body = null, headers = {}, tim
   const ctrl = new AbortController();
   opts.signal = ctrl.signal;
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  if (signal) signal.aborted ? ctrl.abort() : signal.addEventListener("abort", () => ctrl.abort(), { once: true });
   let res;
   try {
     res = await fetch(url, opts);
   } catch (e) {
     if (e.name === "AbortError") {
+      if (signal?.aborted) { const ae = new Error("Отменено"); ae.aborted = true; throw ae; }
       throw new Error(
         "Сервер не ответил вовремя. Проверьте связь и переоткройте " +
         "мини-приложение через кнопку меню в боте.");

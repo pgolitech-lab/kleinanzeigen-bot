@@ -1566,3 +1566,7 @@ body.kb .tdock, body.kb .dock { display: none; }   /* док не закрыва
 .ms-am { color: var(--hint); }
 .ms-open { color: var(--link); font-weight: 700; text-align: right; }
 .ms-legacy { color: var(--hint); font-size: .85rem; text-decoration: none; padding: 12px 0; }
+.ms-sug .qchip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-act { min-height: 44px; padding: 0 16px; }
+.ms-busy { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.ms-busy p { margin: 0; }

@@ -23,6 +23,7 @@ function note(cls, msg, action) {
     const r = el(`<button class="btn" type="button"></button>`);
     r.textContent = action.label;
     r.addEventListener("click", action.fn);
+    r.classList.add("ms-act");
     b.appendChild(r);
   }
   return b;
@@ -88,7 +89,7 @@ export async function render(mount) {
     <div class="msearch">
       <form class="ms-form" role="search">
         <label class="ms-lbl" for="ms-q">Какой товар?</label>
-        <div class="ms-row"><input id="ms-q" class="form-control ms-q" type="search" enterkeyhint="search" autocomplete="off" placeholder="например: сиденья Peugeot"><button class="btn btn-primary ms-go" type="submit">Найти</button></div>
+        <div class="ms-row"><input id="ms-q" class="form-control ms-q" type="search" maxlength="80" enterkeyhint="search" autocomplete="off" placeholder="например: сиденья Peugeot"><button class="btn btn-primary ms-go" type="submit">Найти</button></div>
       </form>
       <div class="ms-sug"></div>
       <div class="ms-res"></div>
@@ -96,7 +97,10 @@ export async function render(mount) {
     </div>`);
   mount.replaceChildren(root);
   const input = root.querySelector(".ms-q"), sug = root.querySelector(".ms-sug"), res = root.querySelector(".ms-res");
-  let seq = 0;
+  let seq = 0, ctrl = null;
+  const go = root.querySelector(".ms-go");
+  // уход с экрана обрывает запрос: роутер заменяет mount, ждём hashchange
+  window.addEventListener("hashchange", () => { if (!root.isConnected) ctrl?.abort(); });
 
   const chip = (label, onClick, cls) => {
     const c = el(`<button type="button" class="qchip"></button>`);
@@ -118,19 +122,28 @@ export async function render(mount) {
   async function search(q, live) {
     q = (q ?? "").trim();
     if (!q) { res.replaceChildren(note("ms-empty", "Введите товар — например «сиденья Peugeot» или «скамья». Или нажмите на подсказку выше.")); return; }
-    const my = ++seq;
-    res.replaceChildren(el(`<div class="ms-busy">⏳ ${live ? "Ищу на Kleinanzeigen (до минуты)…" : "Смотрю, как это продаётся…"}</div>`));
+    if (q.length > 80) q = q.slice(0, 80);
+    ctrl?.abort();
+    const my = ++seq, mine = ctrl = new AbortController();
+    go.disabled = true;
+    const busy = el(`<div class="ms-busy"><p></p><button class="btn ms-act" type="button">Отмена</button></div>`);
+    busy.querySelector("p").textContent = `⏳ ${live ? "Ищу на Kleinanzeigen (до минуты)…" : "Смотрю, как это продаётся…"}`;
+    busy.querySelector("button").addEventListener("click", () => mine.abort());
+    res.replaceChildren(busy);
     input.blur();  // клавиатура не должна закрывать результат
     let d;
     try {
-      d = await api(`/api/ma/market/search?q=${encodeURIComponent(q)}&live=${live ? 1 : 0}&limit=40`, { timeoutMs: LLM_TIMEOUT_MS });
+      d = await api(`/api/ma/market/search?q=${encodeURIComponent(q)}&live=${live ? 1 : 0}&limit=40`, { timeoutMs: LLM_TIMEOUT_MS, signal: mine.signal });
     } catch (e) {
       if (my !== seq || !root.isConnected) return;
+      go.disabled = false;
+      if (e.aborted) { res.replaceChildren(note("ms-empty", "Поиск отменён.", { label: "🔄 Искать снова", fn: () => search(q, live) })); return; }
       const nf = e.status === 404 && (!e.detail || e.detail === "Not Found");
       res.replaceChildren(note("ms-err", nf ? "Поиск по рынку ещё не подключён на сервере." : (e.network ? e.message : "Не получилось посмотреть рынок."), nf ? null : { label: "🔄 Повторить", fn: () => search(q, live) }));
       return;
     }
     if (my !== seq || !root.isConnected) return;
+    go.disabled = false;
     res.replaceChildren();
     const st = d?.status, msg = d?.message_ru;
     if (st === "source_unavailable") { res.appendChild(note("ms-err", msg || "Kleinanzeigen не ответил.", { label: "🔄 Повторить", fn: () => search(q, live) })); return; }
