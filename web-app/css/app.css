@@ -1298,3 +1298,87 @@ em.good { color: var(--good); }
   .det-acts .det-yes { grid-column: 1 / -1; }
   .s-total { font-size: 1.7rem; }
 }
+
+/* ============================================================
+   Склад
+   ============================================================ */
+.stock { display: flex; flex-direction: column; gap: 10px; }
+.st-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.st-k { padding: 10px; border-radius: var(--r); background: var(--card); border: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+.st-k b { font-size: 1.1rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-k small { font-size: .68rem; color: var(--hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-k:last-child b { color: var(--good); }
+.st-note { font-size: .82rem; color: var(--warn); }
+.st-banners { display: flex; flex-direction: column; gap: 6px; }
+.st-banners:empty { display: none; }
+.st-banner { display: block; padding: 10px 14px; border-radius: var(--r); background: var(--card); border: 1px solid var(--line); color: var(--text); text-decoration: none; font-weight: 600; font-size: .9rem; }
+.st-banner.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 9%, var(--card)); }
+.st-actions { display: flex; gap: 8px; }
+.st-actions .btn { flex: 1; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.st-q { min-height: 44px; border-radius: 12px; }
+.st-list { margin: 0 -12px; }
+.prow { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; background: var(--bg); }
+.prow:active { background: var(--tonal); }
+.prow.sel { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
+.pr-qty { flex: none; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 800; font-size: 1.05rem;
+  background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--good); }
+.pr-qty.zero { background: var(--tonal); color: var(--hint); }
+.pr-qty.unk { background: var(--tonal); color: var(--hint); }
+.pr-qty.bad { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.pr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pr-main b { font-weight: 650; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pr-main small { color: var(--hint); font-size: .76rem; }
+.pr-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; }
+.pr-side small { color: var(--hint); font-size: .72rem; }
+.rcpt { display: flex; flex-direction: column; gap: 8px; }
+.rcpt .r-text { min-height: 48px; }
+.r-row { padding: 8px; border-radius: 12px; background: var(--tonal); display: flex; flex-direction: column; gap: 6px; }
+.r-src { font-size: .82rem; color: var(--sub); }
+.r-ctl { display: grid; grid-template-columns: 64px minmax(0, 1fr) 84px; gap: 6px; align-items: center; }
+.r-ctl .form-control { min-height: 40px; padding: 4px 8px; }
+.r-prod { justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.product { display: flex; flex-direction: column; gap: 12px; }
+.pd-hero { text-align: center; padding: 12px 6px 0; }
+.pd-hero h2 { margin: 6px 0 2px; font-size: 1.2rem; overflow-wrap: anywhere; }
+.pd-qty { display: inline-block; padding: 6px 16px; border-radius: 999px; font-weight: 800; color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.pd-qty.unk { color: var(--hint); background: var(--tonal); }
+.pd-sub { color: var(--hint); font-size: .84rem; }
+.pd-acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+.pd-acts .btn { min-height: 46px; }
+.mv { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: .88rem; }
+.mv:last-child { border-bottom: 0; }
+.mv.void { opacity: .45; text-decoration: line-through; }
+.mv-q { flex: none; min-width: 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mv-q.good { color: var(--good); }
+.mv-q.bad { color: var(--danger); }
+.mv-t { flex: 1; min-width: 0; color: var(--sub); overflow-wrap: anywhere; }
+.mv time, .mv-p { flex: none; color: var(--hint); font-size: .76rem; }
+.mv-p { color: var(--good); font-size: .88rem; }
+.num-form .nf { display: flex; flex-direction: column; gap: 4px; }
+.num-form .form-control { min-height: 46px; margin-bottom: 6px; }
+.stockq { display: flex; flex-direction: column; gap: 10px; }
+.q-list { display: flex; flex-direction: column; gap: 10px; }
+.qcard { padding: 12px; border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.q-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; }
+.q-a, .q-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px; border-radius: 12px; background: var(--tonal); }
+.q-a small, .q-b small { font-size: .66rem; color: var(--hint); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.q-a b, .q-b b { font-size: .88rem; overflow-wrap: anywhere; }
+.q-a span, .q-b span { color: var(--sub); font-size: .8rem; }
+.q-vs { color: var(--hint); font-weight: 800; }
+.q-why { font-size: .8rem; color: var(--hint); }
+.q-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.q-acts .btn { min-height: 48px; }
+.month { display: flex; flex-direction: column; gap: 10px; }
+.m-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.m-nav b { text-transform: capitalize; }
+@media (max-width: 340px) {
+  .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .q-pair { grid-template-columns: 1fr; }
+  .q-vs { text-align: center; }
+  .r-ctl { grid-template-columns: 56px minmax(0, 1fr); }
+  .r-ctl .r-unit { grid-column: 1 / -1; }
+}
+.stock { container-type: inline-size; }
+@container (max-width: 460px) {
+  .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

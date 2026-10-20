@@ -1,7 +1,7 @@
 // Нижний таб-бар: SVG-иконка + подпись, активная вкладка подсвечена.
-// Вкладки (итог QA «ленивый продажник»): Входящие · Клиенты · Продажи ·
-// Объявления · Ещё. Обзор влит во Входящие (полоса-итог), Рынок/Настройки/
-// Аккаунты/Найденные продажи — в «Ещё».
+// Вкладки: Входящие · Клиенты · Продажи · Склад · Ещё. Склад — товары с их
+// объявлениями (закрывает и «Мои объявления»). Обзор влит во Входящие
+// (полоса-итог), Рынок/Настройки/Аккаунты — в «Ещё».
 import { el } from "../utils.js";
 
 const ICONS = {
@@ -16,7 +16,7 @@ const TABS = [
   { icon: "inbox",    label: "Входящие",   hash: "#/pipeline", match: /^#\/(pipeline|thread|review|triage)/ },
   { icon: "users",    label: "Клиенты",    hash: "#/clients",  match: /^#\/(clients|client)/ },
   { icon: "sales",    label: "Продажи",    hash: "#/sales",    match: /^#\/(sales|detected)/ },
-  { icon: "listings", label: "Объявления", hash: "#/listings", match: /^#\/(listings|scout)/ },
+  { icon: "listings", label: "Склад",      hash: "#/stock",    match: /^#\/(stock|listings)/ },
   { icon: "more",     label: "Ещё",        hash: "#/more",     match: /^#\/(more|settings|accounts|dashboard|scout)/ },
 ];
 

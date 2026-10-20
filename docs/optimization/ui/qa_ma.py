@@ -91,9 +91,43 @@ def _msg(mid, tid, status="pending"):
             "extra_notes": None, "is_auto_ack": False}
 
 
+STOCK_PRODUCTS = [
+    {"product_id": 1, "title": "Sitzbank 3er VW T6 Multivan", "category": "sitzbank", "condition": "gebraucht", "archived": False,
+     "stock_tracked": True, "qty": 3, "unit_cost_eur": 450, "list_price_eur": 1200, "min_price_eur": 950, "listings": 2,
+     "listed_days": 23, "stale": False, "negative_stock": False},
+    {"product_id": 2, "title": "Tisch Schienensystem T5", "category": "tisch", "condition": None, "archived": False,
+     "stock_tracked": True, "qty": 1, "unit_cost_eur": 60, "list_price_eur": 220, "min_price_eur": 180, "listings": 1,
+     "listed_days": 71, "stale": True, "negative_stock": False},
+    {"product_id": 3, "title": "Drehkonsole Fahrersitz Sprinter", "category": "konsole", "condition": None, "archived": False,
+     "stock_tracked": False, "qty": None, "unit_cost_eur": None, "list_price_eur": 380, "min_price_eur": None, "listings": 1,
+     "listed_days": 9, "stale": False, "negative_stock": False},
+]
+
+
 def mock_get(path: str):
     p = urllib.parse.urlparse(path)
     route = p.path
+    if route == "/api/ma/stock/report":
+        return 200, {"totals": {"products": 3, "tracked": 2, "qty": 4, "stock_cost": 1410, "expected_revenue_list": 3820,
+                                "expected_profit_list": 2410, "open_questions": 2, "unlinked_sales": 1, "stale": 1},
+                     "products": STOCK_PRODUCTS}
+    m = re.match(r"^/api/ma/stock/products/(\d+)$", route)
+    if m:
+        pr = next((x for x in STOCK_PRODUCTS if x["product_id"] == int(m.group(1))), STOCK_PRODUCTS[0])
+        return 200, {"product": pr, "listings": [{"ad_id": "3391", "title": pr["title"], "price_eur": pr["list_price_eur"], "state": "active",
+                                                  "account_id": 1, "first_seen_at": "2026-09-27T10:00:00", "url": "https://example.invalid/ad"}],
+                     "movements": [{"kind": "receipt", "qty": 4, "unit_cost_eur": 450, "occurred_at": "2026-09-20T10:00:00"},
+                                   {"kind": "sale", "qty": -1, "unit_price_eur": 1050, "occurred_at": "2026-10-12T10:00:00"}]}
+    if route == "/api/ma/stock/questions":
+        return 200, {"items": [{"id": 7, "ad_id": "3402", "ad_title": "Sitzbank 2+1 Traveller", "ad_price_eur": 900,
+                                "suggested_title": "Sitzbank 2+1 SpaceTourer", "suggested_price_eur": 950, "reason": "тот же заголовок без модели, цена близко"}]}
+    if route == "/api/ma/stock/unlinked-sales":
+        return 200, {"items": [{"thread_id": "T9", "ad_title": "2+1 старые 3 шт", "price_eur": 600}]}
+    if route == "/api/ma/stock/month":
+        return 200, {"profit": 1340, "revenue": 2210, "cogs": 870, "invested": 1800, "sold_qty": 4,
+                     "stock_end": {"qty": 4, "list_value": 3820},
+                     "lots": [{"title": "Sitzbank T6", "qty_in": 4, "cost": 1800, "date": "2026-10-02T10:00:00", "payback": "not_yet", "payback_pct": 58}],
+                     "products": [{"title": "Sitzbank 3er VW T6 Multivan", "sold": 2, "profit": 1100}, {"title": "Tisch T5", "sold": 2, "profit": 240}]}
     if route == "/api/ma/pipeline":
         return 200, PIPE
     m = re.match(r"^/api/ma/threads/([^/]+)$", route)

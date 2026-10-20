@@ -19,6 +19,7 @@ const scout    = () => import("./screens/scout.js");
 
 const more     = () => import("./screens/more.js");
 const triage   = () => import("./screens/triage.js");
+const stock    = () => import("./screens/stock.js");
 
 // root: true — корневой экран вкладки (без кнопки «Назад»).
 // list — на широком экране (Fold внутренний) слева держится этот список,
@@ -32,7 +33,11 @@ const ROUTES = [
   { pattern: /^#\/dashboard\/?$/,         screen: dashboard, title: "Обзор", params: () => ({}) },
   { pattern: /^#\/clients\/?$/,           screen: clients,  root: true, list: "clients", title: "Клиенты", params: () => ({}) },
   { pattern: /^#\/sales\/?$/,             screen: sales,    root: true, title: "Продажи", params: () => ({}) },
-  { pattern: /^#\/(?:listings|scout)\/?$/, screen: scout,   root: true, title: "Объявления", params: () => ({}) },
+  { pattern: /^#\/(?:stock|listings)\/?$/, screen: stock,  root: true, list: "stock", title: "Склад", params: () => ({}) },
+  { pattern: /^#\/stock\/questions\/?$/,  screen: stock,  title: "Тот же товар?", params: () => ({ view: "questions" }) },
+  { pattern: /^#\/stock\/month\/?$/,      screen: stock,  title: "Отчёт за месяц", params: () => ({ view: "month" }) },
+  { pattern: /^#\/stock\/(\d+)\/?$/,       screen: stock,  list: "stock", title: "Товар", params: m => ({ id: m[1] }), key: p => p.id },
+  { pattern: /^#\/scout\/?$/,             screen: scout,    title: "Рынок", params: () => ({}) },
   { pattern: /^#\/more\/?$/,              screen: more,     root: true, title: "Ещё", params: () => ({}) },
   { pattern: /^#\/detected\/?$/,          screen: detected, title: "Найденные продажи", params: () => ({}) },
   { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, list: "pipeline", title: "Переписка", params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }), key: p => p.thread_id },  // focused deep-link
@@ -43,7 +48,7 @@ const ROUTES = [
 ];
 
 // Экраны-списки для левой панели (широкий экран)
-const LISTS = { pipeline, clients };
+const LISTS = { pipeline, clients, stock };
 
 // Модуль экрана: уже загруженный или ленивый загрузчик () => import(...).
 async function loadScreen(screen) {
@@ -88,9 +93,9 @@ function emptyDetail(list) {
   box.className = "pane-empty";
   const ic = document.createElement("div");
   ic.className = "pe-ic";
-  ic.textContent = list === "clients" ? "👤" : "💬";
+  ic.textContent = { clients: "👤", stock: "📦" }[list] ?? "💬";
   const t = document.createElement("div");
-  t.textContent = list === "clients" ? "Выберите клиента слева" : "Выберите переписку слева";
+  t.textContent = { clients: "Выберите клиента слева", stock: "Выберите товар слева" }[list] ?? "Выберите переписку слева";
   box.append(ic, t);
   return box;
 }
@@ -171,7 +176,7 @@ export function start(app) {
     applyChrome();
     setTitle(r.title);
     // На широком экране список уже слева — корневой экран списка справа не дублируем
-    if (isSplit() && r.list && r.screen === LISTS[r.list]) {
+    if (isSplit() && r.list && r.screen === LISTS[r.list] && r.root) {
       screenMount.appendChild(emptyDetail(r.list));
       return;
     }
@@ -194,7 +199,7 @@ export function start(app) {
     if (route?.flex && (next === "flex" || prev === "flex")) { dispatch(); return; }
     const wasSplit = prev === "split2" || prev === "split3";
     const nowSplit = isSplit();
-    if (route && route.list && route.screen === LISTS[route.list] && wasSplit !== nowSplit) {
+    if (route && route.list && route.root && wasSplit !== nowSplit) {
       // корневой экран списка: на телефоне он справа, на Fold — слева
       dispatch();
       return;
