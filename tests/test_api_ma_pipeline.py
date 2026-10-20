@@ -148,6 +148,8 @@ def test_dashboard_and_pipeline_share_one_query(client):
     conn = mdb.get_conn.return_value.__enter__.return_value
     conn.execute.return_value.fetchone.return_value = {"c": 0, "s": 0}
     mdb.list_sales.return_value = []
+    mdb.berlin_day_bounds_utc.return_value = ("2026-10-19T22:00:00", "2026-10-20T22:00:00")
+    mdb.sales_summary.return_value = {"count": 0, "total_eur": 0.0}
     with patch("web.api_ma.config") as mcfg:
         mcfg.get.return_value = ""
         assert c.get("/api/ma/pipeline", headers=h).status_code == 200

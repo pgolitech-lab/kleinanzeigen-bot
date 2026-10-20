@@ -68,3 +68,12 @@ def test_variants_refused_for_sent(env):
     database.update_message(mid, status="sent", sent_at="x")
     assert c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).status_code == 409
     assert calls == []
+
+
+def test_minus5_never_below_min_price(env):
+    c, mid, calls = env
+    database.update_message(mid, ad_id="AD1")
+    from modules.db_sales import set_ad_min_price
+    set_ad_min_price("AD1", 390)
+    by = {x["tone"]: x for x in c.post(f"/api/ma/messages/{mid}/variants", json={}, headers=H()).json()["variants"]}
+    assert by["floor"]["price_eur"] == 390 and by["minus5"]["price_eur"] == 390

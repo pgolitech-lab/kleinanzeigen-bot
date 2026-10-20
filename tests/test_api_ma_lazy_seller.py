@@ -33,9 +33,13 @@ def client():
         yield TestClient(app), mdb
 
 
-def _thread(mdb, brief=None, ad_price="450 €"):
-    mdb.thread_history.return_value = [_row(id=7, direction="in", deal_brief_json=brief,
-                                            ad_price=ad_price, extra_notes=None, status="sent")]
+def _thread(mdb, brief=None, ad_price="450 €", status="pending", sent_at=None):
+    mdb.thread_history.return_value = [_row(id=7, direction="in", deal_brief_json=brief, ad_price=ad_price,
+                                            extra_notes=None, status=status, sent_at=sent_at,
+                                            sent_message_id=None, account_id=3, ad_title="Bank",
+                                            buyer_display_name="Klaus", buyer_name="k@x")]
+    conn = mdb.get_conn.return_value.__enter__.return_value
+    conn.execute.return_value.fetchone.return_value = None  # в очереди ничего
 
 
 def test_sold_any_thread_price_from_deal_brief(client):
@@ -55,6 +59,27 @@ def test_sold_any_thread_price_from_ad_and_explicit(client):
     assert "забрал сам" in mdb.update_message.call_args.kwargs["extra_notes"]
 
 
+def test_sold_on_answered_thread_keeps_sent_row(client):
+    """Последнее письмо уже отвечено: наш отправленный ответ не превращается в skipped_sold —
+    продажа отдельной строкой, тред закрыт."""
+    c, mdb = client
+    _thread(mdb, status="sent", sent_at="2026-10-19T10:00:00")
+    mdb.add_manual_sale.return_value = {"msg_id": 99, "thread_id": "manual-x"}
+    r = c.post("/api/ma/threads/t1/sold", json={"price_eur": 300}, headers=H())
+    assert r.status_code == 200 and r.json()["separate_sale"] == {"msg_id": 99, "thread_id": "manual-x"}
+    mdb.mark_thread_sold.assert_not_called()
+    assert mdb.add_manual_sale.call_args.kwargs["sold_price_eur"] == 300.0
+    mdb.close_thread.assert_called_once()
+
+
+def test_sold_refused_while_letter_queued(client):
+    c, mdb = client
+    _thread(mdb)
+    mdb.get_conn.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = {"id": 7}
+    assert c.post("/api/ma/threads/t1/sold", json={"price_eur": 1}, headers=H()).status_code == 409
+    mdb.mark_thread_sold.assert_not_called()
+
+
 def test_sold_without_any_price_400(client):
     c, mdb = client
     _thread(mdb, ad_price="VB")
@@ -64,40 +89,30 @@ def test_sold_without_any_price_400(client):
 
 def test_accept_confident(client):
     c, mdb = client
-    mdb.list_pending_detections.return_value = [_row(id=1, confidence="high"), _row(id=2, confidence="medium"),
-                                                _row(id=3, confidence="low")]
-    r = c.post("/api/ma/detected-sales/accept-confident", json={}, headers=H())
-    assert r.json()["applied"] == [1]
-    mdb.apply_detection_to_messages.reset_mock()
+    mdb.accept_detected_bulk.return_value = {"applied": [{"detection_id": 1}], "skipped": []}
     r = c.post("/api/ma/detected-sales/accept-confident", json={"min_confidence": "medium"}, headers=H())
-    assert r.json()["applied"] == [1, 2]
+    assert r.json()["applied"] == [{"detection_id": 1}]
+    mdb.accept_detected_bulk.assert_called_once_with("medium")
     assert c.post("/api/ma/detected-sales/accept-confident", json={"min_confidence": "low"},
                   headers=H()).status_code == 422
 
 
-def test_berlin_day_bounds_cover_local_day():
-    from web.api_ma import berlin_day_bounds
-    t0, t1 = berlin_day_bounds()
-    a, b = datetime.fromisoformat(t0), datetime.fromisoformat(t1)
-    assert 23 * 3600 <= (b - a).total_seconds() <= 25 * 3600
-    assert a.hour in (22, 23)  # полночь по Берлину = 22:00/23:00 UTC
-    assert a <= datetime.utcnow() < b
-
-
-def test_dashboard_sold_today_from_list_sales(client):
+def test_dashboard_sold_today_from_db_sales_summary(client):
+    """«Продано сегодня» — db.sales_summary(сегодня по Берлину), как экран «Продажи» и бот."""
     c, mdb = client
     mdb.pipeline_threads.return_value = []
     conn = mdb.get_conn.return_value.__enter__.return_value
     conn.execute.return_value.fetchone.return_value = {"c": 0, "s": 0}
-    mdb.list_sales.return_value = [{"sold_price_eur": 300}, {"sold_price_eur": 200}]
+    mdb.berlin_day_bounds_utc.return_value = ("2026-10-19T22:00:00", "2026-10-20T22:00:00")
+    mdb.sales_summary.return_value = {"count": 2, "total_eur": 500.0}
     from web import api_ma
+    from modules.db_sales import today_berlin
     api_ma.invalidate_pipeline_cache()
     with patch("web.api_ma.config") as mcfg:
         mcfg.get.return_value = ""
         body = c.get("/api/ma/dashboard", headers=H()).json()
     assert body["today"]["sold"] == 2
-    t0, t1 = api_ma.berlin_day_bounds()
-    assert mdb.list_sales.call_args_list[0].kwargs["period_from"] == t0
+    assert mdb.sales_summary.call_args_list[0].args == (today_berlin(), today_berlin())
 
 
 def test_detected_sales_evidence_translated_and_cached(client):

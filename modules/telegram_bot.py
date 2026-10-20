@@ -573,15 +573,16 @@ def _drain_deferred(thread_id: str) -> None:
 def evening_summary_text() -> Optional[str]:
     """Итог дня: письма, ответы, продажи (те же числа, что «Сегодня» в Обзоре MA) + кто ждёт сейчас.
     None — день пустой и никто не ждёт (не шлём)."""
-    from web.api_ma import _sales_summary, berlin_day_bounds  # один источник «сегодня» с MA
-    t0, t1 = berlin_day_bounds()
+    from modules.db_sales import today_berlin
+    today = today_berlin()
+    t0, t1 = db.berlin_day_bounds_utc(today)  # один источник «сегодня» с Обзором MA
     with db.get_conn() as conn:
         new = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE direction='in' "
                            "AND created_at >= ? AND created_at < ?", (t0, t1)).fetchone()["c"]
         sent = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
                             "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?",
                             (t0, t1)).fetchone()["c"]
-    sales = _sales_summary(t0, t1)
+    sales = db.sales_summary(today, today)
     waiting = sum(1 for t in db.pipeline_threads()
                   if t["last_event_kind"] == "in" and not t["autopilot_active"])
     if not (new or sent or sales["count"] or waiting):

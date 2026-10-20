@@ -30,6 +30,7 @@ import scheduler
 from modules import claude
 from modules import claude_scout
 from modules import scout_runner
+from modules.db_sales import today_berlin
 from modules.tg_init_data import verify_init_data_dep, verify_init_data
 
 
@@ -57,6 +58,18 @@ def _is_answered(row) -> bool:
     """Черновик менять нельзя: отправлено или тред закрыт (продано/архив).
     «Пропущено» (skipped) — можно: оператор передумал и хочет ответить."""
     return row["status"] in _ANSWERED_STATUSES or _already_sent(row)
+
+
+def _ensure_nothing_queued(thread_id: "str | None") -> None:
+    """В треде письмо ждёт отложенной отправки — compose/«Продано»/«Пропустить» сначала через «Отменить»
+    (иначе клиенту ушло бы и письмо из очереди)."""
+    if not thread_id:
+        return
+    with db.get_conn() as conn:
+        queued = conn.execute("SELECT id FROM messages WHERE gmail_thread_id=? AND status='send_queued' LIMIT 1",
+                              (thread_id,)).fetchone()
+    if queued:
+        raise HTTPException(409, "В треде письмо в очереди на отправку — сначала нажмите «Отменить»")
 
 
 def _ensure_draft_editable(row) -> None:
@@ -824,6 +837,7 @@ def _send_now(msg_id: int, actor: str) -> "dict[str, Any]":
                 )
 
     telegram_bot._release_lock(msg_id, actor)
+    invalidate_pipeline_cache()  # таймер отложенной отправки — не HTTP POST, middleware кэш не сбросит
 
     status = fresh["status"] if fresh else "sent"
     if status in ("sent", "sent_debug"):
@@ -910,7 +924,9 @@ def _fire_queued_send(msg_id: int) -> None:
             if job is None:
                 return  # отменили
             if not _return_to_draft(msg_id, job["prev"]):
-                logger.warning("отложенная отправка msg=%s: строка уже не в очереди — пропуск", msg_id)
+                _persist_send_queue()
+                _alert_send_failed(msg_id, "письмо изменили, пока оно ждало отправки — не отправлено, "
+                                           "проверьте и отправьте ещё раз")
                 return
             _persist_send_queue()
         row = db.get_message(msg_id)
@@ -1070,6 +1086,8 @@ def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
 def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
+    if db.get_message(msg_id)["status"] == SEND_QUEUED:
+        raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -1111,17 +1129,37 @@ def ma_thread_sold(thread_id: str, body: "ThreadSoldBody | None" = None,
             price, source = _parse_listed_price_eur(latest_in["ad_price"]), "ad_price"
     if not price:
         raise HTTPException(400, "Укажите цену продажи — в переписке и объявлении её нет")
+    _ensure_nothing_queued(thread_id)
     msg_id = latest_in["id"]
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
-    result = db.mark_thread_sold(msg_id, sold_price_eur=float(price),
-                                 close_other_threads_for_ad=b.close_other_threads_for_ad)
-    if b.note.strip():
-        prev = (latest_in["extra_notes"] if "extra_notes" in latest_in.keys() else None) or ""
-        db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
-    telegram_bot._release_lock(msg_id, actor)
+    try:
+        if _already_sent(latest_in):
+            # Последнее письмо уже отвечено: mark_thread_sold перевёл бы НАШ отправленный ответ
+            # в skipped_sold (он пропал бы из ленты, «ответили», напоминаний). Пока db не умеет
+            # отдельную запись продажи по треду — продажа отдельной строкой + тред закрыт.
+            # TODO(api): перейти на db-функцию «продажа по треду без смены статусов», когда появится
+            sale = db.add_manual_sale(
+                account_id=latest_in["account_id"], ad_title=latest_in["ad_title"] or "(без названия)",
+                ad_price=latest_in["ad_price"], sold_price_eur=float(price),
+                sold_at=datetime.utcnow().isoformat(),
+                buyer_name=latest_in["buyer_display_name"] or latest_in["buyer_name"],
+                notes=(f"тред {thread_id}" + (f"; {b.note.strip()}" if b.note.strip() else "")))
+            db.close_thread(thread_id, closed_by=actor)
+            closed_other: list[str] = []
+            sale_ref = sale
+        else:
+            result = db.mark_thread_sold(msg_id, sold_price_eur=float(price),
+                                         close_other_threads_for_ad=b.close_other_threads_for_ad)
+            closed_other = result["closed_other_threads"]
+            sale_ref = None
+            if b.note.strip():
+                prev = (latest_in["extra_notes"] if "extra_notes" in latest_in.keys() else None) or ""
+                db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
+    finally:
+        telegram_bot._release_lock(msg_id, actor)
     return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price), "price_source": source,
-            "msg_id": msg_id, "closed_other_threads": result["closed_other_threads"]}
+            "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref}
 
 
 @router.post("/messages/{msg_id}/sold")
@@ -1129,6 +1167,8 @@ def ma_sold(msg_id: int, body: SoldBody,
             user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
+    if db.get_message(msg_id)["status"] == SEND_QUEUED:
+        raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -1210,16 +1250,25 @@ def _round5(x: float) -> int:
 
 
 def _variant_prices(row: Any) -> dict[str, "int | None"]:
-    """Цена для каждого тона: hold — цена объявления; minus5 — −5 %; floor — минимум автопилота,
-    иначе цена − max_discount_percent; decline — без цены."""
+    """Цена для каждого тона: hold — цена объявления; floor — минимум (ad_briefs.min_price_eur,
+    иначе минимум автопилота, иначе цена − max_discount_percent); minus5 — −5 %, но не ниже минимума;
+    decline — без цены."""
     listed = _parse_listed_price_eur(row["ad_price"])
     if not listed:
         return {"hold": None, "minus5": None, "floor": None, "decline": None}
-    ap = db.get_thread_autopilot(row["gmail_thread_id"]) if row["gmail_thread_id"] else None
-    floor = ap["floor_price_eur"] if ap is not None and ap["floor_price_eur"] else \
-        listed * (1 - config.max_discount_percent() / 100)
-    return {"hold": _round5(listed), "minus5": _round5(listed * 0.95),
-            "floor": _round5(min(floor, listed)), "decline": None}
+    floor = None
+    brief = db.get_ad_brief(row["ad_id"]) if row["ad_id"] else None
+    if brief is not None and "min_price_eur" in brief.keys() and brief["min_price_eur"]:
+        floor = float(brief["min_price_eur"])
+    if floor is None:
+        ap = db.get_thread_autopilot(row["gmail_thread_id"]) if row["gmail_thread_id"] else None
+        if ap is not None and ap["floor_price_eur"]:
+            floor = float(ap["floor_price_eur"])
+    if floor is None:
+        floor = listed * (1 - config.max_discount_percent() / 100)
+    floor_p = _round5(min(floor, listed))
+    return {"hold": _round5(listed), "minus5": max(_round5(listed * 0.95), floor_p),
+            "floor": floor_p, "decline": None}
 
 
 def _variant_instruction(tone: str, price: "int | None") -> str:
@@ -1421,6 +1470,7 @@ def ma_compose(thread_id: str, body: ComposeSendBody,
     if not history:
         raise HTTPException(404, "thread not found")
     source_msg_id = history[-1]["id"]
+    _ensure_nothing_queued(thread_id)
 
     result = scheduler.send_manual_compose(source_msg_id, body.text, body.final_text, body.target_lang)
     if result.get("kind") == "error":
@@ -2034,34 +2084,20 @@ class AcceptConfidentBody(BaseModel):
     @field_validator("min_confidence")
     @classmethod
     def _check_conf(cls, v: str) -> str:
-        if v not in _CONFIDENCE_RANK or v == "low":
+        if v not in ("high", "medium"):
             raise ValueError("min_confidence: 'high' или 'medium'")
         return v
-
-
-_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
 @router.post("/detected-sales/accept-confident")
 def ma_detections_accept_confident(body: "AcceptConfidentBody | None" = None,
                                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    """Принять разом все найденные продажи с уверенностью не ниже порога (цена — найденная)."""
-    min_rank = _CONFIDENCE_RANK[(body or AcceptConfidentBody()).min_confidence]
-    applied: list[int] = []
-    failed: list[dict[str, Any]] = []
-    for r in db.list_pending_detections():
-        if _CONFIDENCE_RANK.get(r["confidence"], -1) < min_rank:
-            continue
-        try:
-            db.apply_detection_to_messages(r["id"])
-            applied.append(r["id"])
-        except Exception as e:
-            if not isinstance(e, ValueError):
-                logger.exception("accept-confident: находка #%s не применена", r["id"])
-            failed.append({"id": r["id"], "error": str(e)})
-    logger.info("accept-confident: принято %d, не применено %d (оператор %s)",
-                len(applied), len(failed), actor_from_user(user))
-    return {"ok": not failed, "applied": applied, "failed": failed}
+    """Принять разом все найденные продажи с уверенностью не ниже порога (db: одна транзакция,
+    неприменимые пропускаются с причиной)."""
+    res = db.accept_detected_bulk((body or AcceptConfidentBody()).min_confidence)
+    logger.info("accept-confident: принято %d, пропущено %d (оператор %s)",
+                len(res["applied"]), len(res["skipped"]), actor_from_user(user))
+    return {"ok": True, **res}
 
 
 @router.post("/detected-sales/{detection_id}/reject", status_code=204)
@@ -2192,26 +2228,9 @@ def ma_settings_post(body: SettingPostBody,
     return {"ok": True, "key": body.key, "value": body.value}
 
 
-def berlin_day_bounds(day_offset: int = 0) -> "tuple[str, str]":
-    """[начало, конец) календарного дня по Europe/Berlin как naive-UTC ISO (формат БД).
-    day_offset=-1 — вчера. Один источник «сегодня» для Обзора, Продаж и бота."""
-    import zoneinfo
-    from datetime import timedelta, timezone
-    tz = zoneinfo.ZoneInfo("Europe/Berlin")
-    start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
-    start_local = start_local + timedelta(days=day_offset)
-    # Арифметика aware-datetime с ZoneInfo — по «настенному» времени: +1 день = следующая
-    # полночь по Берлину и в дни перевода часов (сутки 23/25 ч)
-    end_local = start_local + timedelta(days=1)
-    to_utc = lambda d: d.astimezone(timezone.utc).replace(tzinfo=None).isoformat()  # noqa: E731
-    return to_utc(start_local), to_utc(end_local)
-
-
-def _sales_summary(period_from: "str | None", period_to: "str | None") -> dict[str, Any]:
-    """Продажи за период — через db.list_sales (тот же источник, что экран «Продажи»)."""
-    rows = db.list_sales(period_from=period_from, period_to=period_to, account_id=None, query=None)
-    prices = [float(r["sold_price_eur"]) for r in rows if r.get("sold_price_eur") is not None]
-    return {"count": len(rows), "total_eur": round(sum(prices), 2) if prices else 0.0}
+def berlin_day_bounds() -> "tuple[str, str]":
+    """[начало, конец) сегодняшнего дня по Берлину, naive-UTC ISO — из db (один источник)."""
+    return db.berlin_day_bounds_utc(today_berlin())
 
 
 @router.get("/dashboard")
@@ -2277,14 +2296,17 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
         days_remaining = round(remaining / burn_per_day, 1)
 
     # --- продажи 7д / 30д ---
+    today = today_berlin()
+
     def _sales_window(days: int) -> dict[str, Any]:
-        return _sales_summary((datetime.utcnow() - timedelta(days=days)).isoformat(), None)
+        sm = db.sales_summary(today - timedelta(days=days - 1), today)  # N дней по Берлину, включая сегодня
+        return {"count": sm["count"], "total_eur": sm["total_eur"]}
 
     return {
         "pipeline": {"red": red, "green": green, "drafts": drafts,
                      "autopilot_active": ap_active},
         "today": {"new": new_today, "sent": sent_today, "sent_external": sent_external_today,
-                  "sold": _sales_summary(t0, t1)["count"]},
+                  "sold": db.sales_summary(today, today)["count"]},
         "api_balance": {"snapshot_usd": snapshot_usd, "remaining_usd": remaining,
                         "burn_per_day_usd": burn_per_day, "days_remaining": days_remaining},
         "sales_7d": _sales_window(7),
