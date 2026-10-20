@@ -30,6 +30,10 @@ async def _lifespan(_app: FastAPI):
         resume_send_queue()
     except Exception:
         logger.exception("resume_send_queue упал — письма в send_queued остались, проверьте вручную")
+        from modules import telegram_bot
+        telegram_bot.run_in_background(
+            telegram_bot.notify, "⚠️ <b>После перезапуска очередь отправки не восстановлена</b> — "
+            "письма «в очереди» могли зависнуть, проверьте Входящие.", "pipeline", "📥 Входящие", "send_requeue")
     yield
 
 

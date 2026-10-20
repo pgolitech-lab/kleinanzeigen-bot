@@ -858,15 +858,27 @@ def _schedule_send(msg_id: int, due: float, prev: str, actor: str) -> None:
 def _enqueue_send(msg_id: int, actor: str, delay_sec: int) -> "dict[str, Any]":
     row = db.get_message(msg_id)
     prev = row["status"]
+    # По таймеру строка вернётся в prev и уйдёт через send_one. 'approved' подхватил бы ещё и
+    # джоб send_approved_replies → дубль; поэтому в очередь из approved встаём как edited.
+    back = "edited" if prev == "approved" else prev
     with db.get_conn() as conn:
         cur = conn.execute("UPDATE messages SET status=? WHERE id=? AND status=?",
                            (SEND_QUEUED, msg_id, prev))
     if cur.rowcount == 0:
         raise HTTPException(409, "Статус письма изменился — обновите экран")
     due = time.time() + delay_sec
-    with _send_queue_lock:
-        _schedule_send(msg_id, due, prev, actor)
-        _persist_send_queue()
+    try:
+        with _send_queue_lock:
+            _schedule_send(msg_id, due, back, actor)
+            _persist_send_queue()
+    except Exception:
+        logger.exception("отложенная отправка msg=%s не поставлена — возвращаю черновик", msg_id)
+        with _send_queue_lock:
+            job = _send_queue.pop(msg_id, None)
+        if job:
+            job["timer"].cancel()
+        _return_to_draft(msg_id, back)
+        raise HTTPException(500, "Не удалось поставить письмо в очередь — ничего не отправлено, попробуйте ещё раз")
     logger.info("отложенная отправка msg=%s через %d с (%s)", msg_id, delay_sec, actor)
     return {"ok": True, "queued": True, "job_id": msg_id, "status": SEND_QUEUED,
             "send_at": datetime.utcfromtimestamp(due).isoformat(timespec="seconds")}
@@ -880,30 +892,41 @@ def _return_to_draft(msg_id: int, prev: str) -> bool:
     return cur.rowcount > 0
 
 
+def _alert_send_failed(msg_id: int, detail: str) -> None:
+    logger.error("отложенная отправка msg=%s не удалась: %s", msg_id, detail)
+    telegram_bot.run_in_background(
+        telegram_bot.notify,
+        f"🟥 <b>Письмо не отправлено</b> (отложенная отправка): {telegram_bot._html(detail)[:300]}",
+        f"review_{msg_id}", "📋 Открыть", "send_failed")
+
+
 def _fire_queued_send(msg_id: int) -> None:
-    """Таймер: отправить, если не отменили. Ошибка — ERROR + уведомление операторам."""
-    with _send_queue_lock:
-        job = _send_queue.pop(msg_id, None)
-        if job is None:
-            return  # отменили
-        _persist_send_queue()
-        if not _return_to_draft(msg_id, job["prev"]):
-            logger.warning("отложенная отправка msg=%s: строка уже не в очереди — пропуск", msg_id)
-            return
+    """Таймер: отправить, если не отменили. Любой сбой — письмо возвращается в черновик (не застревает
+    в send_queued) + ERROR + уведомление операторам."""
+    job = None
     try:
+        with _send_queue_lock:
+            job = _send_queue.pop(msg_id, None)
+            if job is None:
+                return  # отменили
+            if not _return_to_draft(msg_id, job["prev"]):
+                logger.warning("отложенная отправка msg=%s: строка уже не в очереди — пропуск", msg_id)
+                return
+            _persist_send_queue()
         row = db.get_message(msg_id)
         if row is None or _already_sent(row):
-            logger.warning("отложенная отправка msg=%s: уже отправлено/нет строки — пропуск", msg_id)
+            _alert_send_failed(msg_id, "письмо уже отмечено отправленным — повторно не шлю, проверьте тред")
             return
         _send_now(msg_id, job["actor"])
         logger.info("отложенная отправка msg=%s выполнена", msg_id)
     except Exception as e:
-        detail = e.detail if isinstance(e, HTTPException) else str(e)
-        logger.error("отложенная отправка msg=%s не удалась: %s", msg_id, detail)
-        telegram_bot.run_in_background(
-            telegram_bot.notify,
-            f"🟥 <b>Письмо не отправлено</b> (отложенная отправка): {telegram_bot._html(str(detail))[:300]}",
-            f"review_{msg_id}", "📋 Открыть", "send_failed")
+        detail = e.detail if isinstance(e, HTTPException) else f"{type(e).__name__}: {e}"
+        if job is not None:
+            try:
+                _return_to_draft(msg_id, job["prev"])  # если сбой случился ещё в очереди
+            except Exception:
+                logger.exception("отложенная отправка msg=%s: не вернул в черновик", msg_id)
+        _alert_send_failed(msg_id, str(detail))
 
 
 @router.post("/send/{job_id}/cancel")
@@ -1247,6 +1270,10 @@ def ma_variants(msg_id: int, body: "VariantsBody | None" = None,
         except Exception as e:
             logger.exception("вариант %s для msg=%s не сгенерирован", tone, msg_id)
             out[tone] = {"tone": tone, "price_eur": prices[tone], "error": str(e)[:300], "cached": False}
+            continue
+        if not (res.get("client_answer") or "").strip():
+            logger.error("вариант %s для msg=%s: LLM вернул пустой текст", tone, msg_id)
+            out[tone] = {"tone": tone, "price_eur": prices[tone], "error": "пустой ответ LLM", "cached": False}
             continue
         item = {"tone": tone, "price_eur": prices[tone], "error": None,
                 "client_text": res.get("client_answer", ""), "ru_text": res.get("ru_answer", ""),
@@ -1643,11 +1670,14 @@ def _quick_key(account_id: int) -> str:
 
 
 def _quick_info(account_id: int) -> dict[str, str]:
+    raw = config.get(_quick_key(account_id)) or "{}"
     try:
-        data = json.loads(config.get(_quick_key(account_id)) or "{}")
-    except ValueError:
-        logger.error("справка быстрых ответов аккаунта %s нечитаема — считаю пустой", account_id)
-        data = {}
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("не объект")
+    except ValueError as e:
+        logger.error("справка быстрых ответов аккаунта %s повреждена (%s): %r", account_id, e, raw[:200])
+        raise HTTPException(500, "Справка быстрых ответов повреждена — заполните её заново в «Аккаунты»")
     return {k: str(data.get(k) or "") for k in _QUICK_KINDS}
 
 
@@ -1671,7 +1701,10 @@ def ma_quick_info_set(account_id: int, body: QuickInfoBody,
     """Справка для быстрых ответов (по-русски; на язык покупателя переводится при вставке)."""
     if db.get_account(account_id) is None:
         raise HTTPException(404, "account not found")
-    info = _quick_info(account_id)
+    try:
+        info = _quick_info(account_id)
+    except HTTPException:
+        info = {k: "" for k in _QUICK_KINDS}  # повреждена (ERROR уже в логе) — сохранение её чинит
     for k in _QUICK_KINDS:
         v = getattr(body, k)
         if v is not None:
@@ -1932,7 +1965,10 @@ def _evidence_ru(evidence: "dict[int, str | None]") -> "dict[int, str | None]":
 
     def _tr(text: str) -> str:
         res = claude.translate_only(text, target_lang="ru", source_lang=None)
-        return (res.get("translation") if isinstance(res, dict) else str(res)) or ""
+        out_text = ((res.get("translation") if isinstance(res, dict) else str(res)) or "").strip()
+        if not out_text:
+            raise RuntimeError("пустой перевод")  # не кэшируем пустое — повторим в следующий раз
+        return out_text
 
     futures = {det_id: _EVIDENCE_POOL.submit(_tr, text) for det_id, text in todo.items()}
     for det_id, fut in futures.items():
@@ -1964,6 +2000,8 @@ def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, A
             "detected_sold_at": r["detected_sold_at"],
             "evidence": r["evidence"],
             "evidence_ru": ru.get(r["id"]),
+            # перевод не удался — фронт покажет оригинал с пометкой (None иначе неотличим от «нет цитаты»)
+            "evidence_ru_failed": bool(r["evidence"]) and ru.get(r["id"]) is None,
             "thread_ad_title": r["thread_ad_title"] or "(без названия)",
             "thread_ad_price": ad_price_raw,
             "thread_ad_price_eur": listed,
@@ -2017,11 +2055,13 @@ def ma_detections_accept_confident(body: "AcceptConfidentBody | None" = None,
         try:
             db.apply_detection_to_messages(r["id"])
             applied.append(r["id"])
-        except ValueError as e:
+        except Exception as e:
+            if not isinstance(e, ValueError):
+                logger.exception("accept-confident: находка #%s не применена", r["id"])
             failed.append({"id": r["id"], "error": str(e)})
     logger.info("accept-confident: принято %d, не применено %d (оператор %s)",
                 len(applied), len(failed), actor_from_user(user))
-    return {"ok": True, "applied": applied, "failed": failed}
+    return {"ok": not failed, "applied": applied, "failed": failed}
 
 
 @router.post("/detected-sales/{detection_id}/reject", status_code=204)

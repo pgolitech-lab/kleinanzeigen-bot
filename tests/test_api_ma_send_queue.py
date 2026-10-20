@@ -101,3 +101,23 @@ def test_resume_long_overdue_returns_to_draft(env):
     api_ma.resume_send_queue()
     assert database.get_message(mid)["status"] == "edited" and sent == []
     mtb.run_in_background.assert_called_once()  # операторам сообщено
+
+
+def test_approved_queued_as_edited_no_double_send(env):
+    """Из approved в очередь встаём как edited — джоб send_approved_replies не подхватит дубль."""
+    c, mid, sent, api_ma, _ = env
+    database.update_message(mid, status="approved")
+    c.post(f"/api/ma/messages/{mid}/send", json={"delay_sec": 5}, headers=H())
+    assert api_ma._send_queue[mid]["prev"] == "edited"
+    c.post(f"/api/ma/send/{mid}/cancel", headers=H())
+    assert database.get_message(mid)["status"] == "edited"
+
+
+def test_fire_failure_returns_to_draft_and_alerts(env):
+    c, mid, sent, api_ma, mtb = env
+    c.post(f"/api/ma/messages/{mid}/send", json={"delay_sec": 30}, headers=H())
+    api_ma._send_queue[mid]["timer"].cancel()
+    with patch.object(api_ma, "_persist_send_queue", side_effect=RuntimeError("database is locked")):
+        api_ma._fire_queued_send(mid)
+    assert database.get_message(mid)["status"] == "pending" and sent == []
+    mtb.run_in_background.assert_called()  # оператору сообщено
