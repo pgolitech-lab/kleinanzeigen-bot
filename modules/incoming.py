@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import config
 import database as db
-from modules import ad_brief, claude, guardrails, parser, telegram_bot
+from modules import ad_brief, claude, guardrails, llm, llm_memory, parser, telegram_bot
 from modules.outgoing import _row_get, _send_reply
 
 logger = logging.getLogger(__name__)
@@ -124,6 +124,9 @@ def _send_auto_ack(
             hour_local=berlin_hour,
             excuse_hint=excuse,
         )
+    except llm.LLMLimitError as e:
+        logger.warning("auto-ack пропущен: %s (in_msg=%s)", e, in_row["id"])
+        return None
     except Exception:
         logger.exception("auto-ack: Haiku упал, пропускаю in_msg=%s", in_row["id"])
         return None
@@ -604,6 +607,15 @@ def _email_age_days(email: dict[str, Any]) -> Optional[float]:
     return (datetime.now(timezone.utc) - msg_dt).total_seconds() / 86400
 
 
+def _notify_llm_limit(message_id: int, thread_id: str, err: Exception) -> None:
+    text = (f"⏳ <b>{telegram_bot._html(str(err))}</b>\n"
+            f"Письмо #{message_id} ждёт ручного ответа. Автопилот треда остаётся включённым.")
+    try:
+        telegram_bot.notify(text, f"thread_{thread_id}", label="📋 Открыть тред")
+    except Exception:
+        logger.exception("Уведомление о лимите LLM не ушло msg=%s", message_id)
+
+
 def _notify_too_old(account: Any, email: dict[str, Any], age_days: float, max_age: int) -> None:
     h = telegram_bot._html
     text = (f"📭 <b>Старое письмо не обработано</b> ({age_days:.0f} дн., лимит {max_age})\n"
@@ -1046,11 +1058,13 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
 
     history = _history_for_prompt(email.get("gmail_thread_id") or "", inserted_id)
 
-    # Релевантные уроки от оператора — топ-5
-    lessons_rows = db.find_relevant_lessons(
-        ad_id=ad_id, account_id=account["id"], limit=5,
-    )
-    lessons_payload = [dict(r) for r in lessons_rows]
+    # Релевантные уроки: объявление → покупатель → категория → аккаунт, включая
+    # уроки из разбора истории (llm_memory). Сбой подбора — без уроков, не без ответа.
+    try:
+        lessons_payload = llm_memory.lessons_for(db.get_message(inserted_id))
+    except Exception:
+        logger.exception("lessons_for упал для msg=%s — генерим без уроков", inserted_id)
+        lessons_payload = []
 
     # Проверим autopilot для треда — если активен, генерим Sonnet-ответ автоматически.
     # Иначе (manual flow) — Sonnet НЕ дёргаем, дешёво переводим incoming на RU
@@ -1089,6 +1103,13 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
                 floor_eur=autopilot["floor_price_eur"],
                 last_our_price_eur=last_price,
             )
+        except llm.LLMLimitError as e:
+            # Лимит подписки: не ошибка кода — карточка оператору + пометка, до какого
+            # времени LLM недоступен; автопилот на треде остаётся включённым.
+            logger.warning("Autopilot: %s — msg=%s оператору", e, inserted_id)
+            _deliver_review(inserted_id)
+            _notify_llm_limit(inserted_id, ap_thread_id, e)
+            return
         except Exception as e:
             # Письмо клиента не должно потеряться: без ответа модели отдаём его
             # оператору обычной карточкой (автопилот остаётся активным).
@@ -1128,6 +1149,9 @@ def _process_incoming(account: Any, email: dict[str, Any], force: bool = False) 
         if tr.get("lang"):
             fields["client_lang"] = tr["lang"]  # язык не выдумываем: нет — остаётся пустым
         db.update_message(inserted_id, **fields)
+    except llm.LLMLimitError as e:
+        logger.warning("incoming RU-translation: %s — msg=%s", e, inserted_id)
+        db.update_message(inserted_id, ru_client=f"⚠️ перевода нет: {e}")
     except Exception:
         logger.exception("incoming RU-translation fail msg=%s", inserted_id)
         # Пометка в карточке вместо пустого перевода; client_lang не подставляем.
