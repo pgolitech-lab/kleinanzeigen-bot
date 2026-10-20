@@ -29,6 +29,7 @@ function notReady(mount, e) {
 export async function render(mount, params = {}) {
   if (params.view === "questions") return renderQuestions(mount);
   if (params.view === "month") return renderMonth(mount);
+  if (params.view === "types") return renderTypes(mount);
   if (params.id) return renderProduct(mount, params.id);
   return renderList(mount);
 }
@@ -60,6 +61,7 @@ async function renderList(mount) {
       <div class="st-actions">
         <button class="btn btn-primary st-in" type="button">➕ Приход</button>
         <a class="btn st-month" href="#/stock/month">📊 Отчёт за месяц</a>
+        <a class="btn st-types" href="#/stock/types">🏷 Типы и себестоимость</a>
       </div>
       <input type="search" class="form-control st-q" placeholder="Товар…" aria-label="Поиск товара">
       <div class="lsec"><span>Товары</span><i></i></div>
@@ -158,6 +160,11 @@ function receiptSheet(products, onDone) {
       <input type="text" class="form-control r-text" placeholder="3 скамейки T6, 2 столика, 3 VIP за 1350">
       <button class="btn r-parse" type="button">Разобрать</button>
       <div class="r-lines"></div>
+      <div class="r-totalrow" hidden>
+        <label class="form-label small">Вся партия стоила, € (необязательно)</label>
+        <input type="text" inputmode="decimal" class="form-control r-total" placeholder="например 1350">
+        <small class="r-hint">Разделим по позициям пропорционально цене объявлений. Пусто — себестоимость неизвестна.</small>
+      </div>
       <div class="form-error text-danger small" hidden></div>
       <div class="sheet-actions">
         <button class="btn cancel-btn" type="button">Отмена</button>
@@ -178,20 +185,14 @@ function receiptSheet(products, onDone) {
       if (e.status !== 404 && e.status !== 405) { err.textContent = e.message ?? String(e); err.hidden = false; }
     }
     if (Array.isArray(parsed?.items)) {
-      rows = parsed.items.map(x => ({ qty: x.qty, name: x.name ?? x.title ?? "", product_id: x.product_id ?? null, unit: x.unit_cost_eur ?? null }));
+      rows = parsed.items.map(x => ({ qty: x.qty, name: x.name ?? x.title ?? "", product_id: x.product_id ?? null }));
+      if (parsed.total_cost_eur != null) box.querySelector(".r-total").value = String(parsed.total_cost_eur);
     } else {
       const { lines, total } = parseReceipt(text);
-      // общую сумму делим на штуки только для одной позиции; для разных товаров
-      // себестоимость за штуку оператор вписывает сам (поровну — порча прибыли)
-      const units = lines.reduce((s, l) => s + l.qty, 0) || 1;
-      const single = lines.length === 1;
-      rows = lines.map(l => ({ ...l, product_id: guessProduct(l.name, products)?.product_id ?? null,
-        unit: total != null && single ? Math.round((total / units) * 100) / 100 : null }));
-      if (total != null && !single) {
-        err.textContent = `Общая сумма ${eur(total)} — впишите себестоимость за штуку в каждой строке.`;
-        err.hidden = false;
-      }
+      rows = lines.map(l => ({ ...l, product_id: guessProduct(l.name, products)?.product_id ?? null }));
+      if (total != null) box.querySelector(".r-total").value = String(total);
     }
+    box.querySelector(".r-totalrow").hidden = !rows.length;
     paintRows();
   });
   function paintRows() {
@@ -203,16 +204,12 @@ function receiptSheet(products, onDone) {
           <div class="r-ctl">
             <input type="number" min="1" step="1" class="form-control r-qty" aria-label="Количество">
             <button type="button" class="fchip r-prod"></button>
-            <input type="number" min="0" step="1" class="form-control r-unit" placeholder="€/шт" aria-label="Себестоимость за штуку">
           </div>
         </div>`);
       row.querySelector(".r-src").textContent = `«${r.name}»`;
-      const qIn = row.querySelector(".r-qty"), uIn = row.querySelector(".r-unit"), pb = row.querySelector(".r-prod");
+      const qIn = row.querySelector(".r-qty"), pb = row.querySelector(".r-prod");
       qIn.value = String(r.qty);
-      if (r.unit != null) uIn.value = String(r.unit);
-      else uIn.classList.add("need");
       qIn.addEventListener("input", () => { r.qty = Number(qIn.value); sync(); });
-      uIn.addEventListener("input", () => { r.unit = uIn.value === "" ? null : Number(uIn.value); });
       const p = products.find(x => x.product_id === r.product_id);
       pb.textContent = p ? `${p.title} ▾` : "Выбрать товар ▾";
       pb.classList.toggle("on", !!p);
@@ -232,25 +229,28 @@ function receiptSheet(products, onDone) {
   }
   function sync() { save.disabled = !rows.length || rows.some(r => !r.product_id || !(r.qty > 0)); }
   save.addEventListener("click", async () => {
+    err.hidden = true;
+    const rawTotal = box.querySelector(".r-total").value.trim();
+    const total = rawTotal === "" ? null : parseEur(rawTotal);
+    if (rawTotal !== "" && (total == null || total < 0)) { err.textContent = "Сумма партии — число, например 1350"; err.hidden = false; return; }
+    // один товар в двух строках — складываем штуки (сервер дубль не принимает)
+    const byProd = new Map();
+    rows.forEach(r => byProd.set(r.product_id, (byProd.get(r.product_id) ?? 0) + r.qty));
     save.disabled = true;
     save.textContent = "⏳ Записываю…";
-    // принятые строки убираем сразу: повтор после частичной ошибки не задвоит остаток
-    const failed = [];
-    let ok = 0;
-    for (const r of [...rows]) {
-      try {
-        await api(`/api/ma/stock/products/${r.product_id}/receipt`, { method: "POST", body: { qty: r.qty, unit_cost_eur: r.unit } });
-        rows = rows.filter(x => x !== r);
-        ok++;
-      } catch (e) {
-        failed.push(`«${r.name}»: ${e.message ?? e}`);
-      }
+    try {
+      // партия целиком или ничего: частичного прихода не бывает
+      await api("/api/ma/stock/batches", { method: "POST", body: {
+        items: [...byProd].map(([product_id, qty]) => ({ product_id, qty })), total_cost_eur: total } });
+      closeSheet();
+      toast(`✅ Оприходовано позиций: ${byProd.size}${total != null ? ` на ${eur(total)}` : ""}`);
+      onDone();
+    } catch (e) {
+      err.textContent = e.message ?? String(e);
+      err.hidden = false;
+      save.textContent = "✅ Оприходовать";
+      sync();
     }
-    if (!failed.length) { closeSheet(); toast(`✅ Оприходовано позиций: ${ok}`); onDone(); return; }
-    err.textContent = `${ok ? `Принято ${ok}. ` : ""}Не прошло: ${failed.join("; ")}`;
-    err.hidden = false;
-    save.textContent = "✅ Оприходовать";
-    paintRows();
   });
   openSheet(box, "➕ Приход");
   box.querySelector(".r-text").focus();
@@ -289,6 +289,9 @@ async function renderProduct(mount, id) {
   if (!tracked) qEl.classList.add("unk");
   root.querySelector("h2").textContent = p.title ?? "";
   root.querySelector(".pd-sub").textContent = [p.category, p.condition].filter(Boolean).join(" · ");
+  if (ctx.kit && (ctx.components ?? []).length) {
+    root.querySelector(".pd-sub").textContent += ` · комплект из ${ctx.components.length} поз.`;
+  }
   const tiles = root.querySelector(".c-tiles");
   [["цена", money(p.list_price_eur)], ["минимум", money(p.min_price_eur)], ["себестоимость", money(p.unit_cost_eur)]].forEach(([l, v]) => {
     const t = el(`<div class="c-tile"><b></b><small></small></div>`);
@@ -313,6 +316,12 @@ async function renderProduct(mount, id) {
     v => api(`/api/ma/stock/products/${id}/writeoff`, { method: "POST", body: v }), reload));
   act("✏️ Цены", () => numberSheet("Цены товара", [["list_price_eur", "Цена в объявлениях, €", p.list_price_eur], ["min_price_eur", "Минимум, €", p.min_price_eur], ["unit_cost_eur", "Себестоимость, €", p.unit_cost_eur]],
     v => api(`/api/ma/stock/products/${id}`, { method: "PATCH", body: v }), reload, true));
+  act(`🧩 ${ctx.kit ? "Состав комплекта" : "Комплект…"}`, () => kitSheet(id, ctx.components ?? [], reload));
+  act("🙈 Не запчасть", async () => {
+    if (!(await confirmSheet("Скрыть товар со склада (гараж, личное, не запчасть)? Из отчётов он пропадёт, переписка останется.", "Скрыть"))) return;
+    try { await api(`/api/ma/stock/products/${id}/non-stock`, { method: "POST", body: { non_stock: true } }); toast("Скрыт со склада"); location.hash = "#/stock"; }
+    catch (e) { toast(`Ошибка: ${e.message ?? e}`, { level: "bad" }); }
+  });
   act("🗄 В архив", async () => {
     if (!(await confirmSheet("Убрать товар в архив?", "В архив"))) return;
     try { await api(`/api/ma/stock/products/${id}/archive`, { method: "POST", body: { archived: true } }); location.hash = "#/stock"; }
@@ -515,5 +524,133 @@ async function renderMonth(mount, ym = null) {
     mp.appendChild(row);
   });
   if (!mp.children.length) mp.appendChild(el(`<div class="empty"><p>В этом месяце движений нет</p></div>`));
+  mount.replaceChildren(root);
+}
+
+
+// ================= комплект =================
+// Состав комплекта: что и по сколько штук входит. Пустой состав = не комплект.
+async function kitSheet(productId, current, onDone) {
+  let all;
+  try {
+    all = (await api("/api/ma/stock/products")).items ?? [];
+  } catch (e) { toast(`Ошибка: ${e.message ?? e}`, { level: "bad" }); return; }
+  const titleOf = id => all.find(x => x.id === id)?.title ?? `товар ${id}`;
+  let comps = current.map(c => ({ product_id: c.product_id, qty: c.per_kit ?? c.qty ?? 1 }));
+  const box = el(`
+    <div class="kit">
+      <p class="small kit-warn" hidden>Текущий состав сервер не отдал — сохранение задаст его заново.</p>
+      <div class="kit-rows"></div>
+      <button class="btn kit-add" type="button">➕ Добавить товар</button>
+      <div class="form-error text-danger small" hidden></div>
+      <div class="sheet-actions"><button class="btn cancel-btn" type="button">Отмена</button><button class="btn btn-primary save-btn" type="button">💾 Сохранить</button></div>
+    </div>`);
+  box.querySelector(".kit-warn").hidden = comps.length > 0;
+  const rowsEl = box.querySelector(".kit-rows"), err = box.querySelector(".form-error");
+  const paint = () => {
+    rowsEl.replaceChildren();
+    comps.forEach(c => {
+      const r = el(`<div class="kit-row"><span class="kr-t"></span><input type="number" min="1" step="1" class="form-control kr-q" aria-label="Штук в комплекте"><button class="ibtn kr-x" type="button" aria-label="Убрать">✕</button></div>`);
+      r.querySelector(".kr-t").textContent = titleOf(c.product_id);
+      const q = r.querySelector(".kr-q");
+      q.value = String(c.qty);
+      q.addEventListener("input", () => { c.qty = Number(q.value); });
+      r.querySelector(".kr-x").addEventListener("click", () => { comps = comps.filter(x => x !== c); paint(); });
+      rowsEl.appendChild(r);
+    });
+    if (!comps.length) rowsEl.appendChild(el(`<div class="empty"><p>Не комплект</p></div>`));
+  };
+  paint();
+  box.querySelector(".cancel-btn").addEventListener("click", () => closeSheet());
+  box.querySelector(".kit-add").addEventListener("click", () => {
+    menuSheet([
+      { label: "↩ Назад к составу", onClick: () => openSheet(box, "🧩 Комплект") },
+      ...all.filter(x => x.id !== productId && !comps.some(c => c.product_id === x.id)).slice(0, 120).map(x => ({
+        label: x.title, onClick: () => { comps.push({ product_id: x.id, qty: 1 }); openSheet(box, "🧩 Комплект"); paint(); } })),
+    ], "Что входит в комплект?");
+  });
+  box.querySelector(".save-btn").addEventListener("click", async ev => {
+    if (comps.some(c => !Number.isInteger(c.qty) || c.qty < 1)) { err.textContent = "Штук в комплекте — целое число от 1"; err.hidden = false; return; }
+    ev.currentTarget.disabled = true;
+    try {
+      await api(`/api/ma/stock/products/${productId}/kit`, { method: "PUT", body: { components: comps } });
+      closeSheet();
+      toast(comps.length ? "✅ Состав сохранён" : "Больше не комплект");
+      onDone();
+    } catch (e) {
+      err.textContent = e.message ?? String(e);
+      err.hidden = false;
+      ev.currentTarget.disabled = false;
+    }
+  });
+  openSheet(box, "🧩 Комплект");
+}
+
+// ================= типы и стандартная себестоимость =================
+async function renderTypes(mount) {
+  setLoading(mount, "Загружаю типы…");
+  let d;
+  try {
+    d = await api("/api/ma/stock/types");
+  } catch (e) {
+    if (mount.isConnected && !notReady(mount, e)) setError(mount, e.message ?? String(e));
+    return;
+  }
+  if (!mount.isConnected) return;
+  const root = el(`<div class="types"><section class="c-sec ty-q"><h3>Какой это тип?</h3><div class="ty-qs"></div></section><section class="c-sec"><h3>Стандартная себестоимость за штуку</h3><div class="ty-table"></div></section></div>`);
+  const qs = root.querySelector(".ty-qs");
+  const questions = d.questions ?? [];
+  const drop = (card) => { card.remove(); if (!qs.children.length) root.querySelector(".ty-q").remove(); };
+  questions.forEach(q => {
+    const c = el(`<article class="ty-card"><b class="ty-t"></b><small class="ty-m"></small><div class="fchips ty-opts"></div></article>`);
+    c.querySelector(".ty-t").textContent = q.title;
+    c.querySelector(".ty-m").textContent = [q.list_price_eur != null ? `цена ${money(q.list_price_eur)}` : "", `сейчас: ${q.category}`].filter(Boolean).join(" · ");
+    (q.options ?? []).forEach(o => {
+      const b = el(`<button class="fchip" type="button"></button>`);
+      b.textContent = o.standard_cost_eur != null ? `${o.label} · ${money(o.standard_cost_eur)}` : o.label;
+      b.addEventListener("click", async () => {
+        const body = { product_id: q.product_id, category: o.category };
+        c.querySelectorAll("button").forEach(x => { x.disabled = true; });
+        try {
+          await api("/api/ma/stock/types", { method: "POST", body });
+          toast(`✅ ${q.title}: ${o.label}`);
+          drop(c);
+        } catch (e) {
+          toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+          c.querySelectorAll("button").forEach(x => { x.disabled = false; });
+        }
+      });
+      c.querySelector(".ty-opts").appendChild(b);
+    });
+    qs.appendChild(c);
+  });
+  if (!questions.length) root.querySelector(".ty-q").remove();
+
+  const table = root.querySelector(".ty-table");
+  (d.table ?? []).forEach(t => {
+    const r = el(`<div class="ty-row"><span class="ty-l"></span><input type="text" inputmode="decimal" class="form-control ty-v" placeholder="нет"><button class="btn ty-s" type="button" hidden>💾</button></div>`);
+    r.querySelector(".ty-l").textContent = t.label;
+    const inp = r.querySelector(".ty-v"), btn = r.querySelector(".ty-s");
+    const orig = t.standard_cost_eur != null ? String(t.standard_cost_eur) : "";
+    inp.value = orig;
+    inp.addEventListener("input", () => { btn.hidden = inp.value.trim() === orig; });
+    btn.addEventListener("click", async () => {
+      const raw = inp.value.trim();
+      const v = raw === "" ? null : parseEur(raw);
+      if (raw !== "" && (v == null || v < 0)) { toast("Нужно число, например 40", { level: "bad" }); return; }
+      btn.disabled = true;
+      try {
+        await api("/api/ma/stock/category-costs", { method: "PUT", body: { category: t.category, unit_cost_eur: v } });
+        toast(v == null ? `Стандарт «${t.label}» убран` : `✅ ${t.label}: ${money(v)} за штуку`);
+        btn.hidden = true;
+        btn.disabled = false;
+        t.standard_cost_eur = v;
+      } catch (e) {
+        toast(`Ошибка: ${e.message ?? e}`, { level: "bad", ms: 5000 });
+        btn.disabled = false;
+      }
+    });
+    table.appendChild(r);
+  });
   mount.replaceChildren(root);
 }

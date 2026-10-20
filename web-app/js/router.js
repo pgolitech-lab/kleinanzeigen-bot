@@ -36,6 +36,7 @@ const ROUTES = [
   { pattern: /^#\/sales\/?$/,             screen: sales,    root: true, title: "Продажи", params: () => ({}) },
   { pattern: /^#\/(?:stock|listings)\/?$/, screen: stock,  root: true, list: "stock", title: "Склад", params: () => ({}) },
   { pattern: /^#\/stock\/questions\/?$/,  screen: stock,  title: "Тот же товар?", params: () => ({ view: "questions" }) },
+  { pattern: /^#\/stock\/types\/?$/,      screen: stock,  title: "Типы и себестоимость", params: () => ({ view: "types" }) },
   { pattern: /^#\/stock\/month\/?$/,      screen: stock,  title: "Отчёт за месяц", params: () => ({ view: "month" }) },
   { pattern: /^#\/stock\/(\d+)\/?$/,       screen: stock,  list: "stock", title: "Товар", params: m => ({ id: m[1] }), key: p => p.id },
   { pattern: /^#\/scout\/?$/,             screen: scout,    title: "Рынок", params: () => ({}) },

@@ -1453,3 +1453,13 @@ em.good { color: var(--good); }
 .var-t { margin: 0; white-space: pre-wrap; }
 .var-ru, .var-meta { margin: 0; color: var(--hint); white-space: pre-wrap; }
 .pchip.vchip { border-color: var(--accent); color: var(--accent); }
+
+/* склад: типы, комплект, партия */
+.ty-card{padding:12px;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:12px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+.ty-m{opacity:.7}
+.ty-row,.kit-row{display:flex;align-items:center;gap:8px;padding:6px 0}
+.ty-l,.kr-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ty-v{width:90px}.kr-q{width:70px}
+.r-totalrow{display:flex;flex-direction:column;gap:4px;margin:8px 0}
+.r-hint{opacity:.7}
+.kit-warn{opacity:.75}
