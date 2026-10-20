@@ -7,7 +7,7 @@ existing scheduler.* helpers — никакой бизнес-логики.
 """
 from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ import scheduler
 from modules import claude
 from modules import claude_scout
 from modules import scout_runner
+from modules.db_sales import today_berlin
 from modules.tg_init_data import verify_init_data_dep, verify_init_data
 
 
@@ -40,7 +41,7 @@ _CLOSED_STATUSES = {"skipped", "skipped_sold", "archived"}
 _SENT_STATUSES = frozenset(db.SENT_STATUSES)  # ушло клиенту (в т.ч. sent_external — с сайта)
 # Строка уже отвечена/закрыта: перезапись черновика затёрла бы отправленный клиенту текст
 # (инцидент аудита №45: «Предложить» переводил sent → edited и затирал de_answer).
-_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "skipped_sold", "archived"}
+_ANSWERED_STATUSES = {"sent", "sent_debug", "sending", "send_queued", "skipped_sold", "archived"}
 
 
 def _already_sent(row) -> bool:
@@ -59,7 +60,21 @@ def _is_answered(row) -> bool:
     return row["status"] in _ANSWERED_STATUSES or _already_sent(row)
 
 
+def _ensure_nothing_queued(thread_id: "str | None") -> None:
+    """В треде письмо ждёт отложенной отправки — compose/«Продано»/«Пропустить» сначала через «Отменить»
+    (иначе клиенту ушло бы и письмо из очереди)."""
+    if not thread_id:
+        return
+    with db.get_conn() as conn:
+        queued = conn.execute("SELECT id FROM messages WHERE gmail_thread_id=? AND status='send_queued' LIMIT 1",
+                              (thread_id,)).fetchone()
+    if queued:
+        raise HTTPException(409, "В треде письмо в очереди на отправку — сначала нажмите «Отменить»")
+
+
 def _ensure_draft_editable(row) -> None:
+    if row["status"] == "send_queued":
+        raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
     if _is_answered(row):
         raise HTTPException(
             409, f"Сообщение уже отправлено или закрыто ({row['status']}) — черновик не меняем. "
@@ -145,6 +160,9 @@ def _row_to_pipeline_item(row: Any) -> dict[str, Any]:
         "last_event_kind": row["last_event_kind"],
         "pending_drafts_count": row["pending_drafts_count"],
         "is_autopilot": bool(row["autopilot_active"]),
+        # «горячий покупатель» (mail помечает is_hot/hot_reason) — наверх в «ждут нас»
+        "is_hot": bool(row["is_hot"]) if "is_hot" in keys else False,
+        "hot_reason": row["hot_reason"] if "hot_reason" in keys else None,
         "account_id": row["account_id"] if "account_id" in keys else None,
         "ru_client": _preview(row["ru_client"]) if "ru_client" in keys else None,
         "is_pinned": bool(row["is_pinned"]) if "is_pinned" in keys else False,
@@ -173,6 +191,7 @@ def ma_pipeline(request: Request, user: dict = Depends(verify_init_data_dep)) ->
             green.append(item)
     for section in (pinned, red, green):
         section.sort(key=lambda x: x["last_event_at"] or "", reverse=True)
+    red.sort(key=lambda x: x["is_hot"], reverse=True)  # стабильная: горячие сверху, внутри — по времени
     accounts = [{"id": a["id"], "name": a["name"]} for a in db.list_accounts()]
     body = json.dumps({"pinned": pinned, "red": red, "green": green, "accounts": accounts},
                       ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -261,6 +280,93 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
         last_in["buyer_display_name"], exclude_thread_id=thread_id,
         account_id=last_in["account_id"] if "account_id" in last_in.keys() else None)
     return {"header": header, "events": events, "related": related}
+
+
+# ──────────────────────── РАЗБОР (triage) ────────────────────────
+# Очередь «ждут нас», отсортированная по срочности и шансу сделки. Баллы прозрачные —
+# фронт показывает reasons, чтобы оператор видел, почему тред наверху.
+_HOT_WORDS = ("серьёз", "серьез", "готов", "горяч", "быстро", "сегодня", "завтра", "забер")
+_COLD_WORDS = ("мошен", "тянет", "спам", "скам", "подозр")
+
+
+def _triage_item(row: Any, now: datetime) -> dict[str, Any]:
+    keys = row.keys()
+    score = 0.0
+    reasons: list[str] = []
+    # 1) ожидание: до 40 баллов за первые сутки
+    wait_h = None
+    try:
+        last = datetime.fromisoformat(str(row["last_event_at"]).replace("Z", "").split("+")[0])
+        wait_h = max(0.0, (now - last).total_seconds() / 3600)
+    except (TypeError, ValueError):
+        pass
+    if wait_h is not None:
+        score += min(wait_h / 24, 1.0) * 40
+        if wait_h >= 2:
+            reasons.append(f"ждёт {int(wait_h)} ч" if wait_h < 48 else f"ждёт {int(wait_h // 24)} дн.")
+    # 2) горячесть из сводки сделки
+    brief = _parse_deal_brief(row["deal_brief_json"] if "deal_brief_json" in keys else None) or {}
+    assessment = " ".join(str(brief.get(k) or "") for k in ("client_assessment", "expected_next")).lower()
+    if any(w in assessment for w in _HOT_WORDS):
+        score += 25
+        reasons.append("горячий")
+    if any(w in assessment for w in _COLD_WORDS):
+        score -= 25
+        reasons.append("сомнительный")
+    # 3) цена: предложение покупателя против цены объявления и минимума
+    listed = _parse_listed_price_eur(row["ad_price"])
+    offered = brief.get("negotiated_price_eur")
+    floor = row["autopilot_floor_price_eur"] if "autopilot_floor_price_eur" in keys else None
+    if isinstance(offered, (int, float)) and offered > 0:
+        if listed:
+            ratio = offered / listed
+            if ratio >= 0.9:
+                score += 25
+                reasons.append("цена почти полная")
+            elif ratio >= 0.75:
+                score += 10
+                reasons.append(f"предлагает {int(ratio * 100)}%")
+        if floor and offered >= floor:
+            score += 15
+            reasons.append("не ниже минимума")
+    # 4) готовый черновик — ответить можно сразу
+    has_draft = bool(row["has_pending_draft"]) and bool(row["de_answer"] if "de_answer" in keys else None)
+    if has_draft:
+        score += 5
+    return {
+        "thread_id": row["gmail_thread_id"],
+        "msg_id": row["id"],
+        "account_id": row["account_id"] if "account_id" in keys else None,
+        "buyer_display_name": row["buyer_display_name"],
+        "ad_title": row["ad_title"],
+        "ad_price": row["ad_price"],
+        "ad_price_eur": listed,
+        "offered_eur": offered if isinstance(offered, (int, float)) else None,
+        "floor_eur": floor,
+        "client_message_ru": _preview(row["ru_client"] if "ru_client" in keys else None),
+        "last_event_at": row["last_event_at"],
+        "wait_hours": round(wait_h, 1) if wait_h is not None else None,
+        "deal_summary_ru": brief.get("summary_ru"),
+        "draft": {
+            "msg_id": row["id"],
+            "status": row["status"],
+            "client_text": row["de_answer"],
+            "ru_text": (row["ru_translation"] if "ru_translation" in keys else None) or row["ru_answer"],
+        } if has_draft else None,
+        "score": round(score, 1),
+        "reasons": reasons,
+    }
+
+
+@router.get("/triage")
+def ma_triage(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """«Разбор»: треды, где ход за нами (последним писал покупатель), без активного автопилота —
+    по убыванию балла (ожидание, горячесть, цена против объявления/минимума, готовый черновик)."""
+    now = datetime.utcnow()
+    items = [_triage_item(r, now) for r in _pipeline_rows()
+             if r["last_event_kind"] == "in" and not r["autopilot_active"]]
+    items.sort(key=lambda x: (x["score"], x["last_event_at"] or ""), reverse=True)
+    return {"items": items, "count": len(items)}
 
 
 class BulkActionBody(BaseModel):
@@ -644,6 +750,8 @@ class SendBody(BaseModel):
     text: "str | None" = Field(None, max_length=4000)
     # явное подтверждение оператора «отправить как есть» несмотря на языковой mismatch
     force: bool = False
+    # >0 — отложенная отправка: окно «Отменить» в MA; по таймеру — обычная отправка
+    delay_sec: int = Field(0, ge=0, le=60)
 
     @field_validator("mode")
     @classmethod
@@ -663,6 +771,8 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     if _already_sent(row):
         raise HTTPException(409, f"Письмо по этому сообщению уже отправлено ({row['status']}) — "
                                  "повторно не шлём. Для нового ответа используйте «Написать».")
+    if row["status"] == SEND_QUEUED:
+        raise HTTPException(409, "Письмо уже в очереди на отправку")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -693,6 +803,14 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
                 "Подтвердите отправку «как есть» или выберите «Перевести и отправить».",
             )
 
+    if b.delay_sec > 0:
+        return _enqueue_send(msg_id, actor, b.delay_sec)
+    return _send_now(msg_id, actor)
+
+
+def _send_now(msg_id: int, actor: str) -> "dict[str, Any]":
+    """SMTP-отправка (все guard'ы пройдены вызывающим) + закрыть старые черновики треда +
+    снять лок + урок в фоне. Ошибка SMTP → HTTPException(500)."""
     result = scheduler.send_one(msg_id)
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "send failed"))
@@ -703,7 +821,8 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     # «Отправить», и оператор думает, что письмо не ушло (инцидент 2026-07-20).
     # Более новые входящие (id > msg_id) не трогаем — это неотвеченные вопросы.
     # Та же логика, что в /threads/{id}/compose.
-    thread_id = row["gmail_thread_id"] if "gmail_thread_id" in row.keys() else None
+    fresh = db.get_message(msg_id)
+    thread_id = (fresh["gmail_thread_id"] if fresh is not None else None) or None
     closed_drafts: list[int] = []
     if thread_id:
         with db.get_conn() as conn:
@@ -721,14 +840,161 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
                     (thread_id, msg_id),
                 )
 
-    telegram_bot._release_lock(msg_id)
+    telegram_bot._release_lock(msg_id, actor)
+    invalidate_pipeline_cache()  # таймер отложенной отправки — не HTTP POST, middleware кэш не сбросит
 
-    fresh = db.get_message(msg_id)
     status = fresh["status"] if fresh else "sent"
     if status in ("sent", "sent_debug"):
         # Оператор переписал черновик LLM → урок для следующих ответов (Sonnet, в фоне; ошибка — в лог)
         _LEARN_POOL.submit(_learn_from_sent, msg_id)
     return {"ok": True, "status": status, "closed_drafts": closed_drafts}
+
+
+# ── Отложенная отправка ───────────────────────────────────────────────────
+# Строка ждёт в status='send_queued' (её нельзя править/перегенерировать/слать повторно);
+# job id = msg_id. Срок и прежний статус — в settings['ma_send_queue'] (JSON), чтобы
+# очередь пережила рестарт: resume_send_queue() из старта приложения (web/app.py).
+SEND_QUEUED = "send_queued"
+SEND_QUEUE_KEY = "ma_send_queue"
+SEND_QUEUE_MAX_LATE_SEC = 600  # после рестарта: просрочено сильнее — не шлём, возвращаем в черновики
+_send_queue: dict[int, dict[str, Any]] = {}  # msg_id -> {due, prev, actor, timer}
+_send_queue_lock = threading.RLock()
+
+
+def _persist_send_queue() -> None:
+    data = {str(k): {kk: v[kk] for kk in ("due", "prev", "actor")} for k, v in _send_queue.items()}
+    db.set_setting(SEND_QUEUE_KEY, json.dumps(data))
+
+
+def _schedule_send(msg_id: int, due: float, prev: str, actor: str) -> None:
+    timer = threading.Timer(max(0.0, due - time.time()), _fire_queued_send, args=(msg_id,))
+    timer.daemon = True
+    _send_queue[msg_id] = {"due": due, "prev": prev, "actor": actor, "timer": timer}
+    timer.start()
+
+
+def _enqueue_send(msg_id: int, actor: str, delay_sec: int) -> "dict[str, Any]":
+    row = db.get_message(msg_id)
+    prev = row["status"]
+    # По таймеру строка вернётся в prev и уйдёт через send_one. 'approved' подхватил бы ещё и
+    # джоб send_approved_replies → дубль; поэтому в очередь из approved встаём как edited.
+    back = "edited" if prev == "approved" else prev
+    with db.get_conn() as conn:
+        cur = conn.execute("UPDATE messages SET status=? WHERE id=? AND status=?",
+                           (SEND_QUEUED, msg_id, prev))
+    if cur.rowcount == 0:
+        raise HTTPException(409, "Статус письма изменился — обновите экран")
+    due = time.time() + delay_sec
+    try:
+        with _send_queue_lock:
+            _schedule_send(msg_id, due, back, actor)
+            _persist_send_queue()
+    except Exception:
+        logger.exception("отложенная отправка msg=%s не поставлена — возвращаю черновик", msg_id)
+        with _send_queue_lock:
+            job = _send_queue.pop(msg_id, None)
+        if job:
+            job["timer"].cancel()
+        _return_to_draft(msg_id, back)
+        raise HTTPException(500, "Не удалось поставить письмо в очередь — ничего не отправлено, попробуйте ещё раз")
+    logger.info("отложенная отправка msg=%s через %d с (%s)", msg_id, delay_sec, actor)
+    return {"ok": True, "queued": True, "job_id": msg_id, "status": SEND_QUEUED,
+            "send_at": datetime.utcfromtimestamp(due).isoformat(timespec="seconds")}
+
+
+def _return_to_draft(msg_id: int, prev: str) -> bool:
+    """send_queued → прежний статус. False — строка уже не в очереди (ушла / изменена)."""
+    with db.get_conn() as conn:
+        cur = conn.execute("UPDATE messages SET status=? WHERE id=? AND status=?",
+                           (prev, msg_id, SEND_QUEUED))
+    return cur.rowcount > 0
+
+
+def _alert_send_failed(msg_id: int, detail: str) -> None:
+    logger.error("отложенная отправка msg=%s не удалась: %s", msg_id, detail)
+    telegram_bot.run_in_background(
+        telegram_bot.notify,
+        f"🟥 <b>Письмо не отправлено</b> (отложенная отправка): {telegram_bot._html(detail)[:300]}",
+        f"review_{msg_id}", "📋 Открыть", "send_failed")
+
+
+def _fire_queued_send(msg_id: int) -> None:
+    """Таймер: отправить, если не отменили. Любой сбой — письмо возвращается в черновик (не застревает
+    в send_queued) + ERROR + уведомление операторам."""
+    job = None
+    try:
+        with _send_queue_lock:
+            job = _send_queue.pop(msg_id, None)
+            if job is None:
+                return  # отменили
+            if not _return_to_draft(msg_id, job["prev"]):
+                _persist_send_queue()
+                _alert_send_failed(msg_id, "письмо изменили, пока оно ждало отправки — не отправлено, "
+                                           "проверьте и отправьте ещё раз")
+                return
+            _persist_send_queue()
+        row = db.get_message(msg_id)
+        if row is None or _already_sent(row):
+            _alert_send_failed(msg_id, "письмо уже отмечено отправленным — повторно не шлю, проверьте тред")
+            return
+        _send_now(msg_id, job["actor"])
+        logger.info("отложенная отправка msg=%s выполнена", msg_id)
+    except Exception as e:
+        detail = e.detail if isinstance(e, HTTPException) else f"{type(e).__name__}: {e}"
+        if job is not None:
+            try:
+                _return_to_draft(msg_id, job["prev"])  # если сбой случился ещё в очереди
+            except Exception:
+                logger.exception("отложенная отправка msg=%s: не вернул в черновик", msg_id)
+        _alert_send_failed(msg_id, str(detail))
+
+
+@router.post("/send/{job_id}/cancel")
+def ma_send_cancel(job_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
+    """Отменить отложенную отправку (job_id = msg_id). Уже ушло — 409."""
+    with _send_queue_lock:
+        job = _send_queue.pop(job_id, None)
+        if job is None:
+            raise HTTPException(409, "Отменить нельзя: письмо уже отправляется или отправлено")
+        job["timer"].cancel()
+        _persist_send_queue()
+        if not _return_to_draft(job_id, job["prev"]):
+            raise HTTPException(409, "Отменить нельзя: письмо уже отправляется или отправлено")
+    logger.info("отложенная отправка msg=%s отменена (%s)", job_id, actor_from_user(user))
+    return {"ok": True, "cancelled": True, "status": job["prev"]}
+
+
+def resume_send_queue() -> None:
+    """При старте: письма, оставшиеся в очереди. Срок ещё не вышел или вышел недавно — отправить
+    по расписанию; давно просрочены (сервис лежал) — вернуть в черновики и сообщить операторам."""
+    raw = config.get(SEND_QUEUE_KEY) or "{}"
+    try:
+        saved = {int(k): v for k, v in json.loads(raw).items()}
+    except (ValueError, AttributeError):
+        logger.error("очередь отложенной отправки нечитаема: %r — все send_queued вернутся в черновики", raw[:200])
+        saved = {}
+    with db.get_conn() as conn:
+        queued = [r["id"] for r in conn.execute(
+            "SELECT id FROM messages WHERE status=?", (SEND_QUEUED,)).fetchall()]
+    now = time.time()
+    returned: list[int] = []
+    with _send_queue_lock:
+        for msg_id in queued:
+            job = saved.get(msg_id)
+            if job and now - float(job["due"]) <= SEND_QUEUE_MAX_LATE_SEC:
+                _schedule_send(msg_id, float(job["due"]), job["prev"], job["actor"])
+            else:
+                _return_to_draft(msg_id, (job or {}).get("prev") or "edited")
+                returned.append(msg_id)
+        _persist_send_queue()
+    if queued:
+        logger.info("очередь отправки после старта: продолжено %d, возвращено в черновики %s",
+                    len(queued) - len(returned), returned)
+    if returned:
+        telegram_bot.run_in_background(
+            telegram_bot.notify,
+            f"⚠️ <b>После перезапуска не отправлено писем: {len(returned)}</b> — вернул в черновики, "
+            "отправьте ещё раз.", "pipeline", "📥 Входящие", "send_requeue")
 
 
 # Свой однопоточный пул: Sonnet через CLI — десятки секунд, не занимать пул Telegram-уведомлений
@@ -824,6 +1090,8 @@ def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
 def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
+    if db.get_message(msg_id)["status"] == SEND_QUEUED:
+        raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -837,11 +1105,87 @@ class SoldBody(BaseModel):
     close_other_threads_for_ad: bool = False
 
 
+class ThreadSoldBody(BaseModel):
+    # Цена обязательна (склад/прибыль); фронт предзаполняет из GET /threads/{id}/sale-price
+    price_eur: float = Field(..., ge=0, lt=1000000)
+    note: str = Field("", max_length=500)
+    close_other_threads_for_ad: bool = False
+
+
+@router.post("/threads/{thread_id}/sold")
+def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
+                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """«Продано» на любом треде — с черновиком или без (QA S-01). Цена обязательна; товар
+    списывается со склада (stock в ответе; product_id=None — товар не найден, привязать)."""
+    b = body
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    latest_in = next((r for r in reversed(history) if r["direction"] == "in"), None)
+    if latest_in is None:
+        raise HTTPException(404, "no incoming message in thread")
+    price = b.price_eur
+    _ensure_nothing_queued(thread_id)
+    msg_id = latest_in["id"]
+    actor = actor_from_user(user)
+    _claim_or_409(msg_id, actor)
+    try:
+        if _already_sent(latest_in):
+            # Последнее письмо уже отвечено: mark_thread_sold перевёл бы НАШ отправленный ответ
+            # в skipped_sold (он пропал бы из ленты, «ответили», напоминаний). Пока db не умеет
+            # отдельную запись продажи по треду — продажа отдельной строкой + тред закрыт.
+            # TODO(api): перейти на db-функцию «продажа по треду без смены статусов», когда появится
+            sale = db.add_manual_sale(
+                account_id=latest_in["account_id"], ad_title=latest_in["ad_title"] or "(без названия)",
+                ad_price=latest_in["ad_price"], sold_price_eur=float(price),
+                sold_at=datetime.utcnow().isoformat(),
+                buyer_name=latest_in["buyer_display_name"] or latest_in["buyer_name"],
+                notes=(f"тред {thread_id}" + (f"; {b.note.strip()}" if b.note.strip() else "")))
+            db.close_thread(thread_id, closed_by=actor)
+            closed_other: list[str] = []
+            sale_ref = sale
+        else:
+            result = db.mark_thread_sold(msg_id, sold_price_eur=float(price),
+                                         close_other_threads_for_ad=b.close_other_threads_for_ad)
+            closed_other = result["closed_other_threads"]
+            sale_ref = None
+            if b.note.strip():
+                prev = (latest_in["extra_notes"] if "extra_notes" in latest_in.keys() else None) or ""
+                db.update_message(msg_id, extra_notes=(prev + "\n" if prev else "") + f"Продано: {b.note.strip()}")
+    finally:
+        telegram_bot._release_lock(msg_id, actor)
+    stock = _record_stock_sale(
+        price=float(price), thread_id=thread_id, msg_row=latest_in,
+        # продажа отдельной строкой: тред не «продан» в messages — sync_sales не должен её снимать
+        source="operator" if sale_ref else "thread", actor=actor)
+    return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price),
+            "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref,
+            "stock": stock}
+
+
+def _record_stock_sale(*, price: float, thread_id: str, msg_row: Any, source: str, actor: str) -> "dict[str, Any] | None":
+    """Списать товар со склада (идемпотентно по треду — если db уже сделала это в mark_thread_sold,
+    второй раз не спишется). Сбой склада продажу не откатывает: ERROR в лог, джоб sync_all догонит."""
+    from modules import inventory
+    try:
+        res = inventory.record_sale(
+            price_eur=price, gmail_thread_id=thread_id,
+            ad_id=msg_row["ad_id"] if "ad_id" in msg_row.keys() else None,
+            ad_title=msg_row["ad_title"], message_id=msg_row["id"], source=source, created_by=actor)
+    except Exception:
+        logger.exception("склад: продажа треда %s не списана — догонит sync_all", thread_id)
+        return None
+    return {"product_id": res.get("product_id"), "qty_after": res.get("qty_after"),
+            "stock_tracked": res.get("stock_tracked")}
+
+
 @router.post("/messages/{msg_id}/sold")
 def ma_sold(msg_id: int, body: SoldBody,
             user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
+    if db.get_message(msg_id)["status"] == SEND_QUEUED:
+        raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -850,12 +1194,17 @@ def ma_sold(msg_id: int, body: SoldBody,
         sold_price_eur=body.price_eur,
         close_other_threads_for_ad=body.close_other_threads_for_ad,
     )
-    telegram_bot._release_lock(msg_id)
+    sold_row = db.get_message(msg_id)
+    stock = _record_stock_sale(price=float(body.price_eur), thread_id=sold_row["gmail_thread_id"] or "",
+                               msg_row=sold_row, source="thread", actor=actor) \
+        if sold_row is not None and sold_row["gmail_thread_id"] else None
+    telegram_bot._release_lock(msg_id, actor)
     return {
         "ok": True,
         "status": "skipped_sold",
         "sold_price_eur": body.price_eur,
         "closed_other_threads": result["closed_other_threads"],
+        "stock": stock,
     }
 
 
@@ -892,6 +1241,139 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
 
     _run_regenerate(scheduler.regenerate_draft(msg_id, body.strategy))
 
+    return _message_review_dict(msg_id)
+
+
+# ──────────────────────── ЧИПЫ ЦЕНЫ (варианты ответа) ────────────────────────
+# Несколько черновиков с разной ценовой позицией — параллельно (каждый — обычная регенерация
+# с полным контекстом треда), кэш на (msg_id, тон, версия треда). Ничего не пишут в БД;
+# выбранный вариант применяет POST /variants/{tone}/apply.
+_TONES = ("hold", "minus5", "floor", "decline")
+_VARIANT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="price-variants")
+_variant_cache: dict[tuple, dict[str, Any]] = {}
+_variant_cache_lock = threading.Lock()
+_VARIANT_CACHE_MAX = 200
+
+
+class VariantsBody(BaseModel):
+    tones: list[str] = Field(default_factory=lambda: list(_TONES), min_length=1, max_length=4)
+
+    @field_validator("tones")
+    @classmethod
+    def _check_tones(cls, v: list[str]) -> list[str]:
+        bad = [t for t in v if t not in _TONES]
+        if bad:
+            raise ValueError(f"неизвестные тоны {bad}; есть {list(_TONES)}")
+        return list(dict.fromkeys(v))
+
+
+def _round5(x: float) -> int:
+    return int(round(x / 5.0) * 5)
+
+
+def _variant_prices(row: Any) -> dict[str, "int | None"]:
+    """Цена для каждого тона: hold — цена объявления; floor — минимум (ad_briefs.min_price_eur,
+    иначе минимум автопилота, иначе цена − max_discount_percent); minus5 — −5 %, но не ниже минимума;
+    decline — без цены."""
+    listed = _parse_listed_price_eur(row["ad_price"])
+    if not listed:
+        return {"hold": None, "minus5": None, "floor": None, "decline": None}
+    floor = None
+    brief = db.get_ad_brief(row["ad_id"]) if row["ad_id"] else None
+    if brief is not None and "min_price_eur" in brief.keys() and brief["min_price_eur"]:
+        floor = float(brief["min_price_eur"])
+    if floor is None:
+        ap = db.get_thread_autopilot(row["gmail_thread_id"]) if row["gmail_thread_id"] else None
+        if ap is not None and ap["floor_price_eur"]:
+            floor = float(ap["floor_price_eur"])
+    if floor is None:
+        floor = listed * (1 - config.max_discount_percent() / 100)
+    floor_p = _round5(min(floor, listed))
+    return {"hold": _round5(listed), "minus5": max(_round5(listed * 0.95), floor_p),
+            "floor": floor_p, "decline": None}
+
+
+def _variant_instruction(tone: str, price: "int | None") -> str:
+    return {
+        "hold": f"Держи цену {price} €: вежливо, но твёрдо откажи в скидке и коротко обоснуй ценность "
+                "(состояние, комплектность). Цену не снижай.",
+        "minus5": f"Предложи уступку до {price} € как жест доброй воли ради быстрой сделки. "
+                  f"Ниже {price} € не опускайся, это предел.",
+        "floor": f"Назови последнюю цену {price} € — ниже не продадим. Коротко и вежливо, без торга дальше.",
+        "decline": "Вежливо откажи: на предложенную покупателем цену не согласны, встречную цену не называй. "
+                   "Коротко, без грубости, оставь дверь открытой.",
+    }[tone]
+
+
+def _thread_version(row: Any) -> tuple:
+    """Версия треда для кэша: любое новое письмо/правка/отправка даёт другую версию."""
+    hist = db.thread_history(row["gmail_thread_id"]) if row["gmail_thread_id"] else []
+    return tuple((h["id"], h["status"], hash(h["de_answer"] or "")) for h in hist)
+
+
+@router.post("/messages/{msg_id}/variants")
+def ma_variants(msg_id: int, body: "VariantsBody | None" = None,
+                user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Черновики под ценовые тоны (чипы «держу / −5 % / минимум / отказ»), параллельно. В БД не пишет."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
+    tones = (body or VariantsBody()).tones
+    prices = _variant_prices(row)
+    version = _thread_version(row)
+    out: dict[str, dict[str, Any]] = {}
+    futures = {}
+    for tone in tones:
+        key = (msg_id, tone, prices[tone], version)
+        with _variant_cache_lock:
+            hit = _variant_cache.get(key)
+        if hit is not None:
+            out[tone] = {**hit, "cached": True}
+        elif tone != "decline" and prices[tone] is None:
+            out[tone] = {"tone": tone, "price_eur": None, "error": "в объявлении нет цены", "cached": False}
+        else:
+            futures[tone] = (key, _VARIANT_POOL.submit(
+                claude.regenerate_with_instruction, row, _variant_instruction(tone, prices[tone])))
+    for tone, (key, fut) in futures.items():
+        try:
+            res = fut.result(timeout=180)
+        except Exception as e:
+            logger.exception("вариант %s для msg=%s не сгенерирован", tone, msg_id)
+            out[tone] = {"tone": tone, "price_eur": prices[tone], "error": str(e)[:300], "cached": False}
+            continue
+        if not (res.get("client_answer") or "").strip():
+            logger.error("вариант %s для msg=%s: LLM вернул пустой текст", tone, msg_id)
+            out[tone] = {"tone": tone, "price_eur": prices[tone], "error": "пустой ответ LLM", "cached": False}
+            continue
+        item = {"tone": tone, "price_eur": prices[tone], "error": None,
+                "client_text": res.get("client_answer", ""), "ru_text": res.get("ru_answer", ""),
+                "ru_translation": res.get("ru_translation", ""), "result": res}
+        with _variant_cache_lock:
+            if len(_variant_cache) >= _VARIANT_CACHE_MAX:
+                _variant_cache.pop(next(iter(_variant_cache)))
+            _variant_cache[key] = item
+        out[tone] = {**item, "cached": False}
+    return {"msg_id": msg_id, "variants": [
+        {k: v for k, v in out[t].items() if k != "result"} for t in tones]}
+
+
+@router.post("/messages/{msg_id}/variants/{tone}/apply")
+def ma_variant_apply(msg_id: int, tone: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Сделать выбранный вариант черновиком (как перегенерация: status edited, deal_brief, llm_draft_*)."""
+    if tone not in _TONES:
+        raise HTTPException(404, "unknown tone")
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    _ensure_draft_editable(row)
+    key = (msg_id, tone, _variant_prices(row)[tone], _thread_version(row))
+    with _variant_cache_lock:
+        item = _variant_cache.get(key)
+    if item is None:
+        raise HTTPException(409, "Вариант устарел (в треде что-то изменилось) — запросите варианты заново")
+    _claim_or_409(msg_id, actor_from_user(user))
+    scheduler._save_regen_result(msg_id, row, item["result"])
     return _message_review_dict(msg_id)
 
 
@@ -1010,6 +1492,7 @@ def ma_compose(thread_id: str, body: ComposeSendBody,
     if not history:
         raise HTTPException(404, "thread not found")
     source_msg_id = history[-1]["id"]
+    _ensure_nothing_queued(thread_id)
 
     result = scheduler.send_manual_compose(source_msg_id, body.text, body.final_text, body.target_lang)
     if result.get("kind") == "error":
@@ -1183,15 +1666,148 @@ def ma_autopilot_stop(thread_id: str,
     return _thread_dict(thread_id)
 
 
+class WaitBody(BaseModel):
+    # «Жду до…»: не напоминать про молчание клиента до этой даты (ISO) или N дней
+    until: "str | None" = None
+    days: "float | None" = Field(None, gt=0, le=60)
+
+
 @router.post("/threads/{thread_id}/wait")
-def ma_thread_wait(thread_id: str,
+def ma_thread_wait(thread_id: str, body: "WaitBody | None" = None,
                    user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """«Ждём клиента» (тред уходит из «ждут нас»). С until/days — ещё и без напоминаний до срока."""
     history = db.thread_history(thread_id)
     if not history:
         raise HTTPException(404, "thread not found")
     actor = actor_from_user(user)
     db.mark_thread_waiting(thread_id, marked_by=actor)
-    return _thread_dict(thread_id)
+    b = body or WaitBody()
+    until = None
+    if b.days:
+        until = (datetime.utcnow() + timedelta(days=b.days)).isoformat(timespec="seconds")
+    elif b.until:
+        try:
+            until = datetime.fromisoformat(b.until.replace("Z", "")).isoformat(timespec="seconds")
+        except ValueError:
+            raise HTTPException(400, "until: ожидается дата ISO, например 2026-10-25T10:00")
+    if until:
+        # find_reminder_candidates смотрит reminder_snooze_until строки последнего ответа — ставим всем строкам треда
+        with db.get_conn() as conn:
+            conn.execute("UPDATE messages SET reminder_snooze_until=? WHERE gmail_thread_id=?", (until, thread_id))
+    data = _thread_dict(thread_id)
+    data["wait_until"] = until
+    return data
+
+
+def _preview_in_client_lang(thread_id: str, ru_text: str) -> dict[str, Any]:
+    """RU-текст → язык покупателя треда + обратный перевод; формат как /compose-preview,
+    отправка — обычным /compose (оператор видит и может поправить)."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    last_in = next((r for r in reversed(history) if r["direction"] == "in"), history[-1])
+    lang = _client_lang(last_in)
+    if lang == "ru":
+        return {"translated": ru_text, "back_ru": ru_text, "target_lang": "ru", "ru_text": ru_text}
+    translated, back = _translate_with_back(ru_text, lang, context=last_in["ad_title"])
+    if not translated.strip():
+        raise HTTPException(502, "перевод вернулся пустым")
+    return {"translated": translated, "back_ru": back, "target_lang": lang, "ru_text": ru_text}
+
+
+@router.post("/threads/{thread_id}/followup")
+def ma_thread_followup(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Напоминание молчащему покупателю: готовый текст на его языке (не отправляет — через /compose)."""
+    history = db.thread_history(thread_id)
+    if not history:
+        raise HTTPException(404, "thread not found")
+    ad = next((r["ad_title"] for r in reversed(history) if r["ad_title"]), None) or "товар"
+    ru = (f"Здравствуйте! Хотел уточнить, актуален ли ещё ваш интерес к «{ad}»? "
+          "Если остались вопросы — с радостью отвечу. Если решили иначе, дайте, пожалуйста, знать.")
+    return _preview_in_client_lang(thread_id, ru)
+
+
+# ── Быстрые ответы: справка аккаунта (город, часы, доставка, оплата) ──
+_QUICK_KINDS = ("city", "hours", "delivery", "payment")
+_QUICK_TEMPLATES = {
+    "city": "Товар находится здесь: {v}. Можно посмотреть и забрать на месте.",
+    "hours": "Посмотреть и забрать можно {v}. Напишите, когда вам удобно.",
+    "delivery": "Доставка: {v}.",
+    "payment": "Оплата: {v}.",
+}
+
+
+def _quick_key(account_id: int) -> str:
+    return f"account_quick_{account_id}"
+
+
+def _quick_info(account_id: int) -> dict[str, str]:
+    raw = config.get(_quick_key(account_id)) or "{}"
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("не объект")
+    except ValueError as e:
+        logger.error("справка быстрых ответов аккаунта %s повреждена (%s): %r", account_id, e, raw[:200])
+        raise HTTPException(500, "Справка быстрых ответов повреждена — заполните её заново в «Аккаунты»")
+    return {k: str(data.get(k) or "") for k in _QUICK_KINDS}
+
+
+class QuickInfoBody(BaseModel):
+    city: "str | None" = Field(None, max_length=300)
+    hours: "str | None" = Field(None, max_length=300)
+    delivery: "str | None" = Field(None, max_length=500)
+    payment: "str | None" = Field(None, max_length=300)
+
+
+@router.get("/accounts/{account_id}/quick-info")
+def ma_quick_info_get(account_id: int, user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
+    if db.get_account(account_id) is None:
+        raise HTTPException(404, "account not found")
+    return _quick_info(account_id)
+
+
+@router.post("/accounts/{account_id}/quick-info")
+def ma_quick_info_set(account_id: int, body: QuickInfoBody,
+                      user: dict = Depends(verify_init_data_dep)) -> dict[str, str]:
+    """Справка для быстрых ответов (по-русски; на язык покупателя переводится при вставке)."""
+    if db.get_account(account_id) is None:
+        raise HTTPException(404, "account not found")
+    try:
+        info = _quick_info(account_id)
+    except HTTPException:
+        info = {k: "" for k in _QUICK_KINDS}  # повреждена (ERROR уже в логе) — сохранение её чинит
+    for k in _QUICK_KINDS:
+        v = getattr(body, k)
+        if v is not None:
+            info[k] = v.strip()
+    db.set_setting(_quick_key(account_id), json.dumps(info, ensure_ascii=False))
+    return info
+
+
+class QuickBody(BaseModel):
+    kind: str
+
+    @field_validator("kind")
+    @classmethod
+    def _check_kind(cls, v: str) -> str:
+        if v not in _QUICK_KINDS:
+            raise ValueError(f"kind: один из {list(_QUICK_KINDS)}")
+        return v
+
+
+@router.post("/messages/{msg_id}/quick")
+def ma_quick(msg_id: int, body: QuickBody, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Быстрый ответ (город/часы/доставка/оплата) из справки аккаунта — на языке покупателя.
+    Ничего не пишет: фронт вставляет в черновик или отправляет через /compose."""
+    row = db.get_message(msg_id)
+    if row is None:
+        raise HTTPException(404, "message not found")
+    value = _quick_info(row["account_id"])[body.kind]
+    if not value:
+        raise HTTPException(400, "В справке аккаунта это не заполнено — заполните в «Аккаунты»")
+    ru = _QUICK_TEMPLATES[body.kind].format(v=value)
+    return {"kind": body.kind, **_preview_in_client_lang(row["gmail_thread_id"], ru)}
 
 
 @router.post("/threads/{thread_id}/suggest-reply")
@@ -1273,6 +1889,8 @@ def _period_window(period: str, *, custom_from: "str | None", custom_to: "str | 
     """ISO-границы для фильтра period. Возвращает (from_iso, to_iso) или (None, None) для all."""
     if period == "all":
         return (custom_from, custom_to)
+    if period == "today":
+        return berlin_day_bounds()  # те же границы, что «продано сегодня» в Обзоре
     now = _dt.utcnow()
     if period == "week":
         start = now - _td(days=now.weekday(), hours=now.hour, minutes=now.minute,
@@ -1317,7 +1935,7 @@ def ma_sales(
     user: dict = Depends(verify_init_data_dep),
 ) -> dict[str, Any]:
     """Все продажи (in-one-pot из всех аккаунтов) + сводка + breakdown по периоду."""
-    period = period if period in {"all", "week", "month", "year", "custom"} else "all"
+    period = period if period in {"all", "today", "week", "month", "year", "custom"} else "all"
     group_by = group_by if group_by in {"day", "week", "month", "year"} else "month"
     period_from, period_to = _period_window(period, custom_from=from_, custom_to=to_)
 
@@ -1400,10 +2018,45 @@ def ma_sales(
 
 # ──────────────────────── DETECTED SALES (LLM-сканер) ────────────────────────
 
+_EVIDENCE_RU: dict[int, str] = {}  # перевод цитаты не меняется — кэш на процесс
+_EVIDENCE_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="evidence-ru")
+
+
+def _evidence_ru(evidence: "dict[int, str | None]") -> "dict[int, str | None]":
+    """Цитаты-доказательства продаж по-русски (QA S-04). Кириллица — как есть; остальное —
+    translate_only (Haiku) параллельно, с кэшем. Сбой перевода — None для этой цитаты + лог."""
+    out: dict[int, "str | None"] = {}
+    todo: dict[int, str] = {}
+    for det_id, text in evidence.items():
+        if not text or _mostly_cyrillic(text):
+            out[det_id] = text
+        elif det_id in _EVIDENCE_RU:
+            out[det_id] = _EVIDENCE_RU[det_id]
+        else:
+            todo[det_id] = text
+
+    def _tr(text: str) -> str:
+        res = claude.translate_only(text, target_lang="ru", source_lang=None)
+        out_text = ((res.get("translation") if isinstance(res, dict) else str(res)) or "").strip()
+        if not out_text:
+            raise RuntimeError("пустой перевод")  # не кэшируем пустое — повторим в следующий раз
+        return out_text
+
+    futures = {det_id: _EVIDENCE_POOL.submit(_tr, text) for det_id, text in todo.items()}
+    for det_id, fut in futures.items():
+        try:
+            out[det_id] = _EVIDENCE_RU[det_id] = fut.result(timeout=60)
+        except Exception:
+            logger.exception("перевод цитаты найденной продажи #%s не удался", det_id)
+            out[det_id] = None
+    return out
+
+
 @router.get("/detected-sales")
 def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Список pending detections для review-экрана."""
     rows = db.list_pending_detections()
+    ru = _evidence_ru({r["id"]: r["evidence"] for r in rows})
     items: list[dict[str, Any]] = []
     for r in rows:
         ad_price_raw = r["thread_ad_price"]
@@ -1418,6 +2071,9 @@ def ma_detected_sales(user: dict = Depends(verify_init_data_dep)) -> dict[str, A
             "detected_ad_title": r["detected_ad_title"],
             "detected_sold_at": r["detected_sold_at"],
             "evidence": r["evidence"],
+            "evidence_ru": ru.get(r["id"]),
+            # перевод не удался — фронт покажет оригинал с пометкой (None иначе неотличим от «нет цитаты»)
+            "evidence_ru_failed": bool(r["evidence"]) and ru.get(r["id"]) is None,
             "thread_ad_title": r["thread_ad_title"] or "(без названия)",
             "thread_ad_price": ad_price_raw,
             "thread_ad_price_eur": listed,
@@ -1441,6 +2097,29 @@ def ma_detection_apply(detection_id: int, body: DetectionApplyBody,
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True, **applied}
+
+
+class AcceptConfidentBody(BaseModel):
+    # 'high' — только высокая уверенность; 'medium' — high + medium
+    min_confidence: str = "high"
+
+    @field_validator("min_confidence")
+    @classmethod
+    def _check_conf(cls, v: str) -> str:
+        if v not in ("high", "medium"):
+            raise ValueError("min_confidence: 'high' или 'medium'")
+        return v
+
+
+@router.post("/detected-sales/accept-confident")
+def ma_detections_accept_confident(body: "AcceptConfidentBody | None" = None,
+                                   user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Принять разом все найденные продажи с уверенностью не ниже порога (db: одна транзакция,
+    неприменимые пропускаются с причиной)."""
+    res = db.accept_detected_bulk((body or AcceptConfidentBody()).min_confidence)
+    logger.info("accept-confident: принято %d, пропущено %d (оператор %s)",
+                len(res["applied"]), len(res["skipped"]), actor_from_user(user))
+    return {"ok": True, **res}
 
 
 @router.post("/detected-sales/{detection_id}/reject", status_code=204)
@@ -1490,6 +2169,7 @@ ALLOWED_SETTING_KEYS = {
     "reminders_enabled", "reminder_after_days",
     "polling_paused",
     "telegram_authorized", "telegram_operator_dm_ids", "telegram_admin_chat_id",
+    "tg_quiet_from", "tg_quiet_to",
     "max_discount_percent",
     "claude_model", "system_prompt",
     "chat_font_em", "chat_padding_v_rem", "chat_padding_h_rem",
@@ -1525,6 +2205,8 @@ VALIDATORS = {
     "max_discount_percent": lambda v: v.replace(".", "", 1).isdigit() and 0 <= float(v) <= 100,
     "autopilot_message_cap": lambda v: v.isdigit() and 0 <= int(v) <= 1000,
     "scout_auto_enabled": lambda v: v in {"0", "1"},
+    "tg_quiet_from": lambda v: v.isdigit() and 0 <= int(v) <= 23,
+    "tg_quiet_to": lambda v: v.isdigit() and 0 <= int(v) <= 23,
     # интервал применяется при старте сервиса (job регистрируется в build_scheduler)
     "scout_interval_hours": lambda v: v.isdigit() and 1 <= int(v) <= 168,
     "scout_page_delay_sec": lambda v: _is_float_in(v, 0.2, 10.0),
@@ -1571,6 +2253,11 @@ def ma_settings_post(body: SettingPostBody,
     return {"ok": True, "key": body.key, "value": body.value}
 
 
+def berlin_day_bounds() -> "tuple[str, str]":
+    """[начало, конец) сегодняшнего дня по Берлину, naive-UTC ISO — из db (один источник)."""
+    return db.berlin_day_bounds_utc(today_berlin())
+
+
 @router.get("/dashboard")
 def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     """Сводный дашборд: pipeline-счётчики, сегодня, баланс API, продажи 7/30д."""
@@ -1593,22 +2280,20 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
         ap_active = conn.execute(
             "SELECT COUNT(*) AS c FROM thread_autopilot WHERE active=1"
         ).fetchone()["c"]
+        # «Сегодня» — по Берлину (оператор там), границы в UTC как в БД
+        t0, t1 = berlin_day_bounds()
         new_today = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE direction='in' "
-            "AND date(created_at)=date('now')"
+            "AND created_at >= ? AND created_at < ?", (t0, t1)
         ).fetchone()["c"]
         sent_today = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
-            "AND date(COALESCE(sent_at, created_at))=date('now')"
+            "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?", (t0, t1)
         ).fetchone()["c"]
         # Реплики продавца, написанные на сайте Kleinanzeigen (импорт) — не «отправил бот»
         sent_external_today = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE status='sent_external' "
-            "AND date(COALESCE(sent_at, created_at))=date('now')"
-        ).fetchone()["c"]
-        sold_today = conn.execute(
-            "SELECT COUNT(*) AS c FROM ad_briefs WHERE sold_at IS NOT NULL "
-            "AND date(sold_at)=date('now')"
+            "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?", (t0, t1)
         ).fetchone()["c"]
         burn_row = conn.execute(
             "SELECT COALESCE(SUM(cost_usd),0) AS s FROM messages "
@@ -1636,24 +2321,17 @@ def ma_dashboard(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
         days_remaining = round(remaining / burn_per_day, 1)
 
     # --- продажи 7д / 30д ---
+    today = today_berlin()
+
     def _sales_window(days: int) -> dict[str, Any]:
-        frm = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        try:
-            srows = db.list_sales(period_from=frm, period_to=None, account_id=None, query=None)
-        except Exception:
-            srows = []
-        prices = []
-        for r in srows:
-            v = r.get("sold_price_eur") if hasattr(r, "get") else r["sold_price_eur"]
-            if v is not None:
-                prices.append(float(v))
-        return {"count": len(srows), "total_eur": round(sum(prices), 2) if prices else 0.0}
+        sm = db.sales_summary(today - timedelta(days=days - 1), today)  # N дней по Берлину, включая сегодня
+        return {"count": sm["count"], "total_eur": sm["total_eur"]}
 
     return {
         "pipeline": {"red": red, "green": green, "drafts": drafts,
                      "autopilot_active": ap_active},
         "today": {"new": new_today, "sent": sent_today, "sent_external": sent_external_today,
-                  "sold": sold_today},
+                  "sold": db.sales_summary(today, today)["count"]},
         "api_balance": {"snapshot_usd": snapshot_usd, "remaining_usd": remaining,
                         "burn_per_day_usd": burn_per_day, "days_remaining": days_remaining},
         "sales_7d": _sales_window(7),

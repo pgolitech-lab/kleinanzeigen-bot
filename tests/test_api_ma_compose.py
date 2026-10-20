@@ -40,6 +40,7 @@ def client():
         # execute(...).fetchall() yields an empty list (no pending drafts to skip).
         conn_cm = MagicMock()
         conn_cm.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        conn_cm.__enter__.return_value.execute.return_value.fetchone.return_value = None  # нет письма в очереди
         mdb.get_conn.return_value = conn_cm
         from web.app import app
         yield TestClient(app), mdb, msched, mclaude
@@ -75,6 +76,7 @@ def test_compose_closes_pending_drafts(client):
     conn_cm = MagicMock()
     pending_rows = [_row(id=1965), _row(id=1970)]
     conn_cm.__enter__.return_value.execute.return_value.fetchall.return_value = pending_rows
+    conn_cm.__enter__.return_value.execute.return_value.fetchone.return_value = None
     mdb.get_conn.return_value = conn_cm
 
     init = make_init_data(TEST_USER)
@@ -216,3 +218,15 @@ def test_compose_preview_respects_language_override_directive(client):
     body = res.json()
     assert body["target_lang"] == "en"
     assert body["ru_text"] == "The car is still available."
+
+
+def test_compose_refused_while_letter_queued(client):
+    """В треде письмо ждёт отложенной отправки — compose 409 (иначе клиенту ушли бы оба)."""
+    c, mdb, msched, mclaude = client
+    conn_cm = MagicMock()
+    conn_cm.__enter__.return_value.execute.return_value.fetchone.return_value = {"id": 42}
+    mdb.get_conn.return_value = conn_cm
+    res = c.post("/api/ma/threads/abc/compose", json=_compose_body(),
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 409
+    msched.send_manual_compose.assert_not_called()

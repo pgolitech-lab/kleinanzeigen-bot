@@ -16,12 +16,30 @@ from fastapi.responses import JSONResponse
 import config
 import log_buffer
 import scheduler as sched_mod
-from web.api_ma import invalidate_pipeline_cache, router as ma_router
+from contextlib import asynccontextmanager
+
+from web.api_ma import invalidate_pipeline_cache, resume_send_queue, router as ma_router
+from web.api_stock import router as stock_router
 
 # Документация OpenAPI наружу не нужна (и через туннель её не видно); локально — тоже лишнее
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Kleinanzeigen Bot", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Отложенные отправки, пережившие рестарт (status='send_queued'), — продолжить или вернуть
+    try:
+        resume_send_queue()
+    except Exception:
+        logger.exception("resume_send_queue упал — письма в send_queued остались, проверьте вручную")
+        from modules import telegram_bot
+        telegram_bot.run_in_background(
+            telegram_bot.notify, "⚠️ <b>После перезапуска очередь отправки не восстановлена</b> — "
+            "письма «в очереди» могли зависнуть, проверьте Входящие.", "pipeline", "📥 Входящие", "send_requeue")
+    yield
+
+
+app = FastAPI(title="Kleinanzeigen Bot", docs_url=None, redoc_url=None, openapi_url=None,
+              lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,12 +47,13 @@ app.add_middleware(
         "https://pgolitech-lab.github.io",
         "https://web.telegram.org",
     ],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["X-Telegram-Init-Data", "Content-Type", "If-None-Match"],
     expose_headers=["ETag"],
     max_age=600,
 )
 app.include_router(ma_router)
+app.include_router(stock_router)
 
 
 # Через cloudflared-туннель (публичный адрес) наружу видны только Mini App API и /health.
@@ -60,7 +79,7 @@ async def _tunnel_guard(request: Request, call_next):
         return JSONResponse({"detail": "Not Found"}, status_code=404)
     response = await call_next(request)
     # Любое действие оператора в MA меняет pipeline — сбрасываем короткий кэш
-    if request.method == "POST" and path.startswith("/api/ma/"):
+    if request.method in ("POST", "PATCH") and path.startswith("/api/ma/"):
         invalidate_pipeline_cache()
     return response
 

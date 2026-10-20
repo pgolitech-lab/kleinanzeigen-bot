@@ -140,3 +140,45 @@ def test_release_other_card_keeps_thread_busy():
         assert tb.thread_is_busy("T")  # A ещё работает
         assert tb._release_lock(11, "@a") is True
         assert not tb.thread_is_busy("T")
+
+
+def test_evening_summary(tmp_path, monkeypatch):
+    import database
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "t.db")
+    database.init_db()
+    assert tb.evening_summary_text() is None  # пустой день
+    acc = database.add_account("a", "a@gmail.com", "pw")
+    database.add_message(acc, "in", gmail_thread_id="T", de_client="Hallo", status="pending")
+    text = tb.evening_summary_text()
+    assert "Писем: 1" in text and "Ждут ответа сейчас: 1" in text
+    with patch.object(tb, "notify") as n:
+        assert tb.send_evening_summary() == "итог дня отправлен"
+    assert n.call_args.kwargs["kind"] == "evening_summary"
+
+
+def test_hot_buyer_card_and_loud_at_night(cfg):
+    msg = _row(id=7, gmail_thread_id="t1", buyer_display_name="Klaus", buyer_name="k@x", ad_title="Bank",
+               ad_price="450 €", ru_client="Беру сегодня", de_client="x", ru_translation="", ru_answer="",
+               is_hot=1, hot_reason="готов забрать сегодня")
+    with patch.object(tb, "db") as mdb:
+        mdb.thread_history.return_value = []
+        text = tb._build_review_text(msg)
+        assert text.startswith("🔥 <b>горячий покупатель</b>: готов забрать сегодня")
+        sent = []
+        mdb.get_message.return_value = msg
+        with patch.object(tb, "quiet_now", return_value=True), \
+             patch.object(tb, "_http_post_single", lambda m, p: sent.append(p) or {"message_id": 1}):
+            tb.send_for_review(7)
+    assert all(p["disable_notification"] is False for p in sent)
+
+
+def test_quiet_hours_and_urgent(cfg):
+    from datetime import datetime
+    assert tb.quiet_now(datetime(2026, 10, 20, 23)) and tb.quiet_now(datetime(2026, 10, 20, 3))
+    assert not tb.quiet_now(datetime(2026, 10, 20, 12))
+    sent = []
+    with patch.object(tb, "quiet_now", return_value=True), \
+         patch.object(tb, "_http_post_single", lambda m, p: sent.append(p) or {"message_id": 1}):
+        tb.notify("x")
+        tb.notify("🔥", urgent=True)
+    assert [p["disable_notification"] for p in sent] == [True, True, False, False]

@@ -262,21 +262,39 @@ def _build_review_text(msg: Any) -> str:
     # По-русски: перевод уже есть к моменту уведомления; немецкий — только если перевода нет
     letter = _oneline(_safe(msg, "ru_client") or _safe(msg, "de_client"), 160)
     lines = [head, ad_line, f"«{_html(letter)}»"]
+    if _safe(msg, "is_hot"):
+        reason = _oneline(_safe(msg, "hot_reason"), 60)
+        lines.insert(0, "🔥 <b>горячий покупатель</b>" + (f": {_html(reason)}" if reason else ""))
     draft = _oneline(_safe(msg, "ru_translation") or _safe(msg, "ru_answer"), 100)
     if draft:
         lines.append(f"<i>Черновик: «{_html(draft)}»</i>")
     return "\n".join(lines)
 
 
+def quiet_now(now: Optional[datetime] = None) -> bool:
+    """Тихие часы по Берлину (tg_quiet_from..tg_quiet_to, по умолчанию 22–08): пуши без звука."""
+    import zoneinfo
+    try:
+        q_from = int(config.get("tg_quiet_from") or 22)
+        q_to = int(config.get("tg_quiet_to") or 8)
+    except ValueError:
+        logger.error("tg_quiet_from/tg_quiet_to не числа — тихие часы 22–08")
+        q_from, q_to = 22, 8
+    h = (now or datetime.now(zoneinfo.ZoneInfo("Europe/Berlin"))).hour
+    return (q_from <= h or h < q_to) if q_from > q_to else (q_from <= h < q_to)
+
+
 def notify(text: str, start_param: Optional[str] = None,
-           label: str = "📋 Открыть в MA", kind: str = "notify") -> dict[str, Any]:
+           label: str = "📋 Открыть в MA", kind: str = "notify", urgent: bool = False) -> dict[str, Any]:
     """Универсальное уведомление операторам: текст + (если задан target) кнопка «Открыть».
+    В тихие часы — без звука, кроме urgent (горячий покупатель, продажа, угроза).
     Не доставлено ни одному — RuntimeError (см. _http_post)."""
     payload: dict[str, Any] = {
         "chat_id": config.telegram_chat_id(),
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
+        "disable_notification": (not urgent) and quiet_now(),
         "_kind": kind,
     }
     if start_param:
@@ -359,6 +377,7 @@ def send_for_review(message_id: int) -> Optional[int]:
         return None
     text = _build_review_text(msg)
     kb = _review_kb(msg)
+    silent = quiet_now() and not _safe(msg, "is_hot")  # горячего будим и ночью
     thread_id = _safe(msg, "gmail_thread_id") or ""
     dm_ids = config.telegram_operator_dm_ids() or [str(config.telegram_chat_id())]
     db.clear_card_dispatches(message_id)
@@ -371,6 +390,7 @@ def send_for_review(message_id: int) -> Optional[int]:
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
                 "reply_markup": kb,
+                "disable_notification": silent,
                 "_kind": "review", "_thread": thread_id,
             })
             tg_mid = r.get("message_id") if isinstance(r, dict) else None
@@ -564,6 +584,50 @@ def _release_lock(msg_id: int, actor: Optional[str] = None) -> bool:
 def _drain_deferred(thread_id: str) -> None:
     import scheduler as _sched
     _sched.drain_deferred_thread(thread_id)
+
+
+# ============================================================
+# Итог дня (джоб scheduler, 20:00 по Берлину)
+# ============================================================
+
+def evening_summary_text() -> Optional[str]:
+    """Итог дня: письма, ответы, продажи (те же числа, что «Сегодня» в Обзоре MA) + кто ждёт сейчас.
+    None — день пустой и никто не ждёт (не шлём)."""
+    from modules.db_sales import today_berlin
+    today = today_berlin()
+    t0, t1 = db.berlin_day_bounds_utc(today)  # один источник «сегодня» с Обзором MA
+    with db.get_conn() as conn:
+        new = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE direction='in' "
+                           "AND created_at >= ? AND created_at < ?", (t0, t1)).fetchone()["c"]
+        sent = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE status IN ('sent','sent_debug') "
+                            "AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?",
+                            (t0, t1)).fetchone()["c"]
+    sales = db.sales_summary(today, today)
+    waiting = sum(1 for t in db.pipeline_threads()
+                  if t["last_event_kind"] == "in" and not t["autopilot_active"])
+    if not (new or sent or sales["count"] or waiting):
+        return None
+    lines = ["🌙 <b>Итог дня</b>",
+             f"Писем: {new} · ответили: {sent}",
+             f"Продано: {sales['count']}" + (f" на {int(sales['total_eur'])} €" if sales["count"] else "")]
+    lines.append(f"Ждут ответа сейчас: {waiting}" if waiting else "Все ответы отправлены ✅")
+    try:
+        from modules import inventory
+        stock = inventory.summary_text().strip()
+        if stock:
+            lines += ["", _html(stock)]
+    except Exception:
+        logger.exception("итог дня: сводка склада не собрана — итог без неё")
+    return "\n".join(lines)
+
+
+def send_evening_summary() -> str:
+    """Job: итог дня операторам с кнопкой «Входящие». Пустой день — не шлём."""
+    text = evening_summary_text()
+    if text is None:
+        return "итог дня: пусто — не отправлен"
+    notify(text, "pipeline", label="📥 Входящие", kind="evening_summary")
+    return "итог дня отправлен"
 
 
 # ============================================================
