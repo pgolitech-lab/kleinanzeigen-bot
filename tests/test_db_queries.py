@@ -589,10 +589,14 @@ def test_find_relevant_lessons_ranking(tmp_db):
     dossier = tmp_db.add_lesson(ad_id="z", account_id=9, buyer_email="p2@relay")
     buyer = tmp_db.add_lesson(ad_id="z", account_id=9, buyer_email="p1@relay")
     ad = tmp_db.add_lesson(ad_id="ad1", account_id=9)
+    mined = tmp_db.add_lesson(ad_id="ad1", source="mined", source_ref="m1", lesson_ru="m")
     rows = tmp_db.find_relevant_lessons(ad_id="ad1", account_id=1, limit=10,
                                         buyer_email="p1@relay", category="торг")
     assert [r["id"] for r in rows] == [ad, buyer, dossier, cat, acc, other]
     assert [r["rel_rank"] for r in rows] == [0, 1, 1, 2, 3, 4]
+    # смайненные — только по явному include_mined
+    rows = tmp_db.find_relevant_lessons(ad_id="ad1", limit=10, include_mined=True)
+    assert rows[0]["id"] == mined
 
 
 def test_find_relevant_lessons_old_signature_order(tmp_db):
@@ -666,3 +670,14 @@ def test_latest_msg_id_for_emails(tmp_db):
     mid = tmp_db.add_message(1, "in", buyer_name="x@relay", gmail_thread_id="t")
     tmp_db.add_message(1, "in", buyer_name="y@relay", gmail_thread_id="t2")
     assert tmp_db.latest_msg_id_for_emails(["x@relay", "z@relay"]) == mid
+
+
+def test_dossier_bad_threads_json_logged(tmp_db, caplog):
+    d = tmp_db.upsert_client_dossier(account_id=1, display_name="X", summary_md="a",
+                                     thread_ids=["t1"])
+    with tmp_db.get_conn() as conn:
+        conn.execute("UPDATE client_dossiers SET source_threads_json='\"abc\"' WHERE id=?", (d,))
+    tmp_db.upsert_client_dossier(account_id=1, display_name="X", summary_md="b",
+                                 thread_ids=["t2"])
+    assert tmp_db.get_dossier(1, "X")["source_threads_json"] == '["t2"]'
+    assert "не список строк" in caplog.text

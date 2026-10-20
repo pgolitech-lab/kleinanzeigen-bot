@@ -1,12 +1,15 @@
 # Thread-state, history, clients, pipeline queries.
 # Выделено из database.py.
 
+import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from database import DB_PATH, get_conn, norm_name, transaction
+
+_log = logging.getLogger(__name__)
 
 # --- CLOSED THREADS ---
 
@@ -863,6 +866,9 @@ def upsert_client_dossier(
 ) -> int:
     """Создать/обновить досье клиента. Идемпотентно, одна транзакция. Возвращает id.
 
+    Ограничения: при совпадении по email name_key досье не меняется (новое имя
+    видно в display_name, но get_dossier ищет по старому ключу); email глобально
+    уникален и при конфликте переезжает в это досье.
     Поиск существующего: сначала по любому из emails (связь email → досье точнее
     совпадения имён), затем по (account_id, norm_name(display_name)). thread_ids
     объединяются с уже учтёнными; emails привязываются к досье (email, ранее
@@ -893,9 +899,14 @@ def upsert_client_dossier(
         threads = set(thread_ids or [])
         if row is not None:
             try:
-                threads |= set(_json.loads(row["source_threads_json"] or "[]"))
+                prev = _json.loads(row["source_threads_json"] or "[]")
             except ValueError:
-                pass  # битый JSON в старой строке — перезапишем объединением с новыми
+                prev = None
+            if isinstance(prev, list) and all(isinstance(t, str) for t in prev):
+                threads |= set(prev)
+            else:
+                _log.warning("досье %s: source_threads_json не список строк — "
+                             "перезаписываю новыми тредами", row["id"])
             new_max = max(x for x in (row["dossier_max_msg_id"], max_msg_id, 0) if x is not None)
             conn.execute(
                 "UPDATE client_dossiers SET display_name = COALESCE(?, display_name), "

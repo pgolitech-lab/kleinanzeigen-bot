@@ -343,6 +343,9 @@ def mark_thread_sold(
 def add_lesson(**fields: Any) -> int:
     """Сохранить пару (плохой_черновик, оператора_исправление). fields = столбцы lessons.
 
+    source_ref должен быть уникален НА УРОК (например f"{thread_id}:{category}"),
+    а не на тред: иначе уроки одного треда молча перезапишут друг друга.
+    source ('mined' | 'operator_edit') без source_type используется как тип.
     Если заданы source_type и source_ref — идемпотентно: повторный вызов с тем же
     источником обновляет существующий урок (created_at сохраняется) и возвращает
     его id, а не плодит дубль. Без источника — обычная вставка, как раньше.
@@ -388,6 +391,7 @@ def find_relevant_lessons(
     limit: int = 5,
     buyer_email: Optional[str] = None,
     category: Optional[str] = None,
+    include_mined: bool = False,
 ) -> list[sqlite3.Row]:
     """Топ-N уроков по релевантности.
 
@@ -395,6 +399,10 @@ def find_relevant_lessons(
     или любой email того же досье); 2 — та же category; 3 — тот же account_id;
     4 — прочие. Внутри группы — свежие первыми (id DESC). Без buyer_email/category
     порядок тот же, что раньше (ad → account → прочие).
+
+    include_mined=False (по умолчанию) — только уроки оператора (source NULL или
+    'operator_edit'): у смайненных заполнен lesson_ru, а не пары bad/good, и
+    промпт, который их не умеет выводить, получил бы пустые слоты вместо правок.
     """
     sql = """
         SELECT *,
@@ -411,6 +419,8 @@ def find_relevant_lessons(
         FROM lessons
         WHERE 1=1
     """
+    if not include_mined:
+        sql += " AND (source IS NULL OR source = 'operator_edit')"
     params: dict[str, Any] = {
         "ad": ad_id or "", "acc": account_id if account_id is not None else -1,
         "be": (buyer_email or "").strip(), "cat": (category or "").strip(),
