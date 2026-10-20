@@ -64,7 +64,7 @@ def test_price_history_written_only_on_change(env):
         dbm.record_scrape(source="scout", keywords="Sitzbank Traveller", category="c223", query_ref=1,
                           rows=[serp_row("111", 1, price=price)], pages=1)
     hist = dbm.price_history("111")
-    assert [h["price_eur"] for h in hist] == [1300.0, 1250.0, None]
+    assert [h["price_eur"] for h in hist] == [1300.0, 1250.0]  # None — не «изменение цены»
     assert dbm.price_changes(["111"])["111"][0]["price_eur"] == 1300.0
 
 
@@ -402,3 +402,125 @@ def test_market_report_script_builds(env):
     spec.loader.exec_module(mod)
     text = mod.build(limit=5, use_llm=False)
     assert "## Дубли" in text and "3er Leder Sitzbank" in text and "## Перепост (1)" in text
+
+
+# --- после ревью -------------------------------------------------------------------
+
+def test_same_city_other_plz_is_not_ours(env):
+    db_mod, _dbm, ma, now = env
+    _seed_market(env)
+    add_market(db_mod, ad_id="8200000001", title="3er Leder Sitzbank Peugeot Traveller", price=1200,
+               plz="52250", city="Eschweiler", first=_iso(now, 3), last=_iso(now, 1))
+    assert ma._Ctx().is_ours("8200000001") is None
+
+
+def test_missing_needs_full_run_and_stale(env):
+    _db, dbm, ma, now = env
+    _seed_market(env)
+    rows = [serp_row(f"70000{i:05d}", i, title=f"Sitzbank Traveller {i}") for i in range(1, 26)]
+    dbm.record_scrape(source="scout", keywords="sitzbank traveller", category="c223", query_ref=1,
+                      rows=rows, pages=1)
+    assert ma.rank_report(ad_id="9000000001")["items"][0]["status"] == "no_data"  # 1 стр. ≠ «нет»
+    later = datetime.utcnow() + timedelta(days=3)
+    assert ma.rank_report(ad_id="9000000001", now=later)["items"][0]["status"] == "stale"
+
+
+def test_rank_report_reports_last_error(env):
+    _db, dbm, ma, _now = env
+    _seed_market(env)
+    _runs(env, [5])
+    dbm.record_scrape(source="market", keywords="sitzbank traveller", category="c223", query_ref=1,
+                      rows=[], pages=0, error="http 403")
+    rep = ma.rank_report(ad_id="9000000001")
+    assert rep["last_error"]["error"] == "http 403" and rep["items"][0]["status"] == "top"
+
+
+def test_run_rank_check_empty_not_counted_and_insert_only(env, monkeypatch):
+    db_mod, dbm, ma, now = env
+    _seed_market(env)
+    dbm.upsert_market_query("sitzbank traveller")
+    dbm.upsert_market_query("tisch traveller")
+    from modules import scout
+    monkeypatch.setattr(ma.time, "sleep", lambda s: None)
+    monkeypatch.setattr(ma, "sync_market_queries", lambda: {"added": [], "untracked": []})
+
+    def fake_scrape(client, q, page_delay_sec=0, browser=None, stats=None):
+        if q["keywords"] == "tisch traveller":
+            return []
+        stats["pages"] = 1
+        return [dict(serp_row("8000000001", 1, title="Neu Titel", price=999.0), kind="part", query_id=5),
+                dict(serp_row("8300000001", 2, title="Sitzbank neu im Markt", price=700.0), kind="part",
+                     query_id=5, url="u")]
+    monkeypatch.setattr(scout, "scrape_query", fake_scrape)
+    r = ma.run_rank_check(force=True, page_delay=(0, 0))
+    assert r["ran"] == 1 and any("0 карточек" in e for e in r["errors"])
+    with db_mod.get_conn() as conn:
+        old = conn.execute("SELECT title, price_eur FROM scout_listings WHERE ad_id='8000000001'").fetchone()
+        new = conn.execute("SELECT query_id FROM scout_listings WHERE ad_id='8300000001'").fetchone()
+    assert old["title"].startswith("Sitzbank 3er") and old["price_eur"] == 1300  # чужую строку scout не тронули
+    assert new is not None and new["query_id"] is None
+    assert dbm.price_history("8000000001")[0]["price_eur"] == 999.0  # история цены пишется
+
+
+def test_dup_guessed_by_plz_only_is_warn(env):
+    db_mod, _dbm, ma, now = env
+    title = "Tisch Peugeot Traveller Original"
+    add_msg(db_mod, ad_id="9500000001", title=title, price="150 €", created_at=_iso(now, 2))
+    add_market(db_mod, ad_id="9500000001", title=title, price=150, plz="52249", city="Eschweiler",
+               first=_iso(now, 5), last=_iso(now, 0, 1))
+    add_market(db_mod, ad_id="9500000002", title="Traveller Tisch Original Peugeot", price=150, plz="52249",
+               city="Eschweiler", first=_iso(now, 5), last=_iso(now, 0, 1))
+    g = ma.duplicates_report()["groups"][0]
+    assert g["level"] == "warn" and "9500000002" in g["uncertain"] and g["keep"]["ad_id"] == "9500000001"
+
+
+def test_rule_repost_does_not_invent_facts():
+    from modules import market_advisor as ma
+    it = {"title": "Tisch Traveller", "description": "", "category": "tisch",
+          "features": ma.regex_features("Tisch Traveller")}
+    r = ma._rule_repost(it, ["Original", "Leder", "Spacetourer"])
+    assert "Top Zustand" not in r["title"] and "Original" not in r["title"] and "Spacetourer" not in r["title"]
+    assert r["title"] != "Tisch Traveller" and "описания нет" in r["warning"]
+    it2 = {"title": "Tisch Traveller Peugeot", "description": "Original Tisch", "category": "tisch",
+           "features": ma.regex_features("Tisch Traveller Peugeot", "Original Tisch")}
+    assert "Original" in ma._rule_repost(it2, ["Original"])["title"]
+
+
+def test_recommended_not_below_cost_floor(env, monkeypatch):
+    _db, _dbm, ma, _now = env
+    _seed_market(env)
+    orig = ma.own_items
+
+    def with_cost(ctx=None, include_gone=False):
+        items = orig(ctx, include_gone)
+        for it in items:
+            it["unit_cost_eur"] = 1500.0
+        return items
+    monkeypatch.setattr(ma, "own_items", with_cost)
+    r = ma.advise_price(ad_id="9000000001")
+    assert r["min_basis"] == "cost" and r["min_eur"] == 1800 and r["recommended_eur"] == 1800
+
+
+def test_llm_unknown_does_not_override_regex(env):
+    _db, dbm, ma, _now = env
+    l = {"ad_id": "1", "title": "Sitzbank Leder 3er Traveller", "description": ""}
+    dbm.set_features("1", {"category": "other", "material": None, "vip": False, "seats": None,
+                           "condition": None, "models": []}, "llm", dbm.text_hash(l["title"], l["description"]))
+    f = ma.features_for([l])["1"]
+    assert f["category"] == "sitzbank" and f["material"] == "leder" and f["seats"] == 3
+
+
+def test_top_flags_only_for_card_ids():
+    from modules import scout
+    html = '{"id":[0,"3167594640"],"img":{"id":[0,"99999999999"]},"topAd":[0,true]}'
+    assert scout.parse_top_flags(html) == {"99999999999": True}
+    assert scout.parse_top_flags(html, {"3167594640"}) == {"3167594640": True}
+
+
+def test_data_health_flags_stale_market(env):
+    db_mod, _dbm, ma, now = env
+    add_msg(db_mod, ad_id="9600000001", title="Tisch Traveller", price="150 €", created_at=_iso(now, 40))
+    add_market(db_mod, ad_id="8400000001", title="Sitzbank", price=100, first=_iso(now, 30), last=_iso(now, 10))
+    h = ma.data_health()
+    assert "не обновлялся 10 дн." in h and "ни одного живого" in h
+    assert ma.summary_lines()[0].startswith("Рынок:")

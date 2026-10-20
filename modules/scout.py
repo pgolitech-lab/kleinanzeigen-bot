@@ -419,13 +419,19 @@ _TOP_FLAG_RE = re.compile(r'"topAd":\[0,(true|false)\]')
 _PROPS_ID_RE = re.compile(r'"(?:id|adId)":\[0,"?(\d{8,12})')
 
 
-def parse_top_flags(html: str) -> dict[str, bool]:
-    """ad_id → является ли платным TOP-объявлением. Пусто, если вёрстка изменилась."""
+def parse_top_flags(html: str, ad_ids: Optional[set[str]] = None) -> dict[str, bool]:
+    """ad_id → является ли платным TOP-объявлением. Пусто, если вёрстка изменилась.
+
+    ad_ids — id карточек страницы: флаг приписывается только ближайшему ПРЕДШЕСТВУЮЩЕМУ id
+    из этого набора (не id картинки/пользователя). Покрытие проверяет вызывающий.
+    """
     import html as _html
     txt = _html.unescape(html or "")
     out: dict[str, bool] = {}
     for m in _TOP_FLAG_RE.finditer(txt):
         ids = _PROPS_ID_RE.findall(txt, max(0, m.start() - 4000), m.start())
+        if ad_ids is not None:
+            ids = [i for i in ids if i in ad_ids]
         if ids:
             out.setdefault(ids[-1], m.group(1) == "true")
     return out
@@ -546,13 +552,15 @@ def scrape_query(
             if pnum == 1:
                 raise  # первая страница не загрузилась — это ошибка запроса
             logger.warning("scout: q=%s стр.%s не загрузилась — стоп пагинации", qid, pnum)
+            if stats is not None:
+                stats["partial_error"] = f"стр. {pnum} не загрузилась"
             break
         rows = parse_search_html(html, kind, qid)
         if not rows:
             break
         if stats is not None:
             stats["pages"] = pnum
-        top = parse_top_flags(html)
+        top = parse_top_flags(html, {r["ad_id"] for r in rows})
         new_on_page = 0
         for row in rows:
             aid = row["ad_id"]
@@ -715,6 +723,12 @@ def _record_market(query: Any, rows: list[dict[str, Any]], pages: int,
     """
     if query["kind"] != "part":
         return
+    known = sum(1 for r in rows if r.get("is_top") is not None)
+    if rows and known / len(rows) < 0.9:
+        # Вёрстка изменилась: без флага TOP платные объявления считаются органикой и
+        # позиции завышаются. ERROR — чтобы hourly-монитор логов это показал.
+        logger.error("scout: флаг TOP распознан у %d из %d карточек (q=%s) — проверить parse_top_flags",
+                     known, len(rows), query["id"])
     try:
         from modules import db_market
         db_market.record_scrape(source="scout", keywords=query["keywords"],

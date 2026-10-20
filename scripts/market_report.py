@@ -43,6 +43,12 @@ def build(limit: int, use_llm: bool) -> str:
            f"{sum(1 for a in ctx.market if ctx.is_ours(a) and ctx.market[a]['ek'] == 'part')} "
            f"(по ad_id {sum(1 for a in ctx.market if a in ctx.own_ids)}, по городу+заголовку "
            f"{len(ctx.own_by_location)}).\n"]
+    health = ma.data_health(ctx)
+    if health:
+        out.append(f"> **Данные устарели:** {health}\n")
+    if not any(r["source"] == "market" for r in ma.db_market.runs_since("2000-01-01")):
+        out.append("> Позиции в выдаче нашими запросами ещё не измерялись (джоб market_rank не запускался) — "
+                   "статусы позиций только по прогонам scout.\n")
     dup = ma.duplicates_report(_ctx=ctx)
     out.append(f"## Дубли: опасно {dup['danger']}, внимание {dup['warn']}, снять {dup['ads_to_remove']}\n")
     for g in dup["groups"][:15]:
@@ -55,7 +61,7 @@ def build(limit: int, use_llm: bool) -> str:
         if shown >= limit:
             break
         adv = ma.advise_price(item_id=it["item_id"], _ctx=ctx)
-        rr = ma.rank_report(item_id=it["item_id"], now=ctx.now)["items"]
+        rr = ma.rank_report(item_id=it["item_id"], _ctx=ctx)["items"]
         rank = rr[0] if rr else None
         shown += 1
         out.append(f"### {it['title']}  ·  {_eur(it['price_eur'])}  ·  живых объявлений {it['live_ads']}")
@@ -71,7 +77,8 @@ def build(limit: int, use_llm: bool) -> str:
         if rank:
             b = rank["best"]
             pos = f", лучшее: «{b['keywords']}» стр. {b['page']} место {b['organic_pos'] or b['pos']}" if b else ""
-            out.append(f"- позиция: {rank['status_ru']}{pos}; без писем {rank['days_quiet']} дн.")
+            quiet = "—" if rank["days_quiet"] is None else f"{rank['days_quiet']} дн."
+            out.append(f"- позиция: {rank['status_ru']}{pos}; без писем {quiet}")
         out.append("")
     reps = ma.repost_suggestions(limit=limit, use_llm=use_llm, _ctx=ctx)
     out.append(f"## Перепост ({len(reps)})\n")
@@ -80,6 +87,8 @@ def build(limit: int, use_llm: bool) -> str:
         if r["text"]:
             out.append(f"    - заголовок: `{r['text']['title']}` ({r['text']['source']})")
             out.append(f"    - цена: {_eur(r['price']['current'])} → {_eur(r['price']['suggested'])} {r['price']['advice_ru']}")
+            if r["text"].get("warning"):
+                out.append(f"    - ⚠ {r['text']['warning']}")
         for st in r["steps_ru"]:
             out.append(f"    - {st}")
     return "\n".join(out) + "\n"
@@ -95,9 +104,14 @@ def main() -> int:
     if not a.db.exists():
         print(f"нет файла {a.db}", file=sys.stderr)
         return 2
+    import shutil
     import database
-    database.DB_PATH = _copy_ro(a.db)
-    text = build(a.limit, a.llm)
+    copy = _copy_ro(a.db)
+    database.DB_PATH = copy
+    try:
+        text = build(a.limit, a.llm)
+    finally:
+        shutil.rmtree(copy.parent, ignore_errors=True)
     if a.out:
         a.out.write_text(text, encoding="utf-8")
         print(f"отчёт: {a.out}")

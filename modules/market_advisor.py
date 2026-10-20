@@ -146,7 +146,7 @@ try:  # склад в main — единые правила сопоставле�
     tokens = _inv.tokens            # noqa: F811
     match_key = _inv.match_key      # noqa: F811
     detect_category = _inv.detect_category  # noqa: F811
-except Exception:  # noqa: BLE001 — модуля ещё нет, работаем на локальной копии
+except ImportError:  # модуля склада нет — работаем на локальной копии правил
     _inv = None
 
 
@@ -308,7 +308,9 @@ def features_for(listings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         rx = regex_features(l.get("title"), l.get("description"))
         c = cached.get(l["ad_id"])
         if c and c["src_hash"] == db_market.text_hash(l.get("title"), l.get("description")):
-            rx.update({k: v for k, v in c["features"].items() if k in FEATURE_KEYS})
+            # «не знаю» от Haiku (other / None / пусто) не затирает то, что нашёл regex
+            rx.update({k: v for k, v in c["features"].items()
+                       if k in FEATURE_KEYS and v not in (None, "other", [], 0)})
         out[l["ad_id"]] = rx
     return out
 
@@ -336,8 +338,9 @@ def enrich_features(limit: int = 60, use_llm: bool = True, batch: int = 10) -> d
         todo.append(r)
         if len(todo) >= limit:
             break
-    res = {"llm": 0, "regex": 0, "errors": 0}
+    res = {"llm": 0, "regex": 0, "errors": 0, "missing": 0, "batches": 0}
     for i in range(0, len(todo), batch):
+        res["batches"] += 1
         chunk = todo[i:i + batch]
         got: dict[str, dict[str, Any]] = {}
         if use_llm:
@@ -351,6 +354,8 @@ def enrich_features(limit: int = 60, use_llm: bool = True, batch: int = 10) -> d
                 db_market.set_features(r["ad_id"], got[r["ad_id"]], "llm", r["_hash"])
                 res["llm"] += 1
             else:
+                if use_llm and got:
+                    res["missing"] += 1  # Haiku ответил, но этот ad_id пропустил
                 db_market.set_features(r["ad_id"], regex_features(r["title"], r["description"]),
                                        "regex", r["_hash"])
                 res["regex"] += 1
@@ -426,9 +431,9 @@ class _Ctx:
                 "FROM scout_listings WHERE COALESCE(rejected,0)=0"):
                 self.market[r["ad_id"]] = dict(r)
         self.own_ids: set[str] = set(self.msg_ads) | set(self.briefs) | set(self.inv_ads)
-        # Наши места: город/PLZ, где видели наши объявления в выдаче, + ручная настройка.
+        # Наши места: PLZ, где видели наши объявления в выдаче, + ручная настройка.
+        # Только PLZ, не город: в большом городе (Köln, Aachen) полно конкурентов.
         self.own_plz: set[str] = set()
-        self.own_city: set[str] = set()
         self.city_account: dict[str, int] = {}
         for aid in self.own_ids:
             m = self.market.get(aid)
@@ -436,8 +441,6 @@ class _Ctx:
                 continue
             if m["plz"]:
                 self.own_plz.add(m["plz"])
-            if m["city"]:
-                self.own_city.add(_fold(m["city"]))
             acc = (self.msg_ads.get(aid) or {}).get("account_id") or (self.inv_ads.get(aid) or {}).get("account_id")
             if acc and m["plz"]:
                 self.city_account.setdefault(m["plz"], acc)
@@ -452,9 +455,8 @@ class _Ctx:
         for aid, m in self.market.items():
             if aid in self.own_ids:
                 continue
-            if (m["plz"] and m["plz"] in self.own_plz) or (m["city"] and _fold(m["city"]) in self.own_city):
-                if self._title_is_ours(m["title"]):
-                    self.own_by_location[aid] = "город и заголовок как у нашего"
+            if m["plz"] and m["plz"] in self.own_plz and self._title_is_ours(m["title"]):
+                self.own_by_location[aid] = "PLZ и заголовок как у нашего"
         self.serp_seen = db_market.last_serp_seen(list(self.own_ids | set(self.own_by_location)))
 
     def _own_title(self, ad_id: str) -> str:
@@ -705,20 +707,37 @@ def _closeness(a: dict[str, Any], b: dict[str, Any], a_title: str, b_title: str)
 
 
 def _comparables(ctx: _Ctx, feats: dict[str, Any], title: str) -> list[dict[str, Any]]:
+    """Сопоставимые конкуренты + сколько НАШИХ объявлений выкинуто из этого же набора."""
     cutoff = (ctx.now - timedelta(days=COMPARABLE_DAYS)).isoformat()
-    cand = [m for m in ctx.market.values()
-            if m["ek"] == "part" and m["price_eur"] and m["price_eur"] >= 20
-            and (m["last_seen_at"] or "") >= cutoff and not ctx.is_ours(m["ad_id"])]
-    mf = features_for(cand)
+    if "market_feats" not in ctx.cache:
+        pool = [m for m in ctx.market.values()
+                if m["ek"] == "part" and m["price_eur"] and m["price_eur"] >= 20
+                and (m["last_seen_at"] or "") >= cutoff]
+        ctx.cache["market_pool"] = pool
+        ctx.cache["market_feats"] = features_for(pool)
+    pool, mf = ctx.cache["market_pool"], ctx.cache["market_feats"]
     out = []
-    for m in cand:
+    excluded_own = 0
+    for m in pool:
         f = mf[m["ad_id"]]
         ok, _ = _compatible(feats, f)
         if not ok:
             continue
+        if ctx.is_ours(m["ad_id"]):
+            excluded_own += 1
+            continue
         out.append({**m, "features": f, "closeness": _closeness(feats, f, title, m["title"] or "")})
     out.sort(key=lambda x: (-x["closeness"], -(_ts(x["last_seen_at"]) or 0)))
+    ctx.cache["last_excluded_own"] = excluded_own
     return out
+
+
+def _market_stale_days(ctx: _Ctx) -> Optional[float]:
+    """Дней с последнего обновления рынка запчастей (последний last_seen_at). None — рынок пуст."""
+    last = max((m["last_seen_at"] for m in ctx.market.values() if m["ek"] == "part" and m["last_seen_at"]),
+               default=None)
+    age = _iso_age_days(last, ctx.now)
+    return round(age, 1) if age is not None else None
 
 
 def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
@@ -767,14 +786,15 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
         "url": c["url"], "active": bool(c["active"]), "closeness": c["closeness"],
         "price_change": hist.get(c["ad_id"]),
     } for c in comps[:5]]
-    excluded_own = sum(1 for aid in ctx.market if ctx.is_ours(aid) and ctx.market[aid]["ek"] == "part")
+    excluded_own = ctx.cache.get("last_excluded_own", 0)
+    stale = _market_stale_days(ctx)
     res: dict[str, Any] = {
         "ok": True, "status": "ok", "features": feats, "n": len(comps),
         "n_active": sum(1 for c in comps if c["active"]), "similar": similar, "excluded_own": excluded_own,
         "item": None if not item else {k: item.get(k) for k in (
             "item_id", "product_id", "title", "price_eur", "unit_cost_eur", "min_price_eur")},
         "p25": None, "median": None, "p75": None, "recommended_eur": None, "min_eur": None,
-        "min_basis": None, "delta_pct": None, "verdict": None,
+        "min_basis": None, "delta_pct": None, "verdict": None, "market_stale_days": stale,
     }
     if not item:
         res["item"] = {"item_id": None, "product_id": None, "title": title, "price_eur": price_eur,
@@ -790,6 +810,8 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
     if len(prices) < MIN_COMPARABLE:
         res["status"] = "few_data"
         res["verdict_ru"] = f"мало данных: сопоставимых объявлений {len(prices)} — смотрите ссылки"
+        if stale is not None and stale > 3:
+            res["verdict_ru"] += f" (рынок не обновлялся {int(stale)} дн. — scout стоит?)"
         if cost_floor:
             res["min_eur"], res["min_basis"] = cost_floor, "cost_only"
         return res
@@ -802,6 +824,8 @@ def advise_price(product_id: Optional[int] = None, ad_id: Optional[str] = None,
         res["min_eur"], res["min_basis"] = cost_floor, "cost"
     else:
         res["min_eur"], res["min_basis"] = _round_price(p25), "p25"
+    if res["recommended_eur"] < res["min_eur"]:
+        res["recommended_eur"] = res["min_eur"]  # себестоимость с маржой выше рынка
     if price_eur:
         delta = (price_eur - med) / med * 100
         res["delta_pct"] = round(delta)
@@ -848,28 +872,43 @@ def _query_matches(keywords: str, title: str) -> bool:
     return bool(kw) and all(t in tt for t in kw)
 
 
-def sync_market_queries(ctx: Optional[_Ctx] = None, max_queries: int = RANK_MAX_QUERIES) -> list[str]:
-    """Завести наши поисковые запросы по живым товарам (то, что scout уже ищет, не дублируем)."""
+def sync_market_queries(ctx: Optional[_Ctx] = None, max_queries: int = RANK_MAX_QUERIES) -> dict[str, list[str]]:
+    """Завести наши поисковые запросы по живым товарам. Запрос, который scout уже гоняет
+    на ≥ RANK_MAX_PAGES страниц, не дублируем. Лимит max_queries — по включённым запросам.
+
+    Возвращает {"added": [фразы], "untracked": [названия товаров без запроса]} — товары, для
+    которых нет поискового слова (категория other) или не хватило лимита; их позиция — no_data.
+    """
     ctx = ctx or _Ctx()
     with get_conn() as conn:
         scout_kw = {" ".join(r["keywords"].lower().split()) for r in conn.execute(
-            "SELECT keywords FROM scout_queries WHERE enabled=1 AND kind='part'")}
-    existing = {q["keywords"] for q in db_market.list_market_queries(only_enabled=False)}
-    wanted: dict[str, int] = {}
+            "SELECT keywords FROM scout_queries WHERE enabled=1 AND kind='part' AND max_pages >= ?",
+            (RANK_MAX_PAGES,))}
+    enabled = {q["keywords"] for q in db_market.list_market_queries(only_enabled=True)}
+    known = {q["keywords"] for q in db_market.list_market_queries(only_enabled=False)}
+    wanted: dict[str, list[str]] = {}
+    untracked: list[str] = []
     for it in own_items(ctx):
         ph = search_phrase(it)
-        if ph and ph not in scout_kw:
-            wanted[ph] = wanted.get(ph, 0) + 1
+        if not ph:
+            untracked.append(it["title"])
+        elif ph not in scout_kw:
+            wanted.setdefault(ph, []).append(it["title"])
     added = []
-    for ph, _n in sorted(wanted.items(), key=lambda x: -x[1]):
-        if len(existing) >= max_queries:
-            break
-        if ph in existing:
+    for ph, titles in sorted(wanted.items(), key=lambda x: -len(x[1])):
+        if ph in known:
+            continue  # уже есть (включённый или выключенный оператором — не возвращаем)
+        if len(enabled) >= max_queries:
+            untracked.extend(titles)
             continue
         db_market.upsert_market_query(ph, note="авто: по нашим товарам")
-        existing.add(ph)
+        enabled.add(ph)
+        known.add(ph)
         added.append(ph)
-    return added
+    if untracked:
+        logger.warning("market: позицию не отслеживаем для %d товаров (нет поискового слова или лимит "
+                       "%d запросов): %s", len(untracked), max_queries, "; ".join(untracked[:10]))
+    return {"added": added, "untracked": untracked}
 
 
 def run_rank_check(force: bool = False, max_queries: int = RANK_MAX_QUERIES,
@@ -878,8 +917,9 @@ def run_rank_check(force: bool = False, max_queries: int = RANK_MAX_QUERIES,
 
     Безопасность: не чаще раза в RANK_MIN_INTERVAL_H часов (force — игнорировать), не больше
     max_queries запросов по ≤ 3 страницы, пауза 4–8 с между страницами и запросами.
-    Найденные объявления пишутся и в scout_listings (это обычная выдача запчастей).
-    Возвращает {ran, skipped, pages, cards, errors: [..], added_queries: [..]}.
+    Новые для scout объявления добавляются в scout_listings (уже известные не трогаем).
+    Пустая выдача и недогруженные страницы — в errors (прогон с 0 карточек не засчитывается).
+    Возвращает {ran, skipped, pages, cards, errors: [..], added_queries: [..], untracked: [..]}.
     """
     from modules import scout
     import database as db
@@ -893,13 +933,15 @@ def run_rank_check(force: bool = False, max_queries: int = RANK_MAX_QUERIES,
             res["skipped"] = f"последний прогон {recent[0]['started_at'][:16]} UTC — рано"
             return res
     try:
-        res["added_queries"] = sync_market_queries()
+        sq = sync_market_queries()
+        res["added_queries"], res["untracked"] = sq["added"], sq["untracked"]
     except Exception as e:  # noqa: BLE001
         logger.exception("market: не удалось обновить список запросов")
         res["errors"].append(f"sync_queries: {e}")
     queries = db_market.list_market_queries()[:max_queries]
     if not queries:
         res["skipped"] = "нет запросов"
+        logger.warning("market: прогон позиций — нет ни одного нашего запроса (живых товаров нет?)")
         return res
     browser = scout._BrowserFallback()
     try:
@@ -919,11 +961,20 @@ def run_rank_check(force: bool = False, max_queries: int = RANK_MAX_QUERIES,
                                             query_ref=q["id"], rows=[], pages=0, error=str(e)[:500],
                                             started_at=started)
                     continue
-                for r in rows:
-                    r["query_id"] = None  # не scout_queries.id — не путаем источник
-                db.upsert_scout_listings(rows)
+                if not rows:
+                    # Страница «похожа на выдачу», но карточек 0: либо запрос пуст, либо сломался
+                    # парсер. Прогон не засчитываем, чтобы «нас нет в выдаче» не стало ложным сигналом.
+                    res["errors"].append(f"{q['keywords']}: 0 карточек")
+                    db_market.record_scrape(source="market", keywords=q["keywords"], category=q["category"],
+                                            query_ref=q["id"], rows=[], pages=0, error="0 карточек",
+                                            started_at=started)
+                    continue
+                if stats.get("partial_error"):
+                    res["errors"].append(f"{q['keywords']}: {stats['partial_error']}")
+                _insert_new_market_listings(rows)
                 db_market.record_scrape(source="market", keywords=q["keywords"], category=q["category"],
-                                        query_ref=q["id"], rows=rows, pages=stats["pages"], started_at=started)
+                                        query_ref=q["id"], rows=rows, pages=stats["pages"],
+                                        error=stats.get("partial_error"), started_at=started)
                 db_market.touch_market_query(q["id"])
                 res["ran"] += 1
                 res["pages"] += stats["pages"]
@@ -931,11 +982,23 @@ def run_rank_check(force: bool = False, max_queries: int = RANK_MAX_QUERIES,
                 time.sleep(random.uniform(*page_delay))
     finally:
         browser.close()
-    try:
-        db_market.purge_old_serp()
-    except Exception:  # noqa: BLE001
-        logger.exception("market: чистка старых снимков выдачи не удалась")
     return res
+
+
+def _insert_new_market_listings(rows: list[dict[str, Any]]) -> int:
+    """Новые для scout объявления — в scout_listings (только вставка: строки, которые уже
+    собирает scout, не трогаем — их query_id/kind и учёт «новых» остаются за scout)."""
+    import database as db
+    ids = [r["ad_id"] for r in rows if r.get("ad_id")]
+    if not ids:
+        return 0
+    with get_conn() as conn:
+        ph = ",".join("?" * len(ids))
+        known = {r["ad_id"] for r in conn.execute(f"SELECT ad_id FROM scout_listings WHERE ad_id IN ({ph})", ids)}
+    fresh = [{**r, "query_id": None} for r in rows if r.get("ad_id") and r["ad_id"] not in known]
+    if fresh:
+        db.upsert_scout_listings(fresh)
+    return len(fresh)
 
 
 def _rank_rows(ctx: _Ctx, ad_ids: set[str], titles: list[str], days: int) -> dict[str, dict[str, Any]]:
@@ -951,7 +1014,8 @@ def _rank_rows(ctx: _Ctx, ad_ids: set[str], titles: list[str], days: int) -> dic
         best = min(ours, key=lambda x: x["pos"]) if ours else None
         point = {"at": r["started_at"], "page": best["page"] if best else None,
                  "pos": best["pos"] if best else None,
-                 "organic_pos": best["organic_pos"] if best else None,
+                 # флаг TOP распознан плохо — «органическое» место не считаем
+                 "organic_pos": best["organic_pos"] if best and (r.get("top_known") or 0) >= 0.9 else None,
                  "ad_id": best["ad_id"] if best else None,
                  "searched_pages": r["pages"], "total": r["cards"]}
         e = by_kw.setdefault(r["keywords"], {"keywords": r["keywords"], "history": []})
@@ -967,14 +1031,27 @@ def _rank_rows(ctx: _Ctx, ad_ids: set[str], titles: list[str], days: int) -> dic
     return by_kw
 
 
-def _rank_status(by_kw: dict[str, dict[str, Any]]) -> tuple[str, Optional[dict[str, Any]]]:
-    """top / page1 / sinking / missing / no_data + лучшая последняя точка."""
+STALE_RANK_DAYS = 2  # последнему замеру больше N дней — позиция устарела
+
+
+def _rank_status(by_kw: dict[str, dict[str, Any]],
+                 now: Optional[datetime] = None) -> tuple[str, Optional[dict[str, Any]]]:
+    """top / page1 / sinking / missing / stale / no_data + лучшая последняя точка.
+
+    missing — только по полному прогону (≥ RANK_MAX_PAGES страниц или выдача кончилась раньше):
+    мелкий прогон scout на 1 страницу не значит «нас нет на первых страницах».
+    """
     if not by_kw:
         return "no_data", None
     latest = [e["latest"] for e in by_kw.values()]
+    newest = max(_ts(p["at"]) or 0 for p in latest)
+    if now is not None and newest and (now.timestamp() - newest) / 86400 > STALE_RANK_DAYS:
+        return "stale", None
     found = [p for p in latest if p["pos"]]
     if not found:
-        return "missing", None
+        complete = [p for p in latest if p["searched_pages"] >= RANK_MAX_PAGES
+                    or p["total"] < p["searched_pages"] * PAGE_SIZE]
+        return ("missing", None) if complete else ("no_data", None)
     best = min(found, key=lambda p: p["organic_pos"] or p["pos"])
     pos = best["organic_pos"] or best["pos"]
     if best["page"] == 1 and pos <= 10:
@@ -985,26 +1062,28 @@ def _rank_status(by_kw: dict[str, dict[str, Any]]) -> tuple[str, Optional[dict[s
 
 
 _RANK_RU = {"top": "в топе 1-й страницы", "page1": "на 1-й странице, внизу", "sinking": "опустилось",
-            "missing": "нет на первых страницах", "no_data": "позиция ещё не измерялась"}
+            "missing": "нет на первых страницах", "no_data": "позиция ещё не измерялась",
+            "stale": "замер позиции устарел — прогоны выдачи не идут"}
 
 
 def rank_report(product_id: Optional[int] = None, ad_id: Optional[str] = None,
                 item_id: Optional[str] = None, days: int = 14,
-                now: Optional[datetime] = None) -> dict[str, Any]:
+                now: Optional[datetime] = None, _ctx: Optional[_Ctx] = None) -> dict[str, Any]:
     """Места наших объявлений в выдаче за days дней.
 
     Без аргументов — по всем живым товарам; иначе по одному. Возвращает:
     {"items": [{
         "item_id", "product_id", "title",
-        "status": "top" | "page1" | "sinking" | "missing" | "no_data", "status_ru": str,
+        "status": "top" | "page1" | "sinking" | "missing" | "stale" | "no_data", "status_ru": str,
         "best": {"keywords", "page", "pos", "organic_pos", "ad_id", "at"} | None,
         "queries": [{"keywords", "latest": {at, page, pos, organic_pos, ad_id, searched_pages, total},
                      "trend": int|None (>0 — опустились на N мест), "history": [точки по времени]}],
         "days_quiet": float|None — дней с последнего письма по товару,
         "live_ads": int
-    }], "checked_at": str|None — последний прогон любой выдачи}
+    }], "checked_at": str|None — последний успешный прогон любой выдачи,
+       "last_error": {"at", "keywords", "error"}|None — последний прогон с ошибкой, если он новее успешного}
     """
-    ctx = _Ctx(now)
+    ctx = _ctx or _Ctx(now)
     if product_id is not None or ad_id or item_id:
         it = _find_item(ctx, product_id=product_id, ad_id=ad_id, item_id=item_id)
         items = [it] if it else []
@@ -1015,7 +1094,7 @@ def rank_report(product_id: Optional[int] = None, ad_id: Optional[str] = None,
         ids = {a["ad_id"] for a in it["ads"]}
         titles = list({it["title"], *[a["title"] for a in it["ads"] if a["title"]]})
         by_kw = _rank_rows(ctx, ids, titles, days)
-        status, best_point = _rank_status(by_kw)
+        status, best_point = _rank_status(by_kw, ctx.now)
         best = None
         if best_point:
             kw = next(k for k, e in by_kw.items() if e["latest"] is best_point)
@@ -1026,8 +1105,14 @@ def rank_report(product_id: Optional[int] = None, ad_id: Optional[str] = None,
             "queries": sorted(by_kw.values(), key=lambda e: e["keywords"]),
             "days_quiet": _days_quiet(ctx, it), "live_ads": it["live_ads"],
         })
-    runs = db_market.runs_since((ctx.now - timedelta(days=days)).isoformat())
-    return {"items": out, "checked_at": runs[0]["started_at"] if runs else None}
+    since = (ctx.now - timedelta(days=days)).isoformat()
+    runs = db_market.runs_since(since)
+    checked = runs[0]["started_at"] if runs else None
+    failed = [r for r in db_market.runs_since(since, include_failed=True) if r["error"]]
+    last_error = None
+    if failed and (checked is None or failed[0]["started_at"] > checked):
+        last_error = {"at": failed[0]["started_at"], "keywords": failed[0]["keywords"], "error": failed[0]["error"]}
+    return {"items": out, "checked_at": checked, "last_error": last_error}
 
 
 def _days_quiet(ctx: _Ctx, it: dict[str, Any]) -> Optional[float]:
@@ -1204,7 +1289,9 @@ def visibility_tips(product_id: Optional[int] = None, ad_id: Optional[str] = Non
     if use_llm:
         key = "vis:" + db_market.text_hash(it["title"], it["description"][:300],
                                            "|".join(sorted(l["ad_id"] for l in leaders)))
-        cached = db_market.cache_get(key, max_age_days=14)
+        # Sonnet не чаще раза в сутки на товар: даже если лидеры сменились — отдаём последний совет
+        cached = db_market.cache_get(key, max_age_days=14) or \
+            db_market.cache_get(f"vis_last:{it['item_id']}", max_age_days=1)
         if cached:
             res["suggestions"] = {**cached, "source": "cache"}
             return res
@@ -1220,6 +1307,7 @@ def visibility_tips(product_id: Optional[int] = None, ad_id: Optional[str] = Non
                 schema=_VIS_SCHEMA, max_tokens=1200)
             data["titles"] = [t[:TITLE_MAX] for t in data.get("titles") or [] if t.strip()] or rules
             db_market.cache_set(key, "visibility", data)
+            db_market.cache_set(f"vis_last:{it['item_id']}", "visibility", data)
             res["suggestions"] = {**data, "source": "llm"}
         except Exception as e:  # noqa: BLE001
             logger.warning("market: LLM-советы по заметности не получены: %s", e)
@@ -1270,14 +1358,27 @@ def _dup_group(ctx: _Ctx, it: dict[str, Any]) -> Optional[dict[str, Any]]:
     if len(cities) > 1:
         reasons.append(f"в {len(cities)} городах")
     level = "danger" if (score >= 5 or n >= 3 or (len(accounts) > 1 and same_text)) else "warn"
-    # Оставляем одно: больше писем за последние 14 дней → лучше место в выдаче → свежее.
+    # «Наше» только по PLZ+заголовку (без ad_id) — догадка: одной ею «опасно» не ставим.
+    confirmed = [a for a in live if a["ours_by"] == "наш ad_id"]
+    guessed = [a["ad_id"] for a in live if a["ours_by"] != "наш ad_id"]
+    if guessed:
+        reasons.append(f"{len(guessed)} — наши по PLZ и заголовку, проверить")
+        if len(confirmed) < 2:
+            level = "warn"
+    # На складе несколько штук и тексты разные — несколько объявлений допустимы, но рискованно.
+    stock = it.get("stock_qty")
+    if stock is not None and stock >= n and not same_text and len(accounts) <= 1:
+        level = "warn"
+        reasons.append(f"на складе {stock} шт. — лучше одно объявление «{stock} Stück verfügbar»")
+    # Оставляем одно: подтверждённое → больше писем за 14 дней → видно в выдаче → свежее.
     def keep_rank(a: dict[str, Any]) -> tuple:
         recent = 0
         for t in (ctx.msg_ads.get(a["ad_id"]) or {}).get("inquiry_times") or []:
             age = _iso_age_days(t, ctx.now)
             if age is not None and age <= 14:
                 recent += 1
-        return (-recent, 0 if a["live"] == "seen" else 1, -(_ts(a["first_seen_at"]) or 0))
+        return (0 if a["ours_by"] == "наш ad_id" else 1, -recent, 0 if a["live"] == "seen" else 1,
+                -(_ts(a["first_seen_at"]) or 0))
     ordered = sorted(live, key=keep_rank)
     keep, remove = ordered[0], ordered[1:]
     keep, remove = _strip(keep), [_strip(r) for r in remove]
@@ -1287,7 +1388,7 @@ def _dup_group(ctx: _Ctx, it: dict[str, Any]) -> Optional[dict[str, Any]]:
         "item_id": it["item_id"], "product_id": it["product_id"], "title": it["title"],
         "level": level, "score": score, "n_live": n, "accounts": sorted(accounts),
         "reasons_ru": reasons, "keep": keep, "remove": remove, "message_ru": msg,
-        "uncertain": [a["ad_id"] for a in live if a["live"] == "probable"],
+        "uncertain": sorted({a["ad_id"] for a in live if a["live"] == "probable"} | set(guessed)),
         "photos_checked": False,
     }
 
@@ -1324,7 +1425,10 @@ def duplicates_report(now: Optional[datetime] = None, _ctx: Optional[_Ctx] = Non
 
 def next_repost_window(now_utc: Optional[datetime] = None) -> dict[str, Any]:
     """Ближайшее окно вс–ср 16–19 ч по Берлину. {"now": bool, "start", "end" (Берлин ISO), "label_ru"}."""
-    now_b = (now_utc or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC")).astimezone(BERLIN)
+    now_u = now_utc or datetime.utcnow()
+    if now_u.tzinfo is None:
+        now_u = now_u.replace(tzinfo=ZoneInfo("UTC"))  # naive = UTC (как всё в БД)
+    now_b = now_u.astimezone(BERLIN)
     h0, h1 = REPOST_WINDOW_HOURS
     for d in range(0, 8):
         day = (now_b + timedelta(days=d)).date()
@@ -1376,17 +1480,19 @@ _REPOST_SYSTEM = (
 
 def repost_text(it: dict[str, Any], *, price_eur: Optional[float], missing_terms: Iterable[str] = (),
                 use_llm: bool = True) -> dict[str, Any]:
-    """Готовый текст перепоста: {title, description, price_eur, changes_ru, source: llm|cache|rules}."""
+    """Готовый текст перепоста: {title, description, price_eur, changes_ru, source: llm|cache|rules,
+    warning: str|None — показать оператору (LLM недоступен, нет описания, текст почти как старый)}."""
     title = it["title"]
     desc = it.get("description") or ""
     rules = _rule_repost(it, list(missing_terms))
     base = {"price_eur": price_eur}
     if not use_llm or not desc:
-        return {**rules, **base}
+        return {**rules, **base}  # без описания LLM нечего перефразировать — warning в rules
     key = "rep:" + db_market.text_hash(title, desc[:800], ",".join(missing_terms))
-    cached = db_market.cache_get(key, max_age_days=7)
+    cached = db_market.cache_get(key, max_age_days=7) or \
+        db_market.cache_get(f"rep_last:{it['item_id']}", max_age_days=1)
     if cached:
-        return {**cached, **base, "source": "cache"}
+        return {**cached, **base, "source": "cache", "warning": None}
     try:
         from modules import claude_utils
         user = (f"Старый заголовок: {title}\nСтарое описание:\n{desc[:1500]}\n\n"
@@ -1398,36 +1504,56 @@ def repost_text(it: dict[str, Any], *, price_eur: Optional[float], missing_terms
         if match_key(data["title"]) == match_key(title) and data["description"].strip() == desc.strip():
             raise ValueError("LLM вернул тот же текст")
         db_market.cache_set(key, "repost", data)
-        return {**data, **base, "source": "llm"}
+        db_market.cache_set(f"rep_last:{it['item_id']}", "repost", data)
+        return {**data, **base, "source": "llm", "warning": None}
     except Exception as e:  # noqa: BLE001
         logger.warning("market: LLM-текст перепоста не получен: %s — текст по правилам", e)
-        return {**rules, **base, "warning": f"LLM недоступен: {e}"}
+        return {**rules, **base, "warning": "; ".join(x for x in (f"LLM недоступен: {e}", rules["warning"]) if x)}
+
+
+_FIRST_WORD = {"sitzbank": "Sitzbank", "einzelsitz": "Einzelsitz", "sitze": "Sitze", "fahrersitze": "Sitz",
+               "komplettsatz": "Sitze", "tisch": "Tisch", "ahk": "Anhängerkupplung", "sitzschienen": "Sitzschienen",
+               "raeder": "Felgen", "gurte": "Gurte", "leuchten": "Leuchten", "dach": "Dachreling"}
+_COND_WORD = {"neu": "neu", "gebraucht": "gebraucht", "defekt": "defekt"}
 
 
 def _rule_repost(it: dict[str, Any], missing_terms: list[str]) -> dict[str, Any]:
-    """Вариация без LLM: другой порядок слов заголовка + недостающие термины, новая первая строка."""
+    """Вариация без LLM: другой порядок слов заголовка + недостающие НЕ-модельные термины,
+    новая первая строка. Только факты из нашего же текста — ничего не выдумываем."""
     words = it["title"].split()
     f = it.get("features") or {}
-    add = [t for t in missing_terms if t not in _MODEL_TERMS and t not in ("Versand", "neu / neuwertig")]
+    own_terms = _terms_in(f"{it['title']} {it.get('description') or ''}")
+    # добавляем только термины, которые подтверждаются нашим заголовком/описанием
+    add = [t for t in missing_terms if t in own_terms and t not in _MODEL_TERMS
+           and t not in ("Versand", "neu / neuwertig")]
     if len(words) > 3:
-        # главное слово товара вперёд, остальное — как было
         head = next((w for w in words if detect_category(w) == it.get("category")), None)
         if head:
             words = [head] + [w for w in words if w is not head]
     title = " ".join(words + add)[:TITLE_MAX].strip()
+    warnings = []
+    if title == it["title"] and f.get("condition") in _COND_WORD:
+        title = f"{it['title']} {_COND_WORD[f['condition']]}"[:TITLE_MAX]
+    if title == it["title"] and len(words) > 1:
+        title = " ".join(words[1:] + words[:1])  # хотя бы другой порядок слов
     if title == it["title"]:
-        title = (it["title"] + (" – Top Zustand" if f.get("condition") != "defekt" else " – Bastler"))[:TITLE_MAX]
+        warnings.append("заголовок не удалось изменить — поправьте руками")
     parts = []
     if f.get("material") == "leder":
         parts.append("Leder")
     if f.get("seats") == 3:
-        parts.append("2+1 / 3er")
-    first = f"{(_SEARCH_WORD.get(it.get('category') or '') or 'Teil').capitalize()} " + " ".join(parts)
-    desc = it.get("description") or ""
-    description = (first.strip() + ".\n\n" + desc).strip() if desc else ""
+        parts.append("3er")
+    first = " ".join([_FIRST_WORD.get(it.get("category") or "", "")] + parts).strip()
+    desc = (it.get("description") or "").strip()
+    if not desc:
+        warnings.append("описания нет — допишите текст перед публикацией")
+        description = ""
+    else:
+        description = f"{first}.\n\n{desc}" if first else desc
+        warnings.append("текст почти как старый — перефразируйте пару предложений")
     return {"title": title, "description": description,
             "changes_ru": "порядок слов заголовка и первая строка описания изменены (без LLM)",
-            "source": "rules"}
+            "source": "rules", "warning": "; ".join(warnings) or None}
 
 
 def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text: bool = True,
@@ -1463,9 +1589,11 @@ def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text
         ids = {a["ad_id"] for a in it["ads"]}
         titles = list({it["title"], *[a["title"] for a in it["ads"] if a["title"]]})
         by_kw = _rank_rows(ctx, ids, titles, days=7)
-        status, best = _rank_status(by_kw)
+        status, best = _rank_status(by_kw, ctx.now)
         quiet = _days_quiet(ctx, it)
-        newest_age = min([_iso_age_days(a["first_seen_at"], ctx.now) or 999 for a in live])
+        ages = [_iso_age_days(a["first_seen_at"], ctx.now) for a in live]
+        # возраст неизвестен — считаем свежим: перепост «вслепую» не советуем
+        newest_age = min(0.0 if x is None else x for x in ages)
         dup = _dup_group(ctx, it)
         reasons = []
         prio = 0.0
@@ -1496,7 +1624,8 @@ def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text
             adv = advise_price(item_id=it["item_id"], _ctx=ctx)
         except Exception:  # noqa: BLE001
             logger.exception("market: advise_price для %s упал", it["item_id"])
-            adv = {"verdict": None, "min_eur": None, "recommended_eur": None, "verdict_ru": "нет оценки"}
+            adv = {"verdict": None, "min_eur": None, "recommended_eur": None,
+                   "verdict_ru": "оценка рынка не посчиталась (ошибка в логе) — цену проверьте сами"}
         floor = it["min_price_eur"] or adv.get("min_eur")
         cur = it["price_eur"]
         if adv.get("verdict") == "above" and adv.get("recommended_eur"):
@@ -1537,10 +1666,34 @@ def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text
 # СВОДКА И ДЖОБЫ
 # ══════════════════════════════════════════════════════════════════════════════
 
+def data_health(ctx: Optional[_Ctx] = None) -> Optional[str]:
+    """Почему советы могут быть пустыми: устаревшие данные. None — всё в порядке.
+    Пишет WARNING в лог; вызывается в сводке и доступна api (`/market/*` → поле health)."""
+    ctx = ctx or _Ctx()
+    problems = []
+    stale = _market_stale_days(ctx)
+    if stale is not None and stale > 3:
+        problems.append(f"рынок (scout) не обновлялся {int(stale)} дн.")
+    if ctx.own_ids and not own_items(ctx):
+        problems.append("ни одного живого нашего объявления по данным — выдача/письма устарели?")
+    if db_market.list_market_queries():
+        ok = db_market.runs_since((ctx.now - timedelta(days=STALE_RANK_DAYS)).isoformat())
+        if not any(r["source"] == "market" for r in ok):
+            problems.append(f"позиции в выдаче не измерялись больше {STALE_RANK_DAYS} дн.")
+    if problems:
+        msg = "; ".join(problems)
+        logger.warning("market: %s", msg)
+        return msg
+    return None
+
+
 def summary_lines(now: Optional[datetime] = None) -> list[str]:
     """0–5 строк для утренней сводки бота (HTML-экранирование — на стороне бота)."""
     lines = []
     ctx = _Ctx(now)
+    note = data_health(ctx)
+    if note:
+        lines.append(f"Рынок: {note}")
     try:
         d = duplicates_report(_ctx=ctx)
         if d["danger"]:
@@ -1570,6 +1723,10 @@ def market_rank_job() -> str:
     r = run_rank_check()
     if r["skipped"]:
         return f"market: пропуск — {r['skipped']}"
+    if r["ran"] == 0:
+        # Запросы есть, но ни один не дал карточек — блокировка или новая вёрстка.
+        logger.error("market: прогон позиций без единой выдачи: %s", "; ".join(r["errors"])[:1000])
+        return f"market: ни один запрос не дал выдачи, ошибок {len(r['errors'])}"
     msg = f"market: запросов {r['ran']}, страниц {r['pages']}, карточек {r['cards']}"
     if r["errors"]:
         logger.error("market: ошибки прогона позиций: %s", "; ".join(r["errors"])[:1000])
@@ -1580,6 +1737,10 @@ def market_rank_job() -> str:
 def market_features_job() -> str:
     """Джоб: признаки новых объявлений рынка (Haiku, ≤ 60 за запуск). Раз в 6 ч после scout."""
     r = enrich_features()
-    if r["errors"]:
-        logger.warning("market: признаки — %d пачек без Haiku (сохранены по regex)", r["errors"])
-    return f"market: признаки llm={r['llm']} regex={r['regex']} ошибок={r['errors']}"
+    if r["batches"] and r["errors"] == r["batches"]:
+        # Все пачки без Haiku — скорее всего слетела подписка/CLI. ERROR → hourly-монитор.
+        logger.error("market: признаки — Haiku недоступен во всех %d пачках, работаем по regex", r["batches"])
+    elif r["errors"] or r["missing"]:
+        logger.warning("market: признаки — пачек без Haiku %d, пропущено Haiku %d", r["errors"], r["missing"])
+    return (f"market: признаки llm={r['llm']} regex={r['regex']} ошибок={r['errors']} "
+            f"пропусков={r['missing']}")

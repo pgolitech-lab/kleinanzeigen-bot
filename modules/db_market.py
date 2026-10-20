@@ -54,6 +54,10 @@ def ensure_market_schema(conn: sqlite3.Connection) -> None:
             finished_at TEXT
         )
     """)
+    # доля карточек, у которых распознан флаг TOP (0..1); < 0.9 — organic_pos ненадёжен
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(market_runs)")}
+    if "top_known" not in cols:
+        conn.execute("ALTER TABLE market_runs ADD COLUMN top_known REAL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mr_kw ON market_runs(keywords, started_at)")
     # Снимок выдачи: место каждого объявления в прогоне.
     conn.execute("""
@@ -152,8 +156,9 @@ def _record_prices(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]], now
         ).fetchone()
         if last is not None and last["price_eur"] == price:
             continue
-        if last is None and price is None:
-            continue  # «цена не указана» с первого раза — истории нет
+        if price is None:
+            # «цена не указана» / не распарсилась: не выдаём это за изменение цены
+            continue
         conn.execute(
             "INSERT INTO market_price_history (ad_id, price_eur, price_raw, seen_at) VALUES (?, ?, ?, ?)",
             (ad_id, price, r.get("price_raw"), now),
@@ -199,15 +204,17 @@ def record_scrape(*, source: str, keywords: str, category: Optional[str], query_
     """Сохранить прогон одного запроса: run + места в выдаче + изменения цен. Возвращает run_id.
 
     rows — в порядке выдачи, с ключами page/pos/is_top (их проставляет scout.scrape_query).
+    Раз в сутки (на процесс) попутно чистит снимки старше SERP_RETENTION_DAYS.
     """
     ensure_schema()
     now = _now()
+    top_known = (sum(1 for r in rows if r.get("is_top") is not None) / len(rows)) if rows else None
     with transaction() as conn:
         cur = conn.execute(
             "INSERT INTO market_runs (source, keywords, category, query_ref, pages, cards, error, "
-            "started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "started_at, finished_at, top_known) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (source, (keywords or "").strip().lower(), category, query_ref, int(pages), len(rows),
-             error, started_at or now, now),
+             error, started_at or now, now, top_known),
         )
         run_id = int(cur.lastrowid)
         organic = 0
@@ -226,13 +233,35 @@ def record_scrape(*, source: str, keywords: str, category: Optional[str], query_
                  r.get("plz"), r.get("city"), r.get("posted_raw"), now),
             )
         _record_prices(conn, rows, now)
+    _maybe_purge()
     return run_id
 
 
-def runs_since(since_iso: str, keywords: Optional[str] = None) -> list[dict[str, Any]]:
-    """Прогоны (без ошибки первой страницы) начиная с since_iso, от новых к старым."""
+_last_purge: dict[str, float] = {}
+
+
+def _maybe_purge() -> None:
+    """Чистка старых снимков не чаще раза в сутки на файл БД. Ошибка — в лог, не наверх."""
+    import time as _time
+    import database
+    key = str(database.DB_PATH)
+    if _time.time() - _last_purge.get(key, 0) < 86400:
+        return
+    _last_purge[key] = _time.time()
+    try:
+        n = purge_old_serp()
+        if n:
+            logger.info("market: удалено %d старых прогонов выдачи (> %d дн.)", n, SERP_RETENTION_DAYS)
+    except Exception:  # noqa: BLE001
+        logger.exception("market: чистка старых снимков выдачи не удалась")
+
+
+def runs_since(since_iso: str, keywords: Optional[str] = None,
+               include_failed: bool = False) -> list[dict[str, Any]]:
+    """Прогоны начиная с since_iso, от новых к старым. По умолчанию — только успешные
+    (загрузилась хотя бы 1 страница); include_failed — и с ошибкой / пустые."""
     ensure_schema()
-    sql = "SELECT * FROM market_runs WHERE started_at >= ? AND pages > 0"
+    sql = "SELECT * FROM market_runs WHERE started_at >= ?" + ("" if include_failed else " AND pages > 0")
     args: list[Any] = [since_iso]
     if keywords:
         sql += " AND keywords = ?"
