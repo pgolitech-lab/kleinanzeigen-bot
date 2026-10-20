@@ -102,7 +102,7 @@ def test_link_junk_title_skipped(inv):
 
 def test_doubtful_pair_creates_question_and_answer_merges(inv):
     a = inv.link_listing("100", title="Peugeot Traveller Expert,Opel Zafira Life,Citroen Sitzbank", price=1299)
-    b = inv.link_listing("200", title="Citroën Spacetourer,Toyota ProAce Verso,Fiat Ulysse Sitzbank", price=1299)
+    b = inv.link_listing("200", title="Citroën Spacetourer,Toyota ProAce Verso,Fiat Ulysse Sitzbank 2+1", price=1299)
     assert b["method"] == "new" and b["question_id"]
     qs = inv.inv.list_open_questions()
     assert len(qs) == 1 and qs[0]["suggested_product_id"] == a["product_id"]
@@ -117,7 +117,7 @@ def test_doubtful_pair_creates_question_and_answer_merges(inv):
 
 def test_answer_different_keeps_products(inv):
     inv.link_listing("100", title="Peugeot Traveller Sitzbank", price=1299)
-    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank", price=1299)
+    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank 2+1", price=1299)
     res = inv.answer_question(b["question_id"], same=False)
     assert res["merged"] is False and inv.inv.get_listing("200")["product_id"] == b["product_id"]
 
@@ -129,14 +129,14 @@ def test_llm_high_confidence_links(inv):
     def judge(x, y):
         calls.append((x, y))
         return {"same": True, "confidence": "high", "reason": "та же скамья"}
-    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank", price=1250, use_llm=True, judge=judge)
+    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank 2+1", price=1250, use_llm=True, judge=judge)
     assert calls and b["method"] == "llm" and b["product_id"] == a["product_id"]
     assert not b.get("question_id")
 
 
 def test_llm_confident_no_creates_product_without_question(inv):
     inv.link_listing("100", title="Peugeot Traveller Sitzbank", price=1299)
-    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank", price=1250, use_llm=True,
+    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank 2+1", price=1250, use_llm=True,
                          judge=lambda x, y: {"same": False, "confidence": "high", "reason": "другая"})
     assert b["method"] == "new" and not b.get("question_id")
 
@@ -146,7 +146,7 @@ def test_llm_failure_falls_back_to_operator_question(inv):
 
     def boom(x, y):
         raise RuntimeError("подписка недоступна")
-    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank", price=1250, use_llm=True, judge=boom)
+    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank 2+1", price=1250, use_llm=True, judge=boom)
     assert b["method"] == "new" and b["question_id"]
 
 
@@ -337,7 +337,7 @@ def test_plan_and_apply_seed_idempotent(inv):
     import database as db
     _msg(db, ad_id="1", title="Peugeot Traveller Sitzbank", price="1.299 €", created_at="2026-05-01T00:00:00")
     _msg(db, ad_id="2", title="Peugeot Traveller  Sitzbank", price="1.300 €", created_at="2026-06-01T00:00:00")
-    _msg(db, ad_id="3", title="Citroen Spacetourer Sitzbank", price="1.299 €", created_at="2026-07-01T00:00:00")
+    _msg(db, ad_id="3", title="Citroen Spacetourer Sitzbank 2+1", price="1.299 €", created_at="2026-07-01T00:00:00")
     _msg(db, ad_id="4", title="Deine wöchentliche Anzeigenübersicht", created_at="2026-07-01T00:00:00")
     ads = inv.seed_ads_from_messages()
     assert {a.ad_id for a in ads} == {"1", "2", "3"}
@@ -431,7 +431,7 @@ def test_reserved_kept_when_last_unit(inv):
 
 def test_answer_same_moves_sales_of_that_ad(inv):
     a = inv.link_listing("100", title="Peugeot Traveller Sitzbank", price=1299)
-    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank", price=1299)
+    b = inv.link_listing("200", title="Citroen Spacetourer Sitzbank 2+1", price=1299)
     inv.record_sale(ad_id="200", price_eur=1200, gmail_thread_id="t1", source="thread")
     res = inv.answer_question(b["question_id"], same=True)
     assert res["merged"] is True
@@ -610,3 +610,150 @@ def test_suggest_price_ignores_quotes_and_shipping(inv):
                      ("Ok, 300 € passt. Versand 15 € dazu?\n> Unser Preis: 380 €",))
     out = inv.suggest_sale_price("t1")
     assert out["source"] == "buyer_text" and out["price_eur"] == 300.0
+
+
+# ─── решения владельца 20.10 ─────────────────────────────────────────────────
+
+def test_same_core_different_models_is_one_product(inv):
+    a = inv.link_listing("1", title="Peugeot Traveller Expert,Opel Zafira Life,Citroen Sitzbank", price=1299)
+    b = inv.link_listing("2", title="Citroën Spacetourer,Toyota ProAce Verso,Fiat Ulysse Sitzbank", price=1549)
+    assert b["method"] == "normalized" and b["product_id"] == a["product_id"]
+    # другая суть (Leder) — по-прежнему сомнение, не авто-слияние
+    c = inv.link_listing("3", title="Citroën Spacetourer Leder Sitzbank", price=1299)
+    assert c["method"] == "new"
+    # дефект против целого — никогда не один товар
+    d = inv.link_listing("4", title="Opel Zafira Life Sitzbank defekt", price=600)
+    assert d["product_id"] != a["product_id"]
+
+
+def test_non_stock_hidden_and_neutral(inv):
+    r = inv.link_listing("9", title="Garage zu vermieten Brauereistraße", price=80)
+    p = inv.inv.get_product(r["product_id"])
+    assert p["non_stock"] == 1 and p["category"] == "immobilie"
+    assert inv.inv.list_products() == []
+    ctx = inv.ad_context("9")
+    assert ctx["non_stock"] is True and ctx["stock"] == "unknown"
+    assert inv.effective_ad_state("9", "deleted") == "deleted" and inv.prompt_note("9") == ""
+    assert inv.report()["totals"]["products"] == 0 and inv.report()["totals"]["non_stock_hidden"] == 1
+    inv.set_non_stock(r["product_id"], False)
+    assert len(inv.inv.list_products()) == 1
+    for t in ["Großer Kleiderschrank weiß", "Liebevolle Unterstützung beim Gassigehen",
+              "Peugeot Traveller 2.0 BlueHDi 180 Automatik"]:
+        assert inv.detect_category(t) in inv.NON_STOCK_CATEGORIES
+
+
+def test_effective_min_price(inv):
+    pid = inv.inv.create_product(title="Sitzbank", list_price_eur=1000.0)
+    p = inv.inv.get_product(pid)
+    assert inv.effective_min_price(p) == (900.0, "percent")
+    assert inv.effective_min_price(p, 950.0) == (950.0, "cost")
+    inv.inv.update_product(pid, min_price_eur=800.0)
+    assert inv.effective_min_price(inv.inv.get_product(pid), 950.0) == (800.0, "product")
+    inv.link_listing("1", title="Sitzbank Traveller", price=1000)
+    pid2 = inv.inv.get_listing("1")["product_id"]
+    inv.receive(pid2, 1, 950.0)
+    assert inv.ad_context("1")["min_price_eur"] == 950.0 and inv.ad_context("1")["min_price_source"] == "cost"
+
+
+def _kit(inv):
+    a = inv.inv.create_product(title="Einzelsitz", list_price_eur=300.0)
+    b = inv.inv.create_product(title="Sitzbank", list_price_eur=400.0)
+    kit = inv.inv.create_product(title="Komplettsatz", list_price_eur=1000.0)
+    inv.inv.upsert_listing(ad_id="k1", product_id=kit, link_method="operator")
+    return a, b, kit
+
+
+def test_kit_availability_and_sale(inv):
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 2), (b, 1)])
+    assert inv.ad_context("k1")["stock"] == "unknown"          # учёт составляющих не начат
+    inv.receive(a, 5, 100.0)
+    inv.receive(b, 3, 200.0)
+    assert inv.ad_context("k1")["qty"] == 2 and inv.ad_context("k1")["kit"] is True
+    res = inv.record_sale(ad_id="k1", price_eur=1000.0, gmail_thread_id="t1", source="thread")
+    assert res["created"] and res["kit"] and res["product_id"] == kit and res["qty_after"] == 1
+    assert inv.inv.stock_qty(a) == 3 and inv.inv.stock_qty(b) == 2
+    moves = {m["product_id"]: m for m in inv.inv.sales_for_thread("t1")}
+    # 1000 € делится 600 (2 × 300) : 400 (1 × 400)
+    assert moves[a]["unit_price_eur"] == 300.0 and moves[b]["unit_price_eur"] == 400.0
+    assert not inv.record_sale(ad_id="k1", price_eur=1000.0, gmail_thread_id="t1")["created"]
+    # продажа части уменьшает доступность комплекта
+    inv.record_sale(product_id=a, price_eur=300.0, gmail_thread_id="t2")
+    inv.record_sale(product_id=a, price_eur=300.0, gmail_thread_id="t3")
+    assert inv.ad_context("k1")["qty"] == 0 and inv.ad_context("k1")["stock"] == "out_of_stock"
+    rep = inv.report()
+    kit_item = next(i for i in rep["products"] if i["product_id"] == kit)
+    assert kit_item["kit"] and kit_item["kit_sales"] == 1 and kit_item["qty"] == 0
+    assert rep["totals"]["revenue"] == 1600.0       # выручка комплекта — на составляющих, без двойного счёта
+
+
+def test_kit_validation(inv):
+    a, b, kit = _kit(inv)
+    with pytest.raises(ValueError):
+        inv.set_kit(kit, [(kit, 1)])
+    inv.set_kit(kit, [(a, 1)])
+    with pytest.raises(ValueError):
+        inv.set_kit(a, [(b, 1)])                     # a — уже составляющая
+    with pytest.raises(ValueError):
+        inv.receive_batch([(kit, 1)], 100.0)
+
+
+def test_kit_sale_voided_by_sync(inv):
+    import database as db
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 1), (b, 1)])
+    inv.inv.relink_listing("k1", kit)
+    _msg(db, ad_id="k1", title="Komplettsatz", price="1.000 €", thread="t9", status="skipped_sold",
+         sold_price=900.0, sold_at="2026-10-01T12:00:00")
+    assert inv.sync_sales()["recorded"] == 1 and len(inv.inv.sales_for_thread("t9")) == 2
+    with db.get_conn() as conn:
+        conn.execute("UPDATE messages SET status='pending' WHERE gmail_thread_id='t9'")
+    assert inv.sync_sales()["voided"] == 2
+
+
+def test_receive_batch_and_batch_payback(inv):
+    a = inv.inv.create_product(title="Sitzbank", list_price_eur=300.0)
+    b = inv.inv.create_product(title="Tisch", list_price_eur=100.0)
+    c = inv.inv.create_product(title="Gurt")                       # без цены — по средней (200)
+    res = inv.receive_batch([(a, 1), (b, 2), (c, 1)], 1400.0, occurred_at="2026-10-02T00:00:00", note="Traveller на разбор")
+    costs = {m["product_id"]: m["unit_cost_eur"] for m in res["movements"]}
+    # веса 300 : 200 : 200 → 600 / 400 / 400
+    assert costs == {a: 600.0, b: 200.0, c: 400.0}
+    inv.record_sale(product_id=a, price_eur=900.0, gmail_thread_id="x", occurred_at="2026-10-10T00:00:00")
+    inv.record_sale(product_id=b, price_eur=150.0, gmail_thread_id="y", occurred_at="2026-10-11T00:00:00")
+    m = inv.monthly_report(2026, 10)
+    assert m["invested"] == 1400.0 and m["revenue"] == 1050.0
+    bt = m["batches"][0]
+    assert (bt["invested"], bt["revenue"], bt["sold"], bt["left"], bt["payback"]) == (1400.0, 1050.0, 2, 2, "not_yet")
+    assert bt["payback_pct"] == 75.0 and bt["note"] == "Traveller на разбор"
+    inv.record_sale(product_id=c, price_eur=400.0, gmail_thread_id="z", occurred_at="2026-10-12T00:00:00")
+    assert inv.monthly_report(2026, 10)["batches"][0]["payback"] == "paid"
+    with pytest.raises(ValueError):
+        inv.receive_batch([], 10.0)
+
+
+def test_plan_seed_merge_doubtful(inv):
+    import database as db
+    _msg(db, ad_id="1", title="Peugeot Traveller Sitzbank", price="1.299 €", created_at="2026-05-01T00:00:00")
+    _msg(db, ad_id="2", title="Citroen Spacetourer Sitzbank 2+1", price="1.299 €", created_at="2026-06-01T00:00:00")
+    _msg(db, ad_id="3", title="Sitze set Traveller", price="3.000 €", created_at="2026-06-02T00:00:00")
+    _msg(db, ad_id="4", title="Sitze, Sitzbank set Zafira", price="3.500 €", created_at="2026-06-03T00:00:00")
+    plan = inv.plan_seed(inv.seed_ads_from_messages(), merge_doubtful=True)
+    assert len(plan["merged_doubts"]) == 1 and len(plan["groups"]) == 3
+    assert len(plan["doubtful"]) == 1                 # комплекты не сводятся — вопрос остаётся
+
+
+def test_merge_products_repoints_kit_component(inv):
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 1)])
+    a2 = inv.inv.create_product(title="Einzelsitz 2")
+    inv.inv.merge_products(a, a2)
+    assert [c["component_product_id"] for c in inv.inv.kit_components(kit)] == [a2]
+
+
+def test_profile_has_kit_and_min(inv):
+    a, b, kit = _kit(inv)
+    inv.set_kit(kit, [(a, 2), (b, 1)])
+    prof = inv.product_profile(kit)
+    assert prof["kit"] is True and prof["components"] == [{"product_id": a, "per_kit": 2}, {"product_id": b, "per_kit": 1}]
+    assert prof["min_price_eur"] == 900.0 and prof["min_price_source"] == "percent" and prof["non_stock"] is False

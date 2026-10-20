@@ -87,12 +87,40 @@ def ensure_inventory_schema(conn: sqlite3.Connection) -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_product ON inv_movements(product_id, occurred_at)")
-    # Одна продажа на тред: повторная отметка «Продано» / применение найденной продажи
-    # не списывают товар второй раз. Отменённые (voided) не мешают записать заново.
+    _add_column(conn, "inv_products", "non_stock", "INTEGER NOT NULL DEFAULT 0")  # 1 — не запчасть (гараж, личное): скрыт со склада
+    _add_column(conn, "inv_movements", "batch_id", "INTEGER")        # приход из партии inv_batches
+    _add_column(conn, "inv_movements", "kit_product_id", "INTEGER")  # списание составляющей при продаже комплекта
+    # Одна продажа на тред и товар: повторная отметка «Продано» / применение найденной продажи
+    # не списывают второй раз. Продажа комплекта — по движению на каждую составляющую (отсюда
+    # product_id в ключе). Отменённые (voided) не мешают записать заново.
+    conn.execute("DROP INDEX IF EXISTS uq_inv_mov_thread_sale")   # старый ключ — только тред
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_mov_thread_sale ON inv_movements(gmail_thread_id) "
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_mov_thread_product_sale "
+        "ON inv_movements(gmail_thread_id, product_id) "
         "WHERE kind = 'sale' AND gmail_thread_id IS NOT NULL AND voided_at IS NULL"
     )
+    # Партия закупки: «купили сразу несколько позиций за общую сумму» — сумма распределяется
+    # по позициям (inventory.receive_batch), окупаемость считается по партии целиком.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS inv_batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            total_cost_eur REAL,
+            note TEXT,
+            occurred_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            created_by TEXT
+        )
+    """)
+    # Комплект (Komplettsatz): товар, собранный из других товаров. Своего остатка нет —
+    # доступность = min(остаток составляющей // qty); продажа комплекта списывает составляющие.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS inv_kit_components (
+            kit_product_id INTEGER NOT NULL REFERENCES inv_products(id),
+            component_product_id INTEGER NOT NULL REFERENCES inv_products(id),
+            qty INTEGER NOT NULL,
+            PRIMARY KEY (kit_product_id, component_product_id)
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS inv_link_questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,6 +138,12 @@ def ensure_inventory_schema(conn: sqlite3.Connection) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_q_open ON inv_link_questions(ad_id, suggested_product_id) "
         "WHERE resolved_at IS NULL"
     )
+
+
+def _add_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def ensure_schema() -> None:
@@ -169,7 +203,7 @@ def tracked_since(product_id: int, conn: Optional[sqlite3.Connection] = None) ->
 
 
 _PRODUCT_FIELDS = ("title", "category", "condition", "unit_cost_eur", "list_price_eur",
-                   "min_price_eur", "note", "match_key")
+                   "min_price_eur", "note", "match_key", "non_stock")
 
 
 def create_product(*, title: str, **fields: Any) -> int:
@@ -213,10 +247,16 @@ def get_product(product_id: int) -> Optional[sqlite3.Row]:
         return conn.execute("SELECT * FROM inv_products WHERE id = ?", (int(product_id),)).fetchone()
 
 
-def list_products(include_archived: bool = False) -> list[sqlite3.Row]:
-    """Товары с остатком (SUM невоидированных движений) и числом объявлений."""
+def list_products(include_archived: bool = False, include_non_stock: bool = False) -> list[sqlite3.Row]:
+    """Товары с остатком (с начала учёта) и числом объявлений. qty у комплекта — 0 (своего
+    остатка нет, доступность — inventory.stock_view)."""
     ensure_schema()
-    where = "" if include_archived else "WHERE p.archived_at IS NULL"
+    conds = []
+    if not include_archived:
+        conds.append("p.archived_at IS NULL")
+    if not include_non_stock:
+        conds.append("p.non_stock = 0")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     with get_conn() as conn:
         return conn.execute(f"""
             SELECT p.*,
@@ -315,6 +355,7 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
                  source: str = "manual", gmail_thread_id: Optional[str] = None,
                  message_id: Optional[int] = None, ad_id: Optional[str] = None,
                  note: Optional[str] = None, created_by: Optional[str] = None,
+                 batch_id: Optional[int] = None, kit_product_id: Optional[int] = None,
                  conn: Optional[sqlite3.Connection] = None) -> int:
     """Записать движение. Знак qty проверяется по виду: приход > 0, продажа/списание < 0,
     корректировка — любая. Приход и корректировка включают учёт остатка (stock_tracked=1)."""
@@ -335,10 +376,10 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
         cur = c.execute("""
             INSERT INTO inv_movements (product_id, kind, qty, unit_cost_eur, unit_price_eur, source,
                                        gmail_thread_id, message_id, ad_id, note, occurred_at,
-                                       created_at, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       created_at, created_by, batch_id, kit_product_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (int(product_id), kind, qty, unit_cost_eur, unit_price_eur, source, gmail_thread_id,
-              message_id, ad_id, note, norm_ts(occurred_at), now, created_by))
+              message_id, ad_id, note, norm_ts(occurred_at), now, created_by, batch_id, kit_product_id))
         if kind in ("receipt", "adjust"):
             c.execute("UPDATE inv_products SET stock_tracked = 1, updated_at = ? WHERE id = ?",
                       (now, int(product_id)))
@@ -351,12 +392,80 @@ def add_movement(*, product_id: int, kind: str, qty: int, occurred_at: Optional[
 
 
 def sale_for_thread(gmail_thread_id: str) -> Optional[sqlite3.Row]:
+    """Первое (по id) движение продажи треда; у комплекта их несколько — см. sales_for_thread."""
+    rows = sales_for_thread(gmail_thread_id)
+    return rows[0] if rows else None
+
+
+def sales_for_thread(gmail_thread_id: str) -> list[sqlite3.Row]:
     ensure_schema()
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM inv_movements WHERE kind = 'sale' AND gmail_thread_id = ? AND voided_at IS NULL",
-            (gmail_thread_id,),
-        ).fetchone()
+            "SELECT * FROM inv_movements WHERE kind = 'sale' AND gmail_thread_id = ? AND voided_at IS NULL "
+            "ORDER BY id", (gmail_thread_id,),
+        ).fetchall()
+
+
+# ─── партии и комплекты ───────────────────────────────────────────────────────
+
+def create_batch(*, total_cost_eur: Optional[float], occurred_at: Optional[str], note: Optional[str],
+                 created_by: Optional[str], conn: sqlite3.Connection) -> int:
+    cur = conn.execute(
+        "INSERT INTO inv_batches (total_cost_eur, note, occurred_at, created_at, created_by) VALUES (?, ?, ?, ?, ?)",
+        (total_cost_eur, note, norm_ts(occurred_at), _now(), created_by))
+    return int(cur.lastrowid)
+
+
+def list_batches() -> list[sqlite3.Row]:
+    ensure_schema()
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM inv_batches ORDER BY occurred_at, id").fetchall()
+
+
+def kit_components(kit_product_id: int) -> list[sqlite3.Row]:
+    ensure_schema()
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT k.component_product_id, k.qty, p.title, p.list_price_eur, p.stock_tracked "
+            "FROM inv_kit_components k JOIN inv_products p ON p.id = k.component_product_id "
+            "WHERE k.kit_product_id = ? ORDER BY k.component_product_id", (int(kit_product_id),)).fetchall()
+
+
+def kits_containing(component_product_id: int) -> list[int]:
+    ensure_schema()
+    with get_conn() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT kit_product_id FROM inv_kit_components WHERE component_product_id = ?",
+            (int(component_product_id),))]
+
+
+def set_kit_components(kit_product_id: int, components: list[tuple[int, int]]) -> None:
+    """Задать состав комплекта [(товар, шт.)]; пустой список — товар больше не комплект."""
+    ensure_schema()
+    kit = int(kit_product_id)
+    seen: set[int] = set()
+    for cid, q in components:
+        if int(cid) == kit:
+            raise ValueError("комплект не может состоять из самого себя")
+        if int(q) <= 0:
+            raise ValueError("количество составляющей должно быть > 0")
+        if int(cid) in seen:
+            raise ValueError(f"составляющая {cid} указана дважды")
+        seen.add(int(cid))
+    with transaction() as conn:
+        for pid in [kit, *seen]:
+            if conn.execute("SELECT 1 FROM inv_products WHERE id = ?", (pid,)).fetchone() is None:
+                raise ValueError(f"товар {pid} не найден")
+        nested = conn.execute(
+            f"SELECT 1 FROM inv_kit_components WHERE kit_product_id IN ({','.join('?' * len(seen)) or 'NULL'})",
+            list(seen)).fetchone()
+        if nested:
+            raise ValueError("составляющая сама является комплектом — вложенные комплекты не поддерживаются")
+        if conn.execute("SELECT 1 FROM inv_kit_components WHERE component_product_id = ?", (kit,)).fetchone():
+            raise ValueError("этот товар входит в другой комплект — сделать его комплектом нельзя")
+        conn.execute("DELETE FROM inv_kit_components WHERE kit_product_id = ?", (kit,))
+        conn.executemany("INSERT INTO inv_kit_components (kit_product_id, component_product_id, qty) VALUES (?, ?, ?)",
+                         [(kit, cid, int(q)) for cid, q in components])
 
 
 def update_sale_price(movement_id: int, price_eur: Optional[float]) -> None:
@@ -474,6 +583,32 @@ def merge_products(src_id: int, dst_id: int) -> dict[str, int]:
                               (int(dst_id), int(src_id))).rowcount
         n_mov = conn.execute("UPDATE inv_movements SET product_id = ? WHERE product_id = ?",
                              (int(dst_id), int(src_id))).rowcount
+        conn.execute("UPDATE inv_movements SET kit_product_id = ? WHERE kit_product_id = ?",
+                     (int(dst_id), int(src_id)))
+        # Комплекты: src как составляющая → dst (если dst уже в том же комплекте — сложить шт.)
+        for k in conn.execute("SELECT kit_product_id, qty FROM inv_kit_components WHERE component_product_id = ?",
+                              (int(src_id),)).fetchall():
+            if k["kit_product_id"] == int(dst_id):
+                raise ValueError("нельзя слить составляющую с её же комплектом")
+            have = conn.execute("SELECT qty FROM inv_kit_components WHERE kit_product_id = ? "
+                                "AND component_product_id = ?", (k["kit_product_id"], int(dst_id))).fetchone()
+            if have:
+                conn.execute("UPDATE inv_kit_components SET qty = qty + ? WHERE kit_product_id = ? "
+                             "AND component_product_id = ?", (k["qty"], k["kit_product_id"], int(dst_id)))
+                conn.execute("DELETE FROM inv_kit_components WHERE kit_product_id = ? AND component_product_id = ?",
+                             (k["kit_product_id"], int(src_id)))
+            else:
+                conn.execute("UPDATE inv_kit_components SET component_product_id = ? WHERE kit_product_id = ? "
+                             "AND component_product_id = ?", (int(dst_id), k["kit_product_id"], int(src_id)))
+        # src — комплект: состав переезжает к dst, если у dst своего состава нет
+        if conn.execute("SELECT 1 FROM inv_kit_components WHERE kit_product_id = ?", (int(src_id),)).fetchone():
+            if conn.execute("SELECT 1 FROM inv_kit_components WHERE kit_product_id = ?", (int(dst_id),)).fetchone():
+                raise ValueError("оба товара — комплекты: сначала приведите состав к одному")
+            if conn.execute("SELECT 1 FROM inv_kit_components WHERE component_product_id = ?",
+                            (int(dst_id),)).fetchone():
+                raise ValueError("dst входит в другой комплект — сделать его комплектом нельзя")
+            conn.execute("UPDATE inv_kit_components SET kit_product_id = ? WHERE kit_product_id = ?",
+                         (int(dst_id), int(src_id)))
         # Вопросы «src ли это?» теряют смысл: оба варианта теперь один товар
         conn.execute("UPDATE inv_link_questions SET resolved_at = ?, resolution = 'same' "
                      "WHERE resolved_at IS NULL AND ((product_id = ? AND suggested_product_id = ?) "
