@@ -27,10 +27,8 @@ def test_message_cap_override(tmp_db):
 def test_keys_whitelisted_and_validated():
     from web import api_ma
     assert "autopilot_message_cap" in api_ma.ALLOWED_SETTING_KEYS
-    assert "autopilot_shadow_mode" in api_ma.ALLOWED_SETTING_KEYS
+    # теневой режим убран (решение владельца 2026-10-20): автопилот отвечает сам
+    assert "autopilot_shadow_mode" not in api_ma.ALLOWED_SETTING_KEYS
     assert api_ma.VALIDATORS["autopilot_message_cap"]("20") is True
     assert api_ma.VALIDATORS["autopilot_message_cap"]("1001") is False
     assert api_ma.VALIDATORS["autopilot_message_cap"]("abc") is False
-    assert api_ma.VALIDATORS["autopilot_shadow_mode"]("1") is True
-    assert api_ma.VALIDATORS["autopilot_shadow_mode"]("0") is True
-    assert api_ma.VALIDATORS["autopilot_shadow_mode"]("2") is False

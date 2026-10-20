@@ -746,23 +746,24 @@ def ma_sold(msg_id: int, body: SoldBody,
     }
 
 
-def _apply_regenerate_result(msg_id: int, result: "dict[str, Any]") -> None:
-    """Записать результат claude.regenerate_* в db и перевести status в 'edited'."""
-    fields: "dict[str, Any]" = {"status": "edited"}
-    if "ru_answer" in result:
-        fields["ru_answer"] = result["ru_answer"]
-    if "client_answer" in result:
-        fields["de_answer"] = result["client_answer"]
-    if "ru_translation" in result:
-        fields["ru_translation"] = result["ru_translation"]
-    deal: "dict[str, Any]" = {}
-    for src_key in ("deal_summary_ru", "expected_next", "negotiated_price_eur", "client_assessment"):
-        if src_key in result:
-            target_key = "summary_ru" if src_key == "deal_summary_ru" else src_key
-            deal[target_key] = result[src_key]
-    if deal:
-        fields["deal_brief_json"] = json.dumps(deal, ensure_ascii=False)
-    db.update_message(msg_id, **fields)
+def _run_regenerate(res: "dict[str, Any]") -> None:
+    """Регенерация идёт через drafts.regenerate_draft* — с полным контекстом (история треда,
+    бриф объявления, уроки) и сохранением deal_brief; здесь только проверка результата."""
+    if res.get("kind") == "error":
+        raise HTTPException(500, res.get("message", "regenerate failed"))
+
+
+def _deal_brief_from(result: "dict[str, Any]") -> "dict[str, Any]":
+    """deal_brief из ответа LLM: вложенный `deal_brief`, плоские deal_summary_ru/… — фолбэк."""
+    nested = result.get("deal_brief")
+    if isinstance(nested, dict) and nested:
+        return nested
+    return {
+        "summary_ru": result.get("deal_summary_ru", ""),
+        "expected_next": result.get("expected_next", ""),
+        "negotiated_price_eur": result.get("negotiated_price_eur"),
+        "client_assessment": result.get("client_assessment", ""),
+    }
 
 
 @router.post("/messages/{msg_id}/regenerate")
@@ -778,8 +779,7 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    result = claude.regenerate_with_strategy(row, body.strategy)
-    _apply_regenerate_result(msg_id, result)
+    _run_regenerate(scheduler.regenerate_draft(msg_id, body.strategy))
 
     return _message_review_dict(msg_id)
 
@@ -853,8 +853,7 @@ def ma_price(msg_id: int, body: PriceBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    result = claude.regenerate_with_price(row, body.eur)
-    _apply_regenerate_result(msg_id, result)
+    _run_regenerate(scheduler.regenerate_draft_with_price(msg_id, body.eur))
     return _message_review_dict(msg_id)
 
 
@@ -871,8 +870,7 @@ def ma_instruction(msg_id: int, body: InstructionBody,
         raise HTTPException(409, {"holder": foreign, "remaining_min": operator_lock.remaining_min(msg_id)})
     _ensure_lock(msg_id, actor)
 
-    result = claude.regenerate_with_instruction(row, body.text)
-    _apply_regenerate_result(msg_id, result)
+    _run_regenerate(scheduler.regenerate_draft_with_instruction(msg_id, body.text))
     return _message_review_dict(msg_id)
 
 
@@ -1051,12 +1049,7 @@ def ma_autopilot_preview(thread_id: str, body: AutopilotPreviewBody,
             "ru_text": result.get("ru_answer", ""),
             "client_text": result.get("client_answer", ""),
             "ru_translation": result.get("ru_translation", ""),
-            "deal_brief": {
-                "summary_ru": result.get("deal_summary_ru", ""),
-                "expected_next": result.get("expected_next", ""),
-                "negotiated_price_eur": result.get("negotiated_price_eur"),
-                "client_assessment": result.get("client_assessment", ""),
-            },
+            "deal_brief": _deal_brief_from(result),
             "should_stop": result.get("should_stop", False),
             "stop_reason": result.get("stop_reason"),
             "used_web_search": result.get("used_web_search", False),
@@ -1383,7 +1376,7 @@ ALLOWED_SETTING_KEYS = {
     "anthropic_api_key", "telegram_bot_token",
     "google_drive_credentials_json", "google_drive_folder_id", "backup_interval_hours",
     "web_port", "web_host",
-    "autopilot_message_cap", "autopilot_shadow_mode",
+    "autopilot_message_cap",
     # Разведка рынка: без них авто-прогон нельзя было включить из MA вообще —
     # scout_job молча возвращал «auto disabled», данные протухали (2026-07-21)
     "scout_auto_enabled", "scout_interval_hours",
@@ -1410,7 +1403,6 @@ VALIDATORS = {
     "inquiry_max_age_days": lambda v: v.isdigit() and 1 <= int(v) <= 365,
     "max_discount_percent": lambda v: v.replace(".", "", 1).isdigit() and 0 <= float(v) <= 100,
     "autopilot_message_cap": lambda v: v.isdigit() and 0 <= int(v) <= 1000,
-    "autopilot_shadow_mode": lambda v: v in {"0", "1"},
     "scout_auto_enabled": lambda v: v in {"0", "1"},
     # интервал применяется при старте сервиса (job регистрируется в build_scheduler)
     "scout_interval_hours": lambda v: v.isdigit() and 1 <= int(v) <= 168,

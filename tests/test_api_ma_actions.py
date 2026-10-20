@@ -455,29 +455,28 @@ def test_action_endpoints_require_auth(client):
     assert res.status_code == 422
 
 def test_regenerate_valid_strategy(client):
+    """Регенерация идёт через scheduler.regenerate_draft (контекст: история, бриф, уроки)."""
     c, mdb, mtb, msched, mclaude = client
-    mclaude.regenerate_with_strategy.return_value = {
-        "ru_answer": "новый RU",
-        "client_answer": "neue DE",
-        "ru_translation": "новый back",
-        "deal_summary_ru": "обновлено",
-        "expected_next": "ждём",
-        "negotiated_price_eur": 1400,
-        "client_assessment": "серьёзный",
-    }
+    msched.regenerate_draft.return_value = {"kind": "regenerated", "result": {}}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/regenerate",
                  json={"strategy": "harsh"},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    body = res.json()
     # Возвращается полный review payload (как GET /messages/{id})
-    assert body["msg_id"] == 123
-    mclaude.regenerate_with_strategy.assert_called_once()
-    args, kwargs = mclaude.regenerate_with_strategy.call_args
-    assert args[1] == "harsh"
+    assert res.json()["msg_id"] == 123
+    msched.regenerate_draft.assert_called_once_with(123, "harsh")
+    mclaude.regenerate_with_strategy.assert_not_called()  # голый вызов без контекста — нет
     # Lock остаётся (intermediate)
     mtb._release_lock.assert_not_called()
+
+
+def test_regenerate_error_returns_500(client):
+    c, mdb, mtb, msched, mclaude = client
+    msched.regenerate_draft.return_value = {"kind": "error", "message": "LLM упал"}
+    res = c.post("/api/ma/messages/123/regenerate", json={"strategy": "harsh"},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 500 and "LLM упал" in res.text
 
 
 def test_regenerate_invalid_strategy_422(client):
@@ -571,20 +570,13 @@ def test_edit_ru_too_long_422(client):
 
 def test_price_success(client):
     c, mdb, mtb, msched, mclaude = client
-    mclaude.regenerate_with_price.return_value = {
-        "ru_answer": "согласен на 1400",
-        "client_answer": "akzeptiere 1400",
-        "ru_translation": "принимаю 1400",
-        "deal_summary_ru": "", "expected_next": "",
-        "negotiated_price_eur": 1400, "client_assessment": "",
-    }
+    msched.regenerate_draft_with_price.return_value = {"kind": "regenerated", "result": {}}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/price",
                  json={"eur": 1400},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    args, kwargs = mclaude.regenerate_with_price.call_args
-    assert args[1] == 1400
+    msched.regenerate_draft_with_price.assert_called_once_with(123, 1400)
 
 
 def test_price_invalid_negative_422(client):
@@ -607,18 +599,13 @@ def test_price_invalid_too_high_422(client):
 
 def test_instruction_success(client):
     c, mdb, mtb, msched, mclaude = client
-    mclaude.regenerate_with_instruction.return_value = {
-        "ru_answer": "x", "client_answer": "y", "ru_translation": "z",
-        "deal_summary_ru": "", "expected_next": "",
-        "negotiated_price_eur": None, "client_assessment": "",
-    }
+    msched.regenerate_draft_with_instruction.return_value = {"kind": "regenerated", "result": {}}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/instruction",
                  json={"text": "Скажи что доставим завтра"},
                  headers={"X-Telegram-Init-Data": init})
     assert res.status_code == 200
-    args, kwargs = mclaude.regenerate_with_instruction.call_args
-    assert args[1] == "Скажи что доставим завтра"
+    msched.regenerate_draft_with_instruction.assert_called_once_with(123, "Скажи что доставим завтра")
 
 
 def test_instruction_empty_422(client):
