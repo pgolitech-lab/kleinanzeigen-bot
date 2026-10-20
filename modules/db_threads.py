@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from database import DB_PATH, get_conn, norm_name, transaction
+from database import DB_PATH, SENT_STATUSES, get_conn, norm_name, transaction
 
 _log = logging.getLogger(__name__)
 
@@ -346,7 +346,7 @@ def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
 
     Раскладываем сообщения на события:
       - incoming: row с de_client ⇒ event at created_at
-      - outgoing: row с de_answer + status sent/sent_debug ⇒ event at sent_at
+      - outgoing: row с de_answer + status sent/sent_debug/sent_external ⇒ event at sent_at
     Берём последнее событие в каждом треде по `at_time`. Если оно outgoing и старше
     after_days — тред нуждается в пинге (если ещё не предлагали и не auto-ack).
 
@@ -369,7 +369,7 @@ def find_reminder_candidates(after_days: float) -> list[sqlite3.Row]:
               FROM messages
              WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
                AND de_answer IS NOT NULL
-               AND status IN ('sent', 'sent_debug')
+               AND status IN ('sent', 'sent_debug', 'sent_external')
                AND sent_at IS NOT NULL
         ),
         -- MAX() OVER вместо коррелированного подзапроса по CTE (тот был O(N²)).
@@ -432,7 +432,7 @@ def thread_events(gmail_thread_id: str) -> list[dict[str, Any]]:
     """
     rows = thread_history(gmail_thread_id)
     events: list[dict[str, Any]] = []
-    SENT_LIKE = {"sent", "sent_debug", "edited", "approved", "pending", "new"}
+    SENT_LIKE = {*SENT_STATUSES, "edited", "approved", "pending", "new"}
 
     for r in rows:
         # Входящее
@@ -672,7 +672,7 @@ def pipeline_threads() -> list[sqlite3.Row]:
         SELECT gmail_thread_id, sent_at AS at_time, 'out' AS kind FROM messages
          WHERE gmail_thread_id IS NOT NULL AND gmail_thread_id != ''
            AND de_answer IS NOT NULL
-           AND status IN ('sent', 'sent_debug')
+           AND status IN ('sent', 'sent_debug', 'sent_external')
            AND sent_at IS NOT NULL
         UNION ALL
         -- Виртуальное «out»-событие от оператора: «ждём клиента» → ставит секцию 🟢
@@ -694,10 +694,10 @@ def pipeline_threads() -> list[sqlite3.Row]:
     ),
     counts AS (
         SELECT gmail_thread_id,
-               SUM(CASE WHEN status IN ('sent', 'sent_debug') THEN 1 ELSE 0 END) AS any_sent_count,
+               SUM(CASE WHEN status IN ('sent', 'sent_debug', 'sent_external') THEN 1 ELSE 0 END) AS any_sent_count,
                -- Реальный sent: либо in-row.status=sent (наш Sonnet-ответ),
                -- либо outgoing-row не-auto-ack (manual compose/ping).
-               SUM(CASE WHEN status IN ('sent', 'sent_debug')
+               SUM(CASE WHEN status IN ('sent', 'sent_debug', 'sent_external')
                          AND (direction = 'in' OR COALESCE(is_auto_ack, 0) = 0)
                         THEN 1 ELSE 0 END) AS real_sent_count,
                SUM(CASE WHEN direction = 'in'
@@ -980,3 +980,100 @@ def latest_msg_id_for_emails(emails: list[str]) -> int:
             emails,
         ).fetchone()
     return row["m"] or 0
+
+
+# --- РЕПЛИКИ ПРОДАВЦА С САЙТА KLEINANZEIGEN (kab-site) ---
+
+def find_thread_by_ka_conversation(ka_conversation_id: Optional[str]) -> Optional[sqlite3.Row]:
+    """Последняя строка с этим X-Conversation-ID (gmail_thread_id, account_id,
+    buyer_name, ad_id …) — к какому треду относится переписка с сайта. None если нет."""
+    if not ka_conversation_id:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM messages WHERE ka_conversation_id = ? "
+            "AND gmail_thread_id IS NOT NULL AND gmail_thread_id != '' "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (ka_conversation_id,),
+        ).fetchone()
+
+
+def has_our_reply_like(
+    gmail_thread_id: str, text: str, around_iso: Optional[str] = None,
+    window_hours: float = 6.0,
+) -> bool:
+    """Есть ли в треде НАШ уже отправленный ответ с тем же (нормализованным) текстом.
+
+    Сайт показывает и реплики, ушедшие от бота по почте, — импорт их пропускает,
+    иначе один ответ попадёт в историю дважды. around_iso — время реплики на сайте;
+    если задано, сравниваем только ответы в окне ±window_hours."""
+    norm = _normalize_body(text)
+    if not (gmail_thread_id and norm):
+        return False
+    sql = (
+        "SELECT de_answer FROM messages WHERE gmail_thread_id = ? "
+        "AND de_answer IS NOT NULL AND status IN ('sent', 'sent_debug', 'sent_external')"
+    )
+    params: list[Any] = [gmail_thread_id]
+    if around_iso:
+        t = datetime.fromisoformat(around_iso.replace("Z", "+00:00")).replace(tzinfo=None)
+        sql += " AND sent_at >= ? AND sent_at <= ?"
+        params += [(t - timedelta(hours=window_hours)).isoformat(),
+                   (t + timedelta(hours=window_hours)).isoformat()]
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return any(_normalize_body(r["de_answer"]) == norm for r in rows)
+
+
+def add_external_reply(
+    *,
+    account_id: int,
+    gmail_thread_id: str,
+    external_id: str,
+    text: str,
+    sent_at: str,
+    ka_conversation_id: Optional[str] = None,
+    text_ru: Optional[str] = None,
+    source: str = "site",
+) -> tuple[int, bool]:
+    """Сохранить реплику продавца, отправленную НЕ ботом (с сайта Kleinanzeigen).
+
+    Строка: direction='out', status='sent_external', source='site', de_answer=text,
+    sent_at=created_at=время на сайте. Для thread_events/pipeline/напоминалок это
+    обычный наш отправленный ответ. Идемпотентно по (source, external_id).
+    Поля объявления/покупателя копируются из последнего входящего треда.
+    Возвращает (id, created). Дубли наших же почтовых ответов отсекает вызывающий
+    через has_our_reply_like.
+    """
+    if not (gmail_thread_id and external_id and text):
+        raise ValueError("add_external_reply: нужны gmail_thread_id, external_id и text")
+    with transaction() as conn:
+        ctx = conn.execute(
+            "SELECT buyer_name, buyer_display_name, ad_id, ad_url, ad_title, ad_price, "
+            "email_subject, client_lang, ka_conversation_id FROM messages "
+            "WHERE gmail_thread_id = ? AND direction = 'in' "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (gmail_thread_id,),
+        ).fetchone()
+        c = dict(ctx) if ctx else {}
+        row = conn.execute(
+            "INSERT INTO messages (account_id, direction, status, source, external_id, "
+            "gmail_thread_id, ka_conversation_id, de_answer, ru_answer, created_at, sent_at, "
+            "buyer_name, buyer_display_name, ad_id, ad_url, ad_title, ad_price, "
+            "email_subject, client_lang, is_auto_ack, is_reminder) "
+            "VALUES (?, 'out', 'sent_external', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0) "
+            "ON CONFLICT(source, external_id) WHERE source IS NOT NULL AND external_id IS NOT NULL "
+            "DO NOTHING RETURNING id",
+            (account_id, source, str(external_id), gmail_thread_id,
+             ka_conversation_id or c.get("ka_conversation_id"), text, text_ru,
+             sent_at, sent_at, c.get("buyer_name"), c.get("buyer_display_name"),
+             c.get("ad_id"), c.get("ad_url"), c.get("ad_title"), c.get("ad_price"),
+             c.get("email_subject"), c.get("client_lang")),
+        ).fetchone()
+        if row:
+            return row["id"], True
+        existing = conn.execute(
+            "SELECT id FROM messages WHERE source = ? AND external_id = ?",
+            (source, str(external_id)),
+        ).fetchone()
+        return existing["id"], False

@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 # Путь к файлу БД рядом с проектом
 DB_PATH = Path(__file__).parent / "kleinanzeigen.db"
 
+# Статусы «наш ответ ушёл клиенту». sent_external — реплика продавца, отправленная
+# не ботом (импорт с сайта Kleinanzeigen): для истории, pipeline, напоминалок, уроков
+# и досье это такой же наш ответ.
+SENT_STATUSES = ("sent", "sent_debug", "sent_external")
+SENT_STATUSES_SQL = "(" + ", ".join(f"'{s}'" for s in SENT_STATUSES) + ")"
+
 # Одно соединение на поток (APScheduler-воркеры, threadpool FastAPI). Раньше на
 # каждый вызов открывалось новое соединение + PRAGMA journal_mode — ~2 мс на
 # простейший SELECT. Ключ — путь к БД: тесты подменяют DB_PATH на временный файл.
@@ -371,6 +377,27 @@ def init_db() -> None:
         # {summary_ru, expected_next, negotiated_price_eur, client_assessment}.
         # Кэшируется на in-row, обновляется при каждой Sonnet-генерации (новый incoming + регенерации).
         _add_column_if_missing(conn, "messages", "deal_brief_json", "TEXT")
+        # Исходный черновик LLM до правок оператора (llm пишет при генерации, api
+        # сравнивает с отправленным de_answer → урок). NULL у старых строк.
+        _add_column_if_missing(conn, "messages", "llm_draft_de", "TEXT")
+        _add_column_if_missing(conn, "messages", "llm_draft_ru", "TEXT")
+        # id переписки Kleinanzeigen (заголовок X-Conversation-ID) — связь письма
+        # с перепиской на сайте (mail пишет при приёме, kab-site сопоставляет).
+        _add_column_if_missing(conn, "messages", "ka_conversation_id", "TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_ka_conv ON messages(ka_conversation_id)"
+        )
+        # Откуда строка: NULL — почта/бот (как раньше), 'site' — реплика продавца,
+        # импортированная с сайта Kleinanzeigen (direction='out', status='sent_external').
+        # external_id — id реплики на сайте; (source, external_id) уникальны → импорт
+        # идемпотентен.
+        _add_column_if_missing(conn, "messages", "source", "TEXT")
+        _add_column_if_missing(conn, "messages", "external_id", "TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_external "
+            "ON messages(source, external_id) "
+            "WHERE source IS NOT NULL AND external_id IS NOT NULL"
+        )
 
         # card_dispatches — fanout-копии карточек в DM операторов.
         # При DM-mode (telegram_operator_dm_ids задан) каждая карточка ревью
@@ -1003,6 +1030,9 @@ from modules.db_threads import (  # noqa: F401
     get_dossier,
     list_dossier_emails,
     latest_msg_id_for_emails,
+    find_thread_by_ka_conversation,
+    has_our_reply_like,
+    add_external_reply,
 )
 
 # re-export sales-функций (перенесены в modules/db_sales.py)

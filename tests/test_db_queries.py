@@ -681,3 +681,57 @@ def test_dossier_bad_threads_json_logged(tmp_db, caplog):
                                  thread_ids=["t2"])
     assert tmp_db.get_dossier(1, "X")["source_threads_json"] == '["t2"]'
     assert "не список строк" in caplog.text
+
+
+# --- Реплики с сайта (sent_external) и новые колонки messages ---------------------------
+
+def _thread_with_in(db, tid="ts1", at="2026-10-01T10:00:00"):
+    _account(db)
+    return db.add_message(1, "in", status="skipped", gmail_thread_id=tid, de_client="Hallo?",
+                          buyer_name="b@relay", buyer_display_name="B", ad_id="ad9",
+                          ka_conversation_id="conv-1", created_at=at)
+
+
+def test_new_message_columns(tmp_db):
+    with tmp_db.get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(messages)")}
+    assert {"llm_draft_de", "llm_draft_ru", "ka_conversation_id", "source", "external_id"} <= cols
+
+
+def test_external_reply_idempotent_and_context(tmp_db):
+    _thread_with_in(tmp_db)
+    mid, created = tmp_db.add_external_reply(
+        account_id=1, gmail_thread_id="ts1", external_id="site-77",
+        text="Ja, noch da.", sent_at="2026-10-01T11:00:00")
+    again, created2 = tmp_db.add_external_reply(
+        account_id=1, gmail_thread_id="ts1", external_id="site-77",
+        text="Ja, noch da.", sent_at="2026-10-01T11:00:00")
+    assert created and not created2 and mid == again
+    r = tmp_db.get_message(mid)
+    assert (r["direction"], r["status"], r["source"]) == ("out", "sent_external", "site")
+    assert (r["buyer_name"], r["ad_id"], r["ka_conversation_id"]) == ("b@relay", "ad9", "conv-1")
+    assert tmp_db.find_thread_by_ka_conversation("conv-1")["gmail_thread_id"] == "ts1"
+    assert tmp_db.find_thread_by_ka_conversation("nope") is None
+
+
+def test_external_reply_counts_as_our_answer(tmp_db):
+    _thread_with_in(tmp_db, at="2026-01-01T10:00:00")
+    tmp_db.add_external_reply(account_id=1, gmail_thread_id="ts1", external_id="e1",
+                              text="Ja", sent_at="2026-01-01T11:00:00")
+    ev = tmp_db.thread_events("ts1")
+    assert [e["kind"] for e in ev] == ["in", "out"]
+    pipe = [r for r in tmp_db.pipeline_threads() if r["gmail_thread_id"] == "ts1"]
+    assert pipe and pipe[0]["last_event_kind"] == "out" and pipe[0]["has_real_reply"] == 1
+    rem = tmp_db.find_reminder_candidates(1)
+    assert [r["gmail_thread_id"] for r in rem] == ["ts1"]
+
+
+def test_has_our_reply_like(tmp_db):
+    _thread_with_in(tmp_db)
+    mid = tmp_db.add_message(1, "out", status="sent", gmail_thread_id="ts1",
+                             de_answer="Ja,  noch DA.", sent_at="2026-10-01T11:00:00")
+    assert mid
+    assert tmp_db.has_our_reply_like("ts1", "ja, noch da.")
+    assert tmp_db.has_our_reply_like("ts1", "ja, noch da.", around_iso="2026-10-01T12:00:00Z")
+    assert not tmp_db.has_our_reply_like("ts1", "ja, noch da.", around_iso="2026-10-03T12:00:00")
+    assert not tmp_db.has_our_reply_like("ts1", "anders")
