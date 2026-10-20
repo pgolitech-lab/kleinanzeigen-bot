@@ -22,6 +22,7 @@ def _raw(msg_id: str, subject: str = "Nutzer-Anfrage", body: str = "Hallo") -> b
     m["Subject"] = subject
     m["Message-ID"] = msg_id
     m["Date"] = "Tue, 20 Oct 2026 10:00:00 +0200"
+    m["X-Conversation-ID"] = "49sml:conv:" + msg_id.strip("<>@x")
     m.set_content(body)
     return m.as_bytes()
 
@@ -736,3 +737,22 @@ def test_language_guard_prefers_llm_guard_when_present(inc, tmp_db, monkeypatch)
     mid, ap = _ap_msg(tmp_db)
     inc._autopilot_dispatch(mid, ap, _reply())
     assert seen == ["de"] and inc._calls["send"] == [] and inc._calls["review"] == [mid]
+
+
+# ---------------------------------------------------------------------------
+# X-Conversation-ID (id переписки на сайте Kleinanzeigen)
+# ---------------------------------------------------------------------------
+
+def test_fetch_new_extracts_conversation_id(fake_imap):
+    res = gmail.fetch_new("me@gmail.com", "pw")
+    assert res[0]["kz_conversation_id"] == "49sml:conv:a"
+
+
+def test_conversation_id_saved_when_column_exists(inc, tmp_db, monkeypatch):
+    monkeypatch.setattr(inc, "_MESSAGES_COLUMNS", set())
+    inc._process_incoming(ACC, _email(kz_conversation_id="49sml:1:2"))  # колонки нет — не падаем
+    with tmp_db.get_conn() as conn:
+        conn.execute("ALTER TABLE messages ADD COLUMN kz_conversation_id TEXT")
+    inc._process_incoming(ACC, _email(gmail_message_id="<m2@x>", gmail_thread_id="T2", uid="9",
+                                      kz_conversation_id="49sml:1:2"))
+    assert tmp_db.find_by_gmail_message_id("<m2@x>")["kz_conversation_id"] == "49sml:1:2"
