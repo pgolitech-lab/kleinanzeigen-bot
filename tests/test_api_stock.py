@@ -137,3 +137,14 @@ def test_kit_get_and_hidden_list(c):
     assert c.get("/api/ma/stock/hidden", headers=H()).json()["count"] == 0
     c.post(f"/api/ma/stock/products/{a}/non-stock", json={}, headers=H())
     assert [i["id"] for i in c.get("/api/ma/stock/hidden", headers=H()).json()["items"]] == [a]
+
+
+def test_hard_run_ids_and_not_found(c):
+    big = "99999999999999999999"
+    assert c.get(f"/api/ma/stock/products/{big}", headers=H()).status_code in (404, 422)
+    assert c.get(f"/api/ma/messages/{big}", headers=H()).status_code in (404, 422)
+    assert c.post("/api/ma/stock/products/987654/receipt", json={"qty": 1}, headers=H()).status_code == 404
+    assert c.post("/api/ma/stock/products/987654/archive", json={}, headers=H()).status_code == 404
+    r = c.post("/api/ma/stock/products", content='{"title": "x", "list_price_eur": NaN}',
+               headers={**H(), "Content-Type": "application/json"})
+    assert r.status_code == 422

@@ -1224,8 +1224,13 @@ def ma_lang_check(msg_id: int, body: "LangCheckBody | None" = None,
 def ma_skip(msg_id: int, user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
     if db.get_message(msg_id) is None:
         raise HTTPException(404, "message not found")
-    if db.get_message(msg_id)["status"] == SEND_QUEUED:
+    row = db.get_message(msg_id)
+    if row["status"] == SEND_QUEUED:
         raise HTTPException(409, "Письмо в очереди на отправку — сначала нажмите «Отменить»")
+    if _already_sent(row):  # пропуск ушедшего письма испортил бы его статус
+        raise HTTPException(409, f"Письмо уже отправлено ({row['status']}) — пропустить нельзя")
+    if str(row["status"]).startswith("skipped"):
+        raise HTTPException(409, "Письмо уже пропущено")
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
 
@@ -1264,6 +1269,12 @@ def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
     actor = actor_from_user(user)
     _claim_or_409(msg_id, actor)
     try:
+        prior = _existing_separate_sale(thread_id) if _already_sent(latest_in) else None
+        if prior:
+            # повтор «Продано» (двойной тап, повтор после обрыва): продажа уже записана — не удваиваем выручку
+            return {"ok": True, "already": True, "status": "skipped_sold", "sold_price_eur": prior["price"],
+                    "msg_id": msg_id, "closed_other_threads": [], "separate_sale": prior["sale"],
+                    "stock": None, "others_kept_stock_left": None}
         if _already_sent(latest_in):
             # Последнее письмо уже отвечено: mark_thread_sold перевёл бы НАШ отправленный ответ
             # в skipped_sold (он пропал бы из ленты, «ответили», напоминаний). Пока db не умеет
@@ -1301,6 +1312,18 @@ def ma_thread_sold(thread_id: str, body: ThreadSoldBody,
     return {"ok": True, "status": "skipped_sold", "sold_price_eur": float(price),
             "msg_id": msg_id, "closed_other_threads": closed_other, "separate_sale": sale_ref,
             "stock": stock, **_others_kept(b.close_other_threads_for_ad, closed_other, stock)}
+
+
+def _existing_separate_sale(thread_id: str) -> "dict[str, Any] | None":
+    """Продажа отдельной строкой по этому треду уже есть (notes «тред <id>…»)."""
+    prefix = f"тред {thread_id}"
+    with db.get_conn() as conn:
+        r = conn.execute("SELECT id, gmail_thread_id, sold_price_eur FROM messages WHERE status='skipped_sold' "
+                         "AND gmail_thread_id LIKE 'manual-%' AND substr(extra_notes, 1, ?) = ? "
+                         "ORDER BY id LIMIT 1", (len(prefix), prefix)).fetchone()
+    if not r:
+        return None
+    return {"price": r["sold_price_eur"], "sale": {"msg_id": r["id"], "thread_id": r["gmail_thread_id"]}}
 
 
 def _others_kept(requested: bool, closed_other: list, stock: "dict | None") -> "dict[str, Any]":
