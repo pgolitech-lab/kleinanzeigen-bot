@@ -29,7 +29,12 @@ def client():
         mdb.find_related_inquiries.return_value = []
         mdb.get_thread_autopilot.return_value = None
         mdb.get_account.return_value = _row(name="main", gmail_email="us@gmail.com")
+        mdb.pipeline_threads.return_value = []
+        mdb.get_client_profile.return_value = None
+        mdb.get_dossier_for_email.return_value = None
         from web.app import app
+        from web.api_ma import invalidate_pipeline_cache
+        invalidate_pipeline_cache()
         yield TestClient(app), mdb
 
 
@@ -211,15 +216,17 @@ def test_draft_not_shown_in_feed_as_sent(client):
     assert [e["text"] for e in ev] == ["Hallo", "Sent", "Site"]
 
 
-def test_open_has_deal_and_dossier(client):
+def test_open_header_has_deal_tags_note_dossier(client):
+    """Шапка треда — в тех полях, что читает thread.js: числа торга, теги, заметка, досье-списком."""
     c, mdb = client
     _open_thread_setup(mdb)
-    mdb.get_dossier_for_email.return_value = {"summary_ru": "постоянный клиент"}
-    mdb.pipeline_threads.return_value = []
-    from web.api_ma import invalidate_pipeline_cache
-    invalidate_pipeline_cache()
+    mdb.get_dossier_for_email.return_value = {"id": 1, "summary_md": "Постоянный клиент,\nторгуется",
+                                              "facts_json": '[{"date": "2026-09", "text": "купил стол"}]'}
+    mdb.get_client_profile.return_value = {"tags_json": '["Торгуется"]', "note": "звонить вечером"}
     res = c.post("/api/ma/threads/t1/open", json={"acquire": False},
                  headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()
-    assert res["dossier"] == {"summary_ru": "постоянный клиент"}
-    assert res["deal"]["ad_price_eur"] == 1500 and res["deal"]["offer_eur"] is None
+    h = res["header"]
+    assert h["dossier"] == ["Постоянный клиент, торгуется", {"date": "2026-09", "text": "купил стол"}]
+    assert h["tags"] == ["Торгуется"] and h["client_note"] == "звонить вечером"
+    assert h["ad_price_eur"] == 1500 and h["offer_eur"] is None and "floor_eur" in h
     mdb.get_dossier_for_email.assert_called_once_with("osman@x.com")

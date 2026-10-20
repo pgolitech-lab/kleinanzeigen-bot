@@ -653,6 +653,6 @@ def test_instruction_empty_422(client):
 def test_send_reports_kind_and_send_mode(client):
     """Фронт честно пишет, что произошло: kind от send_one + режим отправки."""
     c, mdb, mtb, msched, mclaude = client
-    msched.send_one.return_value = {"kind": "not_sent_disabled", "message": "выключено"}
+    msched.send_one.return_value = {"kind": "skipped", "mode": "disabled", "message": "выключено"}
     body = c.post("/api/ma/messages/123/send", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)}).json()
-    assert body["kind"] == "not_sent_disabled" and body["send_mode"] == "disabled"
+    assert body["kind"] == "skipped" and body["mode"] == "disabled"  # utils.sendOutcome читает res.mode
