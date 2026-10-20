@@ -14,7 +14,6 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
 import hashlib
-import inspect
 import json
 import logging
 import re
@@ -120,16 +119,6 @@ def _pipeline_rows() -> list:
     return rows
 
 
-def _active_autopilot_threads(rows: list) -> set[str]:
-    """Треды с активным автопилотом. Если db отдаёт колонку autopilot_active (JOIN) — берём её,
-    иначе один запрос на все треды (а не get_thread_autopilot на каждый)."""
-    if rows and "autopilot_active" in rows[0].keys():
-        return {r["gmail_thread_id"] for r in rows if r["autopilot_active"]}
-    with db.get_conn() as conn:
-        return {r["gmail_thread_id"] for r in conn.execute(
-            "SELECT gmail_thread_id FROM thread_autopilot WHERE active=1").fetchall()}
-
-
 def _preview(text: "str | None") -> "str | None":
     if not text:
         return text
@@ -137,8 +126,8 @@ def _preview(text: "str | None") -> "str | None":
     return t if len(t) <= _PIPELINE_PREVIEW_CHARS else t[:_PIPELINE_PREVIEW_CHARS] + "…"
 
 
-def _row_to_pipeline_item(row: Any, is_autopilot: bool) -> dict[str, Any]:
-    """Конвертация row из db.pipeline_threads в API-форму."""
+def _row_to_pipeline_item(row: Any) -> dict[str, Any]:
+    """Конвертация row из db.pipeline_threads (LEFT JOIN thread_autopilot) в API-форму."""
     keys = row.keys()
     return {
         "thread_id": row["gmail_thread_id"],
@@ -151,7 +140,7 @@ def _row_to_pipeline_item(row: Any, is_autopilot: bool) -> dict[str, Any]:
         "last_event_at": row["last_event_at"],
         "last_event_kind": row["last_event_kind"],
         "pending_drafts_count": row["pending_drafts_count"],
-        "is_autopilot": is_autopilot,
+        "is_autopilot": bool(row["autopilot_active"]),
         "account_id": row["account_id"] if "account_id" in keys else None,
         "ru_client": _preview(row["ru_client"]) if "ru_client" in keys else None,
         "is_pinned": bool(row["is_pinned"]) if "is_pinned" in keys else False,
@@ -167,12 +156,11 @@ def ma_pipeline(request: Request, user: dict = Depends(verify_init_data_dep)) ->
     ETag: если ничего не изменилось — 304 без тела (экран опрашивается часто).
     """
     rows = _pipeline_rows()
-    autopilot = _active_autopilot_threads(rows)
     pinned: list[dict[str, Any]] = []
     red: list[dict[str, Any]] = []
     green: list[dict[str, Any]] = []
     for row in rows:
-        item = _row_to_pipeline_item(row, row["gmail_thread_id"] in autopilot)
+        item = _row_to_pipeline_item(row)
         if item["is_pinned"]:
             pinned.append(item)
         elif item["last_event_kind"] == "in":
@@ -218,26 +206,15 @@ def _related_match(row: Any) -> dict[str, Any]:
     }
 
 
-def _db_has_include_maybe() -> bool:
-    try:
-        return "include_maybe" in inspect.signature(db.find_related_inquiries).parameters
-    except (TypeError, ValueError):  # мок в тестах
-        return True
-
-
 def _related(buyer_email: "str | None", display_name: "str | None", *,
              exclude_thread_id: "str | None" = None, account_id: "int | None" = None) -> dict[str, Any]:
     """Другие треды клиента: `matches` — точно он (тот же email), `maybe_same` — возможно тот же
     покупатель (то же имя в том же аккаунте: relay-email Kleinanzeigen свой на каждое объявление)."""
     if not buyer_email:
         return {"buyer_display_name": display_name, "matches": [], "maybe_same": []}
-    if _db_has_include_maybe():
-        rows = db.find_related_inquiries(
-            buyer_email, exclude_thread_id=exclude_thread_id, limit=10,
-            display_name=display_name, account_id=account_id, include_maybe=True)
-    else:
-        # TODO(api): убрать ветку после слияния opt/db (там появился include_maybe)
-        rows = db.find_related_inquiries(buyer_email, exclude_thread_id=exclude_thread_id, limit=10)
+    rows = db.find_related_inquiries(
+        buyer_email, exclude_thread_id=exclude_thread_id, limit=10,
+        display_name=display_name, account_id=account_id, include_maybe=True)
     exact, maybe = [], []
     for r in rows:
         is_maybe = "maybe_same" in r.keys() and bool(r["maybe_same"])
@@ -266,6 +243,7 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
         "ad_url": last_in["ad_url"] if "ad_url" in last_in.keys() else None,
         "buyer_display_name": last_in["buyer_display_name"],
         "buyer_email": last_in["buyer_name"] if "buyer_name" in last_in.keys() else None,
+        "account_id": last_in["account_id"] if "account_id" in last_in.keys() else None,
         "account_name": account["name"] if account is not None else None,
         "account_email": account["gmail_email"] if account is not None else None,
         "is_autopilot": is_autopilot,
@@ -307,9 +285,44 @@ def ma_bulk_action(
     return {"ok": True, "affected": len(body.thread_ids)}
 
 
+_DRAFT_STATUSES = {"pending", "new", "edited", "approved"}
+
+
 @router.get("/threads/{thread_id}")
-def ma_thread(thread_id: str, user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
-    return _thread_dict(thread_id)
+def ma_thread(thread_id: str, focus: "int | None" = None, acquire: bool = False,
+              user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Тред. С focus/acquire — всё для открытия экрана одним запросом (вместо thread → message → lock):
+
+    - review: карточка черновика focus (или последнего неотправленного черновика треда), иначе null;
+    - lock (только при acquire=1): попытка взять лок на этот черновик. Занят другим — не ошибка,
+      acquired=false и holder (экран откроется только для чтения).
+    """
+    data = _thread_dict(thread_id)
+    if focus is None and not acquire:
+        return data
+    msg_id = focus
+    if msg_id is None:
+        drafts = [e["msg_id"] for e in data["events"]
+                  if e["kind"] == "in" and e["msg_id"] and e["status"] in _DRAFT_STATUSES]
+        msg_id = drafts[-1] if drafts else None
+    if msg_id is None:
+        data["review"], data["lock"] = None, None
+        return data
+    if acquire:
+        row = db.get_message(msg_id)
+        if row is None or row["gmail_thread_id"] != thread_id:
+            raise HTTPException(404, "message not found in thread")
+        actor = actor_from_user(user)
+        # Отправленное/закрытое не лочим — его всё равно нельзя править
+        foreign = None if _is_answered(row) else telegram_bot._claim_lock(msg_id, actor)
+        acquired = not _is_answered(row) and foreign is None
+        data["lock"] = {"acquired": acquired,
+                        "holder": actor if acquired else foreign,
+                        "remaining_min": operator_lock.remaining_min(msg_id)}
+    else:
+        data["lock"] = None
+    data["review"] = _message_review_dict(msg_id)
+    return data
 
 
 @router.get("/clients/{email}/history")
@@ -695,8 +708,16 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
     telegram_bot._release_lock(msg_id)
 
     fresh = db.get_message(msg_id)
-    return {"ok": True, "status": fresh["status"] if fresh else "sent",
-            "closed_drafts": closed_drafts}
+    status = fresh["status"] if fresh else "sent"
+    if status in ("sent", "sent_debug"):
+        # Оператор переписал черновик LLM → урок для следующих ответов (Sonnet, в фоне; ошибка — в лог)
+        telegram_bot.run_in_background(_learn_from_sent, msg_id)
+    return {"ok": True, "status": status, "closed_drafts": closed_drafts}
+
+
+def _learn_from_sent(msg_id: int) -> None:
+    from modules import llm_memory
+    llm_memory.learn_from_sent(msg_id)
 
 
 class TranslateDraftBody(BaseModel):
@@ -861,19 +882,9 @@ def _client_lang(row: Any) -> str:
 
 
 def _translate_with_back(text: str, target_lang: str, *, context: "str | None" = None) -> "tuple[str, str]":
-    """RU → язык клиента + обратный перевод на RU. Один вызов LLM (claude.translate_with_back),
-    в сборке без неё — два translate_only."""
-    both = getattr(claude, "translate_with_back", None)
-    if callable(both):
-        res = both(text, target_lang, source_lang="ru", context=context)
-        return (res.get("translation") or "", res.get("back_translation") or "")
-    # TODO(api): убрать ветку после слияния opt/llm
-    tr = claude.translate_only(text, target_lang=target_lang, source_lang="ru", context=context)
-    translated = tr.get("translation", "") if isinstance(tr, dict) else str(tr)
-    if target_lang == "ru":
-        return translated, translated
-    back = claude.translate_only(translated, target_lang="ru", source_lang=target_lang)
-    return translated, (back.get("translation", "") if isinstance(back, dict) else str(back))
+    """RU → язык клиента + обратный перевод на RU одним вызовом LLM."""
+    res = claude.translate_with_back(text, target_lang, source_lang="ru", context=context)
+    return (res.get("translation") or "", res.get("back_translation") or "")
 
 
 @router.post("/messages/{msg_id}/edit-ru")
@@ -1183,6 +1194,7 @@ def ma_suggest_reply(thread_id: str,
                  "Для нового сообщения используйте «Написать».")
 
     msg_id = latest_in["id"]
+    _claim_or_409(msg_id, actor_from_user(user))  # не перезаписывать черновик, который правит другой
     result = scheduler.regenerate_draft(msg_id, "regen")
     if result.get("kind") == "error":
         raise HTTPException(500, result.get("message", "regenerate failed"))
@@ -1461,7 +1473,6 @@ ALLOWED_SETTING_KEYS = {
     "chat_meta_font_em", "chat_secondary_font_em",
     "api_balance_snapshot_usd", "api_balance_snapshot_at",
     "anthropic_api_key", "telegram_bot_token",
-    "google_drive_credentials_json", "google_drive_folder_id", "backup_interval_hours",
     "web_port", "web_host",
     "autopilot_message_cap",
     # Разведка рынка: без них авто-прогон нельзя было включить из MA вообще —
@@ -1472,7 +1483,6 @@ ALLOWED_SETTING_KEYS = {
 
 SENSITIVE_KEYS = {
     "anthropic_api_key", "telegram_bot_token",
-    "google_drive_credentials_json",
 }
 
 def _is_float_in(raw: str, lo: float, hi: float) -> bool:

@@ -560,11 +560,11 @@ def check_llm_login_job() -> str:
     ok, msg = llm.status()
     st = _llm_login_state
     now = time.time()
-    st["checked_at"] = datetime.utcnow().isoformat(timespec="seconds")
+    checked_at = datetime.utcnow().isoformat(timespec="seconds")
     if ok:
         if not st["ok"] and _notify_sent("🟩 <b>Подписка Claude снова подключена</b> — генерация ответов работает."):
             logger.info("LLM: вход в подписку восстановлен")
-        st.update(ok=True, alerted_at=0.0, check_fails=0)
+        st.update(ok=True, alerted_at=0.0, check_fails=0, checked_at=checked_at)
         return msg
     if msg.startswith("Ошибка проверки"):
         st["check_fails"] += 1
@@ -573,6 +573,7 @@ def check_llm_login_job() -> str:
             return msg
     else:
         st["check_fails"] = 0
+    st["checked_at"] = checked_at  # время последнего ОПРЕДЕЛЁННОГО результата (не сбоя проверки)
     if st["ok"] or not st["alerted_at"] or now - st["alerted_at"] >= LLM_LOGIN_REMIND_SEC:
         logger.error("LLM: нет входа в подписку Claude: %s", msg)
         if _notify_sent("🟥 <b>Нет входа в подписку Claude</b> — черновики и переводы не генерируются.\n"

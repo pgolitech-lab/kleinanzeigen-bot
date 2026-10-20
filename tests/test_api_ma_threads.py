@@ -109,3 +109,76 @@ def test_thread_requires_auth(client):
     c, mdb = client
     res = c.get("/api/ma/threads/abc")
     assert res.status_code == 422
+
+
+def _open_thread_setup(mdb, draft_status="pending", sent_at=None):
+    last_in = _row(id=42, gmail_thread_id="t1", direction="in", ad_title="Sitzbank", ad_price="1500€",
+                   ad_url=None, buyer_display_name="Osman", buyer_name="osman@x.com", account_id=3)
+    mdb.thread_history.return_value = [last_in]
+    mdb.thread_events.return_value = [
+        {"ts": "2026-05-10T10:00:00", "kind": "in", "text": "Hallo", "ru_text": "Привет",
+         "is_auto_ack": False, "row": _row(id=42, status=draft_status)},
+    ]
+    mdb.get_message.return_value = _row(
+        id=42, gmail_thread_id="t1", status=draft_status, sent_at=sent_at, sent_message_id=None,
+        ad_title="Sitzbank", ad_price="1500€", ad_url=None, ad_id=None, buyer_display_name="Osman",
+        buyer_name="osman@x.com", client_lang="de", de_client="Hallo", ru_client="Привет",
+        ru_answer="", de_answer="Guten Tag", ru_translation="", deal_brief_json=None,
+        extra_notes=None, is_auto_ack=0, account_id=3)
+
+
+def test_thread_header_has_account_id(client):
+    c, mdb = client
+    _open_thread_setup(mdb)
+    res = c.get("/api/ma/threads/t1", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.json()["header"]["account_id"] == 3
+    assert "review" not in res.json()  # без focus/acquire — прежний ответ
+
+
+def test_open_thread_in_one_request(client):
+    """thread + review + lock одним запросом; черновик выбирается сам, если focus не задан."""
+    c, mdb = client
+    _open_thread_setup(mdb)
+    with patch("web.api_ma.telegram_bot") as mtb, patch("web.api_ma.operator_lock") as mol:
+        mtb._claim_lock.return_value = None
+        mol.remaining_min.return_value = 5
+        mol.state.return_value = ("@pgtest#999", 0)
+        res = c.get("/api/ma/threads/t1?acquire=1",
+                    headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    body = res.json()
+    assert res.status_code == 200
+    assert body["review"]["msg_id"] == 42
+    assert body["lock"] == {"acquired": True, "holder": "@pgtest#999", "remaining_min": 5}
+    mtb._claim_lock.assert_called_once_with(42, "@pgtest#999")
+
+
+def test_open_thread_locked_by_other_is_read_only(client):
+    c, mdb = client
+    _open_thread_setup(mdb)
+    with patch("web.api_ma.telegram_bot") as mtb, patch("web.api_ma.operator_lock") as mol:
+        mtb._claim_lock.return_value = "@other#1"
+        mol.remaining_min.return_value = 4
+        mol.state.return_value = ("@other#1", 0)
+        res = c.get("/api/ma/threads/t1?focus=42&acquire=1",
+                    headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 200
+    assert res.json()["lock"] == {"acquired": False, "holder": "@other#1", "remaining_min": 4}
+
+
+def test_open_thread_does_not_lock_sent_message(client):
+    c, mdb = client
+    _open_thread_setup(mdb, draft_status="sent", sent_at="2026-10-19T10:00:00")
+    with patch("web.api_ma.telegram_bot") as mtb, patch("web.api_ma.operator_lock") as mol:
+        mol.remaining_min.return_value = 0
+        mol.state.return_value = None
+        res = c.get("/api/ma/threads/t1?focus=42&acquire=1",
+                    headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.json()["lock"]["acquired"] is False
+    mtb._claim_lock.assert_not_called()
+
+
+def test_open_thread_without_drafts(client):
+    c, mdb = client
+    _open_thread_setup(mdb, draft_status="sent", sent_at="x")
+    res = c.get("/api/ma/threads/t1?acquire=1", headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.json()["review"] is None and res.json()["lock"] is None

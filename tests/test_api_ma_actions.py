@@ -82,6 +82,23 @@ def test_send_success(client):
     mtb._release_lock.assert_called_once_with(123)
 
 
+def test_send_learns_lesson_in_background_only_when_sent(client):
+    """После УСПЕШНОЙ отправки — learn_from_sent в фоне; не отправлено — урока нет."""
+    from web import api_ma
+    c, mdb, mtb, msched, mclaude = client
+    msched.send_one.return_value = {"kind": "ok", "message": "sent"}
+    h = {"X-Telegram-Init-Data": make_init_data(TEST_USER)}
+    pending, sent = _full_msg_row(), _full_msg_row(status="sent")
+    mdb.get_message.side_effect = [pending, sent]
+    assert c.post("/api/ma/messages/123/send", headers=h).status_code == 200
+    mtb.run_in_background.assert_called_once_with(api_ma._learn_from_sent, 123)
+
+    mtb.run_in_background.reset_mock()
+    mdb.get_message.side_effect = [pending, _full_msg_row(status="not_sent_disabled")]
+    assert c.post("/api/ma/messages/123/send", headers=h).status_code == 200
+    mtb.run_in_background.assert_not_called()
+
+
 def test_send_blocks_cyrillic_to_german_client(client):
     """Кириллический текст немецкому клиенту без force → 409, ничего не отправлено."""
     c, mdb, mtb, msched, mclaude = client
@@ -544,17 +561,6 @@ def test_edit_ru_success(client):
     assert kwargs["de_answer"] == "Neue DE Text"
     assert kwargs["ru_translation"] == "Новый back"
     assert kwargs["status"] == "edited"
-
-
-def test_edit_ru_falls_back_to_two_calls_without_translate_with_back(client):
-    c, mdb, mtb, msched, mclaude = client
-    del mclaude.translate_with_back  # сборка без opt/llm
-    mclaude.translate_only.side_effect = ["Neue DE Text", "Новый back"]
-    res = c.post("/api/ma/messages/123/edit-ru", json={"text": "Новый RU текст"},
-                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
-    assert res.status_code == 200
-    assert mclaude.translate_only.call_count == 2
-    assert mdb.update_message.call_args.kwargs["de_answer"] == "Neue DE Text"
 
 
 def test_edit_de_success(client):

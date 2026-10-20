@@ -26,6 +26,7 @@ def _row(**overrides):
         "pending_drafts_count": 1,
         "any_sent_count": 0,
         "real_sent_count": 0,
+        "autopilot_active": 0,  # LEFT JOIN thread_autopilot в db.pipeline_threads
     }
     defaults.update(overrides)
     row = MagicMock()
@@ -106,24 +107,8 @@ def test_pipeline_serialises_required_fields(client):
     assert item["is_autopilot"] is False
 
 
-def test_pipeline_autopilot_flag_true_when_row_active(client):
-    """Без колонки autopilot_active — один запрос активных автопилотов на весь pipeline."""
-    c, mdb = client
-    mdb.pipeline_threads.return_value = [_row(id=1, gmail_thread_id="ap_thread"),
-                                         _row(id=2, gmail_thread_id="other")]
-    conn = mdb.get_conn.return_value.__enter__.return_value
-    conn.execute.return_value.fetchall.return_value = [{"gmail_thread_id": "ap_thread"}]
-    init = make_init_data(TEST_USER)
-    res = c.get("/api/ma/pipeline", headers={"X-Telegram-Init-Data": init})
-    assert res.status_code == 200
-    flags = {i["thread_id"]: i["is_autopilot"] for i in res.json()["red"]}
-    assert flags == {"ap_thread": True, "other": False}
-    assert conn.execute.call_count == 1  # не N+1
-    mdb.get_thread_autopilot.assert_not_called()
-
-
 def test_pipeline_autopilot_from_join_column(client):
-    """Если db отдаёт autopilot_active (LEFT JOIN) — отдельного запроса нет."""
+    """Автопилот — из колонки autopilot_active (LEFT JOIN), без запроса на каждый тред."""
     c, mdb = client
     mdb.pipeline_threads.return_value = [_row(gmail_thread_id="ap", autopilot_active=1)]
     init = make_init_data(TEST_USER)
@@ -200,6 +185,7 @@ def _row_with_flags(**overrides):
         "pending_drafts_count": 0,
         "any_sent_count": 1,
         "real_sent_count": 1,
+        "autopilot_active": 0,
         "is_pinned": 0,
         "operator_unread": 0,
     }
