@@ -7,7 +7,9 @@ const ALLOWED_TAGS = ["Серьёзный", "Торгуется", "Тянет в
 
 const STATUS_LABELS = {
   sent: ["grn", "отправлен"],
-  sent_debug: ["grn", "отправлен"],
+  sent_debug: ["amb", "на тест-адрес"],     // redirect: клиенту не ушло
+  sent_external: ["grn", "из приложения"],  // ответили на сайте/в приложении KZ
+  not_sent_disabled: ["red", "не отправлен"],
   pending: ["amb", "ждёт"],
   new: ["amb", "ждёт"],
   edited: ["amb", "ждёт"],

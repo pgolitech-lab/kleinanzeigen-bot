@@ -86,7 +86,9 @@ function eventBubble(event, header, latestPendingMsgId) {
   if (!isIn) bubble.classList.add("out");
   let who = isIn
     ? (header.buyer_display_name ?? "клиент")
-    : `${header.account_name ?? "мы"}${event.is_auto_ack ? " · авто-привет" : ""}`;
+    : `${header.account_name ?? "мы"}${event.is_auto_ack ? " · авто-привет" : ""}` +
+      // ответ, написанный на сайте/в приложении Kleinanzeigen (не через MA)
+      (event.status === "sent_external" ? " · из приложения" : "");
   if (isPending) who += " · 📝";
   bubble.querySelector(".who").textContent = who;
   bubble.querySelector(".when").textContent = berlinTime(event.ts);
@@ -373,7 +375,10 @@ function renderThread(mount, params, data, latestPendingMsgId, review, acquired,
     container.appendChild(el(`<p class="text-muted">Событий пока нет.</p>`));
   } else {
     // Sort events by ts ASC — newest at bottom (chat-style)
-    const sortedEvents = [...data.events].sort((a, b) => {
+    // Исходящее с pending-статусом — это НЕ отправленное письмо, а черновик
+    // (сервер кладёт его в ленту, thread_events SENT_LIKE). Отправленным пузырём
+    // его не рисуем: текущий черновик показан в карточке черновика (B-02).
+    const sortedEvents = data.events.filter(e => !(e.kind === "out" && PENDING_STATUSES.has(e.status))).sort((a, b) => {
       const ta = a.ts || "";
       const tb = b.ts || "";
       if (ta < tb) return -1;
