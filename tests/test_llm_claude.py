@@ -290,3 +290,15 @@ def test_regenerate_refuses_row_with_sent_message_id(tmp_db, fake_llm):
     with pytest.raises(RuntimeError, match="уже обработано"):
         claude.regenerate_with_strategy(tmp_db.get_message(mid), "short")
     assert fake_llm.calls == []
+
+
+def test_ad_state_from_latest_title_and_sold_brief(tmp_db):
+    t = "thr-st"
+    old = tmp_db.add_message(1, "in", gmail_thread_id=t, ad_id="A1", ad_title="Sitzbank Traveller",
+                             de_client="Noch da?", created_at="2026-10-01T10:00")
+    tmp_db.add_message(1, "in", gmail_thread_id=t, ad_id="A1", ad_title="Gelöscht • Sitzbank Traveller",
+                       de_client="Hallo?", created_at="2026-10-02T10:00")
+    assert claude.ad_state_for(tmp_db.get_message(old)) == "deleted"
+    tmp_db.upsert_ad_brief(ad_id="A1", ad_title="x", ad_url="", ad_price="", brief_md="b", key_facts_json="{}")
+    tmp_db.mark_ad_sold("A1")
+    assert claude.ad_state_for(tmp_db.get_message(old)) == "sold"

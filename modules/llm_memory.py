@@ -7,11 +7,13 @@
 #                                     Haiku формулирует урок → db.add_lesson (вызывает api/outgoing)
 #   save_lesson(**fields)           → db.add_lesson, лишние поля (колонок ещё нет) отбрасываются
 #
-# Источники данных — функции db (find_relevant_lessons, find_related_inquiries, get_client_profile,
-# thread_history). Новые функции db (мягкое совпадение покупателя, досье) берутся через getattr:
-# пока их нет, соответствующая часть просто пропускается (с записью в лог один раз).
+# Источники данных — функции db (find_relevant_lessons, find_related_inquiries, get_dossier_for_email /
+# get_dossier, get_client_profile, thread_history). Функции и колонки, которые добавляет миграция db
+# (досье, поля уроков, llm_draft_*), проверяются при обращении: если их нет — ERROR в лог один раз за
+# процесс (monitor_errors поднимет алерт), а генерация ответа продолжается без этой части.
 
 import difflib
+import inspect
 import json
 import logging
 from typing import Any, Optional
@@ -30,10 +32,11 @@ SAME_TEXT_RATIO = 0.9
 _warned: set[str] = set()
 
 
-def _warn_once(key: str, msg: str, *args: Any) -> None:
+def _error_once(key: str, msg: str, *args: Any) -> None:
+    """ERROR один раз за процесс: отсутствие миграции db — поломка, а не норма."""
     if key not in _warned:
         _warned.add(key)
-        logger.warning(msg, *args)
+        logger.error(msg, *args)
 
 
 def _rget(row: Any, key: str, default: Any = None) -> Any:
@@ -69,15 +72,13 @@ def lessons_for(msg_row: Any, limit: int = LESSONS_LIMIT) -> list[dict[str, Any]
     """Релевантные уроки: то же объявление → тот же покупатель → категория → аккаунт → прочие."""
     ad_id = _rget(msg_row, "ad_id")
     kwargs: dict[str, Any] = dict(ad_id=ad_id, account_id=_rget(msg_row, "account_id"), limit=limit)
-    try:
-        rows = db.find_relevant_lessons(
-            **kwargs, buyer_email=_rget(msg_row, "buyer_name"), category=ad_category(ad_id),
-        )
-    except TypeError:
-        # db ещё без ранжирования по покупателю/категории — старая сигнатура
-        _warn_once("lessons_sig", "find_relevant_lessons без buyer_email/category — ранжирую по ad/аккаунту")
-        rows = db.find_relevant_lessons(**kwargs)
-    return [dict(r) for r in rows]
+    params = inspect.signature(db.find_relevant_lessons).parameters
+    if "buyer_email" in params and "category" in params:
+        kwargs.update(buyer_email=_rget(msg_row, "buyer_name"), category=ad_category(ad_id))
+    else:
+        _error_once("lessons_sig", "db.find_relevant_lessons без buyer_email/category (нет миграции db) — "
+                                   "уроки ранжируются только по объявлению/аккаунту")
+    return [dict(r) for r in db.find_relevant_lessons(**kwargs)]
 
 
 def format_lessons(lessons: Optional[list[dict[str, Any]]], max_chars: int = LESSONS_MAX_CHARS) -> str:
@@ -116,7 +117,10 @@ def table_columns(table: str) -> set[str]:
     key = (str(db.DB_PATH), table)
     if key not in _COLS_CACHE:
         with db.get_conn() as conn:
-            _COLS_CACHE[key] = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if not cols:
+            return cols  # таблицы ещё нет — не кэшируем, иначе не увидим её до рестарта
+        _COLS_CACHE[key] = cols
     return _COLS_CACHE[key]
 
 
@@ -130,17 +134,26 @@ def llm_draft_fields(client_text: str, ru_text: str) -> dict[str, Any]:
     if "llm_draft_ru" in cols:
         out["llm_draft_ru"] = ru_text
     if not out:
-        _warn_once("llm_draft_cols", "messages без llm_draft_de/llm_draft_ru — черновик LLM не сохраняю")
+        _error_once("llm_draft_cols", "messages без llm_draft_de/llm_draft_ru (нет миграции db) — "
+                                      "исходный черновик LLM не сохраняется, уроки из правок не появятся")
     return out
 
 
 def save_lesson(**fields: Any) -> Optional[int]:
-    """db.add_lesson только с существующими колонками (миграция db может отставать)."""
+    """db.add_lesson только с существующими колонками (миграция db может отставать).
+
+    Если нет колонки lesson_ru, а урок передан — НЕ пишем строку без самого урока:
+    ERROR в лог и None.
+    """
     cols = table_columns("lessons")
     dropped = sorted(k for k in fields if k not in cols)
+    if "lesson_ru" in dropped and fields.get("lesson_ru"):
+        logger.error("lessons: нет колонки lesson_ru (нет миграции db) — урок не сохранён: %s",
+                     _clip(fields["lesson_ru"], 120))
+        return None
     if dropped:
-        _warn_once("lesson_cols:" + ",".join(dropped),
-                   "lessons: нет колонок %s — поля не сохраняются (ждём миграцию db)", dropped)
+        _error_once("lesson_cols:" + ",".join(dropped),
+                    "lessons: нет колонок %s (нет миграции db) — эти поля не сохраняются", dropped)
     clean = {k: v for k, v in fields.items() if k in cols and k != "created_at"}
     if not clean:
         return None
@@ -190,53 +203,67 @@ def _thread_line(tid: str, probable: bool) -> Optional[str]:
     return f"- {mark}{dates}, «{title}»: {_thread_outcome(rows)}" + (f". {summary}" if summary else "")
 
 
+def _dossier_text(msg_row: Any) -> str:
+    """Досье покупателя (client_dossiers: по relay-email, иначе по аккаунту + имени)."""
+    get_by_email = getattr(db, "get_dossier_for_email", None)
+    get_by_name = getattr(db, "get_dossier", None)
+    if get_by_email is None and get_by_name is None:
+        _error_once("dossier_fn", "db.get_dossier_for_email/get_dossier нет (нет миграции db) — "
+                                  "досье покупателя в промпт не попадает")
+        return ""
+    row = None
+    buyer = _rget(msg_row, "buyer_name")
+    if get_by_email is not None and buyer:
+        row = get_by_email(buyer)
+    probable = False
+    if row is None and get_by_name is not None and _rget(msg_row, "buyer_display_name"):
+        row = get_by_name(_rget(msg_row, "account_id"), _rget(msg_row, "buyer_display_name"))
+        probable = row is not None  # нашли только по имени — возможно, другой человек
+    if row is None:
+        return ""
+    summary = (_rget(row, "summary_md") or "").strip()
+    if not summary:
+        return ""
+    head = "Досье (ВОЗМОЖНО другой человек с тем же именем — проверяй): " if probable else "Досье: "
+    return head + _clip(summary, 900)
+
+
 def client_memory_text(msg_row: Any, max_chars: int = MEMORY_MAX_CHARS) -> str:
-    """Что мы знаем об этом покупателе: досье + его другие переписки (точные и вероятные)."""
+    """Что мы знаем об этом покупателе: досье + заметка оператора + его другие переписки.
+
+    Другие треды — db.find_related_inquiries(include_maybe=True): maybe_same=1 (совпало имя
+    в том же аккаунте, другой relay-email) помечается как «ВОЗМОЖНО тот же», цены оттуда не факт.
+    """
     buyer = _rget(msg_row, "buyer_name") or ""
     thread_id = _rget(msg_row, "gmail_thread_id") or ""
     parts: list[str] = []
 
+    dossier = _dossier_text(msg_row)
+    if dossier:
+        parts.append(dossier)
     profile = db.get_client_profile(buyer) if buyer else None
-    if profile is not None:
-        dossier = (_rget(profile, "dossier_ru") or "").strip()
-        note = (_rget(profile, "note") or "").strip()
-        if dossier:
-            parts.append(f"Досье: {_clip(dossier, 900)}")
-        if note:
-            parts.append(f"Заметка оператора: {_clip(note, 300)}")
+    note = (_rget(profile, "note") or "").strip() if profile is not None else ""
+    if note:
+        parts.append(f"Заметка оператора: {_clip(note, 300)}")
 
-    seen = {thread_id}
     lines: list[str] = []
-    exact = db.find_related_inquiries(buyer, exclude_thread_id=thread_id, limit=MEMORY_THREADS) if buyer else []
-    for r in exact:
-        tid = _rget(r, "gmail_thread_id")
-        if tid and tid not in seen:
-            seen.add(tid)
-            line = _thread_line(tid, probable=False)
-            if line:
-                lines.append(line)
-    soft_fn = getattr(db, "find_related_inquiries_soft", None)
-    if soft_fn is None:
-        _warn_once("soft", "db.find_related_inquiries_soft нет — вероятные совпадения покупателя пропускаю")
-    elif len(lines) < MEMORY_THREADS:
-        try:
-            soft = soft_fn(
-                display_name=_rget(msg_row, "buyer_display_name"),
-                account_id=_rget(msg_row, "account_id"),
-                exclude_thread_id=thread_id, limit=MEMORY_THREADS,
-            )
-        except Exception:  # noqa: BLE001 — память вспомогательная, генерацию не валим
-            logger.exception("find_related_inquiries_soft упал для msg=%s", _rget(msg_row, "id"))
-            soft = []
-        for r in soft:
+    if buyer:
+        related = db.find_related_inquiries(
+            buyer, exclude_thread_id=thread_id or None, limit=MEMORY_THREADS,
+            display_name=_rget(msg_row, "buyer_display_name"),
+            account_id=_rget(msg_row, "account_id"), include_maybe=True,
+        )
+        seen = {thread_id}
+        for r in related:
             tid = _rget(r, "gmail_thread_id")
-            if tid and tid not in seen and len(lines) < MEMORY_THREADS:
+            if tid and tid not in seen:
                 seen.add(tid)
-                line = _thread_line(tid, probable=True)
+                line = _thread_line(tid, probable=bool(_rget(r, "maybe_same")))
                 if line:
                     lines.append(line)
     if lines:
-        parts.append("Другие переписки с ним (от новых к старым):\n" + "\n".join(lines))
+        parts.append("Другие переписки с ним (сначала точные совпадения, от новых к старым):\n"
+                     + "\n".join(lines))
     if not parts:
         return ""
     text = "=== ЧТО МЫ ЗНАЕМ ОБ ЭТОМ ПОКУПАТЕЛЕ ===\n" + "\n".join(parts)
@@ -273,9 +300,21 @@ def learn_from_sent(
     draft_client = llm_draft_client if llm_draft_client is not None else (_rget(row, "llm_draft_de") or "")
     draft_ru = llm_draft_ru if llm_draft_ru is not None else (_rget(row, "llm_draft_ru") or "")
     sent_client = _rget(row, "de_answer") or ""
-    if not draft_client.strip() or not sent_client.strip():
+    if not draft_client.strip():
+        if llm_draft_client is None and "llm_draft_de" not in table_columns("messages"):
+            _error_once("learn_cols", "learn_from_sent: нет колонки messages.llm_draft_de (нет миграции db) — "
+                                      "уроки из правок оператора не извлекаются")
+        else:
+            logger.info("learn_from_sent msg=%s: черновика LLM не было (оператор писал сам) — урока нет",
+                        message_id)
         return None
-    if _similar(draft_client, sent_client) >= SAME_TEXT_RATIO:
+    if not sent_client.strip():
+        logger.warning("learn_from_sent msg=%s: отправленный текст пуст — урока нет", message_id)
+        return None
+    ratio = _similar(draft_client, sent_client)
+    if ratio >= SAME_TEXT_RATIO:
+        logger.info("learn_from_sent msg=%s: отправлено почти как предложил LLM (%.2f) — урока нет",
+                    message_id, ratio)
         return None
     lesson = claude.extract_operator_lesson(
         client_message=_rget(row, "de_client") or "",
@@ -284,7 +323,8 @@ def learn_from_sent(
         ad_title=_rget(row, "ad_title") or "",
     )
     if not lesson.get("lesson_ru"):
-        return None  # модель решила, что правка не содержит урока (опечатка, мелочь)
+        logger.info("learn_from_sent msg=%s: правка косметическая — урока нет", message_id)
+        return None
     return save_lesson(
         message_id=message_id,
         account_id=_rget(row, "account_id"),

@@ -263,16 +263,22 @@ def _context_parts(
     history: Optional[list[dict[str, Any]]] = None,
     memory_text: str = "",
     lessons_text: str = "",
+    ad_state: str = "",
 ) -> list[str]:
-    """Общий контекст генераций: бриф, объявление, память о клиенте, уроки, история."""
+    """Общий контекст генераций: бриф, объявление, память о клиенте, уроки, история.
+
+    ad_state — 'deleted' / 'reserved' / 'sold' (из `ad_state_for`); пусто — по ad_title."""
     parts: list[str] = []
     if brief_text:
         parts += [brief_text, ""]
 
     # Объявление помечено Gelöscht / Reserviert — чтобы модель не обещала товар
     from modules.parser import detect_ad_state
-    state = detect_ad_state(ad_title or "")
-    if state == "deleted":
+    state = ad_state or detect_ad_state(ad_title or "")
+    if state == "sold":
+        parts += ["⚠️ ТОВАР УЖЕ ПРОДАН (оператор отметил продажу по этому объявлению).",
+                  "Тактично сообщи клиенту, что товар продан. НЕ обещай его и не торгуйся.", ""]
+    elif state == "deleted":
         parts += ["⚠️ ОБЪЯВЛЕНИЕ УДАЛЕНО ПРОДАВЦОМ. Товар уже не продаётся (возможно продан другому или снят).",
                   "В ответе тактично объясни клиенту что объявление снято. НЕ обещай продать.", ""]
     elif state == "reserved":
@@ -426,6 +432,7 @@ def generate_draft(
     current_draft: str = "",
     memory_text: str = "",
     lessons_text: str = "",
+    ad_state: str = "",
     max_tokens: int = 2000,
 ) -> dict[str, Any]:
     """Ответ клиенту с полным контекстом (объявление, бриф, история).
@@ -438,7 +445,7 @@ def generate_draft(
     parts = _context_parts(
         ad_title=ad_title, ad_price=ad_price, ad_description=ad_description,
         seller_name=seller_name, brief_text=brief_text, history=history,
-        memory_text=memory_text, lessons_text=lessons_text,
+        memory_text=memory_text, lessons_text=lessons_text, ad_state=ad_state,
     )
     parts += ["=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (de_client_text or "").strip(), ""]
     if current_draft:
@@ -723,6 +730,29 @@ def draft_context(msg_row: Any) -> tuple[list[dict[str, Any]], str]:
     return history, ad_brief.brief_text_for(_rget(msg_row, "ad_id"))
 
 
+def ad_state_for(msg_row: Any) -> str:
+    """Статус объявления для промпта: 'sold' (ad_briefs.sold_at), 'deleted'/'reserved'
+    (префикс в САМОМ СВЕЖЕМ заголовке треда — у старой строки он мог быть ещё без
+    «Gelöscht»), иначе ''. Ошибка БД → '' с записью в лог."""
+    from modules.parser import detect_ad_state
+    try:
+        ad_id = _rget(msg_row, "ad_id")
+        if ad_id:
+            bf = db.get_ad_brief(ad_id)
+            if bf is not None and _rget(bf, "sold_at"):
+                return "sold"
+        title = _rget(msg_row, "ad_title") or ""
+        tid = _rget(msg_row, "gmail_thread_id")
+        if tid:
+            titles = [_rget(r, "ad_title") for r in db.thread_history(tid) if _rget(r, "ad_title")]
+            title = titles[-1] if titles else title
+        state = detect_ad_state(title)
+        return state if state in ("deleted", "reserved") else ""
+    except Exception:  # noqa: BLE001
+        logger.exception("статус объявления не определён для msg=%s", _rget(msg_row, "id"))
+        return ""
+
+
 def _safe_memory(msg_row: Any) -> str:
     """Память о покупателе; ошибка не валит генерацию ответа (логируется с traceback)."""
     from modules import llm_memory
@@ -774,6 +804,7 @@ def _regenerate_core(
     if include_current_draft:
         current = _rget(msg_row, "ru_answer") or _rget(msg_row, "de_answer") or ""
     memory_text, lessons_text = extra_context(msg_row)
+    ad_state = ad_state_for(msg_row)
     return generate_draft(
         _rget(msg_row, "de_client") or "",
         ad_title=_rget(msg_row, "ad_title") or "",
@@ -783,7 +814,7 @@ def _regenerate_core(
         history=history, brief_text=brief_text,
         client_lang=_rget(msg_row, "client_lang") or _rget(msg_row, "answer_lang") or None,
         task=instruction, current_draft=current,
-        memory_text=memory_text, lessons_text=lessons_text,
+        memory_text=memory_text, lessons_text=lessons_text, ad_state=ad_state,
     )
 
 

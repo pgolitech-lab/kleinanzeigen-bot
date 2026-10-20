@@ -50,13 +50,34 @@ def test_client_memory_empty_for_new_buyer(tmp_db):
 
 
 def test_save_lesson_drops_unknown_columns(tmp_db):
+    llm_memory._COLS_CACHE.clear()
     lid = llm_memory.save_lesson(message_id=1, lesson_ru_future_col="x", good_answer_ru="ok")
     with tmp_db.get_conn() as conn:
         row = conn.execute("SELECT good_answer_ru FROM lessons WHERE id=?", (lid,)).fetchone()
     assert row[0] == "ok"
 
 
+def _migrate_lessons(db):
+    """Колонки уроков, которые добавляет миграция модуля db (в тесте — вручную, если их нет)."""
+    with db.get_conn() as conn:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(lessons)")}
+        for col in ("lesson_ru", "source", "gmail_thread_id", "buyer_email", "outcome", "category"):
+            if col not in have:
+                conn.execute(f"ALTER TABLE lessons ADD COLUMN {col} TEXT")
+    llm_memory._COLS_CACHE.clear()
+
+
+def test_save_lesson_refuses_without_lesson_column(tmp_db):
+    with tmp_db.get_conn() as conn:
+        has = "lesson_ru" in {r[1] for r in conn.execute("PRAGMA table_info(lessons)")}
+    if has:
+        pytest.skip("миграция db уже добавила lesson_ru")
+    llm_memory._COLS_CACHE.clear()
+    assert llm_memory.save_lesson(message_id=1, lesson_ru="урок") is None
+
+
 def test_learn_from_sent_only_when_operator_rewrote(tmp_db):
+    _migrate_lessons(tmp_db)
     mid = tmp_db.add_message(1, "in", gmail_thread_id="t", de_client="Letzter Preis?",
                              de_answer="Der Preis ist 1200 € fest. MfG", status="sent")
     with patch("modules.claude.extract_operator_lesson",
@@ -69,6 +90,7 @@ def test_learn_from_sent_only_when_operator_rewrote(tmp_db):
     with tmp_db.get_conn() as conn:
         row = conn.execute("SELECT * FROM lessons WHERE id=?", (lid,)).fetchone()
     assert row["good_answer_de"].startswith("Der Preis") and row["bad_draft_de"].startswith("Ich kann")
+    assert row["lesson_ru"].startswith("Держи цену") and row["source"] == "operator_edit"
 
 
 def test_autopilot_derives_memory_from_history():
@@ -83,3 +105,12 @@ def test_autopilot_derives_memory_from_history():
             claude.generate_autopilot_reply("Noch da?", history=hist, floor_eur=100)
     cm.assert_called_once()
     assert "купил раньше" in cj.call_args.kwargs["user"]
+
+
+def test_client_memory_marks_probable_same_person(tmp_db):
+    tmp_db.add_message(1, "in", gmail_thread_id="other", buyer_name="x1@relay", buyer_display_name="Jan K",
+                       ad_title="Konsole", de_client="Preis?", created_at="2026-09-01T10:00")
+    cur = tmp_db.add_message(1, "in", gmail_thread_id="now", buyer_name="x2@relay", buyer_display_name="Jan K",
+                             ad_title="Sitzbank", de_client="Hallo", created_at="2026-10-01T10:00")
+    text = llm_memory.client_memory_text(tmp_db.get_message(cur))
+    assert "ВОЗМОЖНО тот же человек" in text and "Konsole" in text
