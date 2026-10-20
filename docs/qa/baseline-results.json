@@ -1,0 +1,6086 @@
+{
+ "fold-cover-412": {
+  "device": {
+   "w": 412,
+   "h": 860,
+   "dpr": 2.625
+  },
+  "screens": {
+   "pipeline": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 10,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 8,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.tc-sub «klausm.@example.invalid · 1 обращ. · 1 т»",
+     "div.tc-sub «jean@example.invalid · 1 обращ. · 1 това»",
+     "div.tc-sub «anna_k@example.invalid · 1 обращ. · 1 то»",
+     "div.tc-sub «piotr@example.invalid · 1 обращ. · 1 тов»",
+     "div.tc-sub «m.yilmaz@example.invalid · 1 обращ. · 1 »",
+     "div.tc-sub «b.st@example.invalid · 1 обращ. · 1 това»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «➕ Добавить» 118×35",
+     "a «🔍 Проверка детекций» 188×35",
+     "input «🔍 объявление / покупатель…» 223×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 157×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 388×36"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «▶️ Включить авто» 157×34",
+     "a «🚐 Машины» 112×26",
+     "a «🪑 Запчасти» 116×26",
+     "a «⚙️ Запросы» 113×26",
+     "input «on» 18×18"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 244×36",
+     "button «✅ Принять» 136×35",
+     "button «❌ Отклонить» 125×35",
+     "a «📂 Тред» 81×35"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "b.ad-title «Sitzbank Citroën Jumpy»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "b.ad-title «Einzelsitz Fahrersitz VW T6»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "b.ad-title «Sitzbank Ford Transit Custom»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/thread/qa-t1/msg/1"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 82,
+     "h": 57,
+     "bottom": 860,
+     "H": 860
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 82,
+     "h": 57,
+     "bottom": 860,
+     "H": 860
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 82,
+     "h": 57,
+     "bottom": 860,
+     "H": 860
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 82,
+     "h": 57,
+     "bottom": 860,
+     "H": 860
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 82,
+     "h": 57,
+     "bottom": 860,
+     "H": 860
+    }
+   ],
+   "send-sheet-1": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42",
+     "button «🌐 Перевести на DE и отправить» 378×42",
+     "button «📨 Отправить как есть» 378×42",
+     "button «🤖 Предложить текст от ЛЛМ» 378×42",
+     "button «✕ Отменить» 378×42"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42",
+     "button «📨 Отправить» 378×42",
+     "button «✏️ Редактировать» 378×42",
+     "button «🤖 Переписать идею ЛЛМ…» 378×42",
+     "button «✕ Отменить» 378×42"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 378×42",
+     "button «✏️ Редактировать» 378×42",
+     "button «🤖 Переписать идею ЛЛМ…» 378×42",
+     "button «✕ Отменить» 378×42"
+    ],
+    "smallN": 16,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 10,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 412,
+    "H": 473,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 412,
+    "H": 473,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 412,
+    "H": 860,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42",
+     "button «Отмена» 185×42",
+     "button «✅ Сохранить» 185×42"
+    ],
+    "smallN": 10,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 473,
+    "textarea_top": 166,
+    "textarea_bottom": 306,
+    "textarea_visible": true,
+    "dock_top": 343,
+    "dock_covers_textarea": false,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 473,
+    "textarea_visible": true,
+    "primary": "✕ Отмена",
+    "primary_visible": true
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "tabbar"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "fold-cover-344": {
+  "device": {
+   "w": 344,
+   "h": 760,
+   "dpr": 3.14
+  },
+  "screens": {
+   "pipeline": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 12,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 10,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.tc-sub «klausm.@example.invalid · 1 обращ. · 1 т»",
+     "div.tc-sub «jean@example.invalid · 1 обращ. · 1 това»",
+     "div.tc-sub «anna_k@example.invalid · 1 обращ. · 1 то»",
+     "div.tc-sub «piotr@example.invalid · 1 обращ. · 1 тов»",
+     "div.tc-sub «m.yilmaz@example.invalid · 1 обращ. · 1 »",
+     "div.tc-sub «b.st@example.invalid · 1 обращ. · 1 това»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «➕ Добавить» 118×35",
+     "a «🔍 Проверка детекций» 188×35",
+     "input «🔍 объявление / покупатель…» 183×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 129×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 320×36"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «on» 18×18"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 176×36"
+    ],
+    "smallN": 2,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Sitzbank Citroën Jumpy»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Einzelsitz Fahrersitz VW T6»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Sitzbank Ford Transit Custom»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/thread/qa-t1/msg/1"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 69,
+     "h": 57,
+     "bottom": 760,
+     "H": 760
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 69,
+     "h": 57,
+     "bottom": 760,
+     "H": 760
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 69,
+     "h": 57,
+     "bottom": 760,
+     "H": 760
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 69,
+     "h": 57,
+     "bottom": 760,
+     "H": 760
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 69,
+     "h": 57,
+     "bottom": 760,
+     "H": 760
+    }
+   ],
+   "send-sheet-1": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🌐 Перевести на DE и отправить» 310×42",
+     "button «📨 Отправить как есть» 310×42",
+     "button «🤖 Предложить текст от ЛЛМ» 310×42",
+     "button «✕ Отменить» 310×42"
+    ],
+    "smallN": 6,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «📨 Отправить» 310×42",
+     "button «✏️ Редактировать» 310×42",
+     "button «🤖 Переписать идею ЛЛМ…» 310×42",
+     "button «✕ Отменить» 310×42"
+    ],
+    "smallN": 6,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 310×42",
+     "button «✏️ Редактировать» 310×42",
+     "button «🤖 Переписать идею ЛЛМ…» 310×42",
+     "button «✕ Отменить» 310×42"
+    ],
+    "smallN": 16,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 12,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 344,
+    "H": 418,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 344,
+    "H": 418,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 344,
+    "H": 760,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «Отмена» 151×42",
+     "button «✅ Сохранить» 151×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 418,
+    "textarea_top": 279,
+    "textarea_bottom": 419,
+    "textarea_visible": true,
+    "dock_top": 270,
+    "dock_covers_textarea": true,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 418,
+    "textarea_visible": true,
+    "primary": "✕ Отмена",
+    "primary_visible": true
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "tabbar"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "fold-cover-280": {
+  "device": {
+   "w": 280,
+   "h": 620,
+   "dpr": 3.86
+  },
+  "screens": {
+   "pipeline": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [
+     "span.unread-dot «unread-dot» right=327"
+    ],
+    "overflowN": 1,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 299,
+    "H": 663,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 5,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.tc-sub «klausm.@example.invalid · 1 обращ. · 1 т»",
+     "div.tc-sub «jean@example.invalid · 1 обращ. · 1 това»",
+     "div.tc-sub «anna_k@example.invalid · 1 обращ. · 1 то»",
+     "div.tc-sub «piotr@example.invalid · 1 обращ. · 1 тов»",
+     "div.tc-sub «m.yilmaz@example.invalid · 1 обращ. · 1 »",
+     "div.tc-sub «b.st@example.invalid · 1 обращ. · 1 това»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 326,
+    "H": 722,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «🔍 объявление / покупатель…» 146×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 102×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 256×36"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «on» 18×18"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 112×36"
+    ],
+    "smallN": 2,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Sitzbank Citroën Jumpy»",
+     "b.ad-title «Sitzbank Citroën Jumpy»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Einzelsitz Fahrersitz VW T6»",
+     "b.ad-title «Einzelsitz Fahrersitz VW T6»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Sitzbank Ford Transit Custom»",
+     "b.ad-title «Sitzbank Ford Transit Custom»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 323,
+    "H": 714,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Sitzbank 2er Mercedes Vito»",
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/pipeline"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 62,
+     "h": 57,
+     "bottom": 665,
+     "H": 665
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 59,
+     "h": 57,
+     "bottom": 665,
+     "H": 665
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 60,
+     "h": 57,
+     "bottom": 665,
+     "H": 665
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 59,
+     "h": 57,
+     "bottom": 665,
+     "H": 665
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 59,
+     "h": 57,
+     "bottom": 665,
+     "H": 665
+    }
+   ],
+   "send-sheet-1": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «📨 Отправить как есть» 266×42",
+     "button «🤖 Предложить текст от ЛЛМ» 266×42",
+     "button «✕ Отменить» 266×42"
+    ],
+    "smallN": 5,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «📨 Отправить» 266×42",
+     "button «✏️ Редактировать» 266×42",
+     "button «🤖 Переписать идею ЛЛМ…» 266×42",
+     "button «✕ Отменить» 266×42"
+    ],
+    "smallN": 6,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 280,
+    "H": 620,
+    "hscroll": 0,
+    "overflow": [
+     "span.unread-dot «unread-dot» right=327"
+    ],
+    "overflowN": 1,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 246×42",
+     "button «✏️ Редактировать» 246×42",
+     "button «✕ Отменить» 246×42"
+    ],
+    "smallN": 15,
+    "trunc": [
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 300,
+    "H": 366,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 323,
+    "H": 714,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "h1. «Sitzbank 2er Mercedes Vito»",
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 323,
+    "H": 393,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "h1. «Sitzbank 2er Mercedes Vito»",
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 300,
+    "H": 665,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 366,
+    "textarea_top": 227,
+    "textarea_bottom": 367,
+    "textarea_visible": true,
+    "dock_top": 218,
+    "dock_covers_textarea": true,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 393,
+    "textarea_visible": true,
+    "primary": "✕ Отмена",
+    "primary_visible": false
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "fold-inner-port": {
+  "device": {
+   "w": 860,
+   "h": 880,
+   "dpr": 2.625
+  },
+  "screens": {
+   "pipeline": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «➕ Добавить» 118×35",
+     "a «🔍 Проверка детекций» 188×35",
+     "button «Все время» 209×42",
+     "button «Эта неделя» 209×42",
+     "button «Этот месяц» 209×42",
+     "button «Этот год» 209×42",
+     "input «🔍 объявление / покупатель…» 484×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 344×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 836×36"
+    ],
+    "smallN": 9,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «▶️ Включить авто» 157×34",
+     "a «🚐 Машины» 112×26",
+     "a «🪑 Запчасти» 116×26",
+     "a «⚙️ Запросы» 113×26",
+     "input «on» 18×18"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 692×36",
+     "button «✅ Принять» 584×35",
+     "button «❌ Отклонить» 125×35",
+     "a «📂 Тред» 81×35"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🤖 Предложить» 376×42",
+     "button «✉️ Написать» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/pipeline"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 172,
+     "h": 57,
+     "bottom": 880,
+     "H": 880
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 172,
+     "h": 57,
+     "bottom": 880,
+     "H": 880
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 172,
+     "h": 57,
+     "bottom": 880,
+     "H": 880
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 172,
+     "h": 57,
+     "bottom": 880,
+     "H": 880
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 172,
+     "h": 57,
+     "bottom": 880,
+     "H": 880
+    }
+   ],
+   "send-sheet-1": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42",
+     "button «🌐 Перевести на DE и отправить» 826×42",
+     "button «📨 Отправить как есть» 826×42",
+     "button «🤖 Предложить текст от ЛЛМ» 826×42",
+     "button «✕ Отменить» 826×42"
+    ],
+    "smallN": 12,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42",
+     "button «📨 Отправить» 826×42",
+     "button «✏️ Редактировать» 826×42",
+     "button «🤖 Переписать идею ЛЛМ…» 826×42",
+     "button «✕ Отменить» 826×42"
+    ],
+    "smallN": 12,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 826×42",
+     "button «✏️ Редактировать» 826×42",
+     "button «🤖 Переписать идею ЛЛМ…» 826×42",
+     "button «✕ Отменить» 826×42"
+    ],
+    "smallN": 16,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 860,
+    "H": 484,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🤖 Предложить» 376×42",
+     "button «✉️ Написать» 376×42",
+     "button «Ещё действия» 48×42",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 860,
+    "H": 484,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🤖 Предложить» 376×42",
+     "button «✉️ Написать» 376×42",
+     "button «Ещё действия» 48×42",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 860,
+    "H": 880,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 272×31",
+     "button «RU идея» 272×31",
+     "button «RU перевод» 272×31",
+     "button «🔁 Вариант» 376×42",
+     "button «📨 Отправить» 376×42",
+     "button «Ещё действия» 48×42",
+     "input «on» 18×18",
+     "button «Отмена» 409×42",
+     "button «✅ Сохранить» 409×42"
+    ],
+    "smallN": 11,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 484,
+    "textarea_top": 172,
+    "textarea_bottom": 312,
+    "textarea_visible": true,
+    "dock_top": 354,
+    "dock_covers_textarea": false,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 484,
+    "textarea_visible": true,
+    "primary": "✕ Отмена",
+    "primary_visible": true
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "fold-inner-land": {
+  "device": {
+   "w": 954,
+   "h": 780,
+   "dpr": 2.625
+  },
+  "screens": {
+   "pipeline": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «➕ Добавить» 118×35",
+     "a «🔍 Проверка детекций» 188×35",
+     "button «Все время» 233×42",
+     "button «Эта неделя» 233×42",
+     "button «Этот месяц» 233×42",
+     "button «Этот год» 233×42",
+     "input «🔍 объявление / покупатель…» 539×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 383×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 930×36"
+    ],
+    "smallN": 9,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «▶️ Включить авто» 157×34",
+     "a «🚐 Машины» 112×26",
+     "a «🪑 Запчасти» 116×26",
+     "a «⚙️ Запросы» 113×26",
+     "input «on» 18×18"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 786×36",
+     "button «✅ Принять» 678×35",
+     "button «❌ Отклонить» 125×35",
+     "a «📂 Тред» 81×35"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🤖 Предложить» 423×42",
+     "button «✉️ Написать» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/pipeline"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 191,
+     "h": 57,
+     "bottom": 780,
+     "H": 780
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 191,
+     "h": 57,
+     "bottom": 780,
+     "H": 780
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 191,
+     "h": 57,
+     "bottom": 780,
+     "H": 780
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 191,
+     "h": 57,
+     "bottom": 780,
+     "H": 780
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 191,
+     "h": 57,
+     "bottom": 780,
+     "H": 780
+    }
+   ],
+   "send-sheet-1": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42",
+     "button «🌐 Перевести на DE и отправить» 920×42",
+     "button «📨 Отправить как есть» 920×42",
+     "button «🤖 Предложить текст от ЛЛМ» 920×42",
+     "button «✕ Отменить» 920×42"
+    ],
+    "smallN": 12,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42",
+     "button «📨 Отправить» 920×42",
+     "button «✏️ Редактировать» 920×42",
+     "button «🤖 Переписать идею ЛЛМ…» 920×42",
+     "button «✕ Отменить» 920×42"
+    ],
+    "smallN": 12,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 920×42",
+     "button «✏️ Редактировать» 920×42",
+     "button «🤖 Переписать идею ЛЛМ…» 920×42",
+     "button «✕ Отменить» 920×42"
+    ],
+    "smallN": 16,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 954,
+    "H": 429,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🤖 Предложить» 423×42",
+     "button «✉️ Написать» 423×42",
+     "button «Ещё действия» 48×42",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 954,
+    "H": 429,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🤖 Предложить» 423×42",
+     "button «✉️ Написать» 423×42",
+     "button «Ещё действия» 48×42",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 7,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 954,
+    "H": 780,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 303×31",
+     "button «RU идея» 303×31",
+     "button «RU перевод» 303×31",
+     "button «🔁 Вариант» 423×42",
+     "button «📨 Отправить» 423×42",
+     "button «Ещё действия» 48×42",
+     "input «on» 18×18",
+     "button «Отмена» 456×42",
+     "button «✅ Сохранить» 456×42"
+    ],
+    "smallN": 11,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 429,
+    "textarea_top": 145,
+    "textarea_bottom": 285,
+    "textarea_visible": true,
+    "dock_top": 299,
+    "dock_covers_textarea": false,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 429,
+    "textarea_visible": true,
+    "primary": "✕ Отмена",
+    "primary_visible": true
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "flip5-main": {
+  "device": {
+   "w": 412,
+   "h": 915,
+   "dpr": 2.625
+  },
+  "screens": {
+   "pipeline": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 10,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 8,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.tc-sub «klausm.@example.invalid · 1 обращ. · 1 т»",
+     "div.tc-sub «jean@example.invalid · 1 обращ. · 1 това»",
+     "div.tc-sub «anna_k@example.invalid · 1 обращ. · 1 то»",
+     "div.tc-sub «piotr@example.invalid · 1 обращ. · 1 тов»",
+     "div.tc-sub «m.yilmaz@example.invalid · 1 обращ. · 1 »",
+     "div.tc-sub «b.st@example.invalid · 1 обращ. · 1 това»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «➕ Добавить» 118×35",
+     "a «🔍 Проверка детекций» 188×35",
+     "input «🔍 объявление / покупатель…» 223×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 157×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 388×36"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «▶️ Включить авто» 157×34",
+     "a «🚐 Машины» 112×26",
+     "a «🪑 Запчасти» 116×26",
+     "a «⚙️ Запросы» 113×26",
+     "input «on» 18×18"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 244×36",
+     "button «✅ Принять» 136×35",
+     "button «❌ Отклонить» 125×35",
+     "a «📂 Тред» 81×35"
+    ],
+    "smallN": 5,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "b.ad-title «Sitzbank Citroën Jumpy»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "b.ad-title «Einzelsitz Fahrersitz VW T6»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "b.ad-title «Sitzbank Ford Transit Custom»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/pipeline"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 82,
+     "h": 57,
+     "bottom": 915,
+     "H": 915
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 82,
+     "h": 57,
+     "bottom": 915,
+     "H": 915
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 82,
+     "h": 57,
+     "bottom": 915,
+     "H": 915
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 82,
+     "h": 57,
+     "bottom": 915,
+     "H": 915
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 82,
+     "h": 57,
+     "bottom": 915,
+     "H": 915
+    }
+   ],
+   "send-sheet-1": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42",
+     "button «🌐 Перевести на DE и отправить» 378×42",
+     "button «📨 Отправить как есть» 378×42",
+     "button «🤖 Предложить текст от ЛЛМ» 378×42",
+     "button «✕ Отменить» 378×42"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42",
+     "button «📨 Отправить» 378×42",
+     "button «✏️ Редактировать» 378×42",
+     "button «🤖 Переписать идею ЛЛМ…» 378×42",
+     "button «✕ Отменить» 378×42"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 378×42",
+     "button «✏️ Редактировать» 378×42",
+     "button «🤖 Переписать идею ЛЛМ…» 378×42",
+     "button «✕ Отменить» 378×42"
+    ],
+    "smallN": 16,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "b.title «Sitzbank Ford Transit Custom»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "b.title «Klappbank Renault Trafic»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 10,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 412,
+    "H": 503,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42"
+    ],
+    "smallN": 8,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 412,
+    "H": 503,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 412,
+    "H": 915,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «DE → клиенту» 122×31",
+     "button «RU идея» 122×31",
+     "button «RU перевод» 122×31",
+     "button «🔁 Вариант» 152×42",
+     "button «📨 Отправить» 152×42",
+     "button «Ещё действия» 48×42",
+     "button «Отмена» 185×42",
+     "button «✅ Сохранить» 185×42"
+    ],
+    "smallN": 10,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 503,
+    "textarea_top": 181,
+    "textarea_bottom": 321,
+    "textarea_visible": true,
+    "dock_top": 373,
+    "dock_covers_textarea": false,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 503,
+    "textarea_visible": true,
+    "primary": "✕ Отмена",
+    "primary_visible": true
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ },
+ "flip5-flex": {
+  "device": {
+   "w": 306,
+   "h": 318,
+   "dpr": 2.35
+  },
+  "screens": {
+   "pipeline": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [
+     "span.unread-dot «unread-dot» right=327"
+    ],
+    "overflowN": 1,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30"
+    ],
+    "smallN": 12,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 9,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "dashboard": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «↻ Обновить» 113×34",
+     "a «⚙ Настройки» 119×34"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 7,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Обзор",
+    "text": "↻ Обновить\n⚙ Настройки\n4\nЖДУТ НАС\n2\nЖДЁМ КЛИЕНТА\n4\nДРАФТЫ\n0\nАВТОПИЛОТ\nСЕГОДНЯ\n4\nНОВЫХ\n0\nОТПРАВЛЕНО\n0\nПРОДАНО\nРЕСУРСЫ\n—\nБАЛАНС API\n0 / 0\nПРОДАЖИ 7Д / 30Д\nЖДУТ НАС · 3\nErsatzteile Nord\nRückbank Peugeot "
+   },
+   "clients": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [],
+    "smallN": 0,
+    "trunc": [
+     "div.tc-sub «klausm.@example.invalid · 1 обращ. · 1 т»",
+     "div.tc-sub «jean@example.invalid · 1 обращ. · 1 това»",
+     "div.tc-sub «anna_k@example.invalid · 1 обращ. · 1 то»",
+     "div.tc-sub «piotr@example.invalid · 1 обращ. · 1 тов»",
+     "div.tc-sub «m.yilmaz@example.invalid · 1 обращ. · 1 »",
+     "div.tc-sub «b.st@example.invalid · 1 обращ. · 1 това»"
+    ],
+    "truncN": 6,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Клиенты",
+    "text": "ВСЕГО: 6\nKlaus M.\nklausm.@example.invalid · 1 обращ. · 1 товаров · 2 сообщ.\n20.10, 10:51\nJean\njean@example.invalid · 1 обращ. · 1 товаров · 1 сообщ.\n20.10, 10:09\nAnna_K\nanna_k@example.invalid · 1 обра"
+   },
+   "sales": {
+    "W": 326,
+    "H": 339,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «🔍 объявление / покупатель…» 161×36",
+     "select «Все аккаунты Autoteile Süd Ersatzteile N» 113×36",
+     "select «Разбивка по дням Разбивка по неделям Раз» 282×36"
+    ],
+    "smallN": 3,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Продажи",
+    "text": "➕ Добавить\n🔍 Проверка детекций\nВсе время\nЭта неделя\nЭтот месяц\nЭтот год\nВсе аккаунты\nAutoteile Süd\nErsatzteile Nord\nGarage West\nTeile-Lager Mitte\nWerkstatt Ost\nРазбивка по дням\nРазбивка по неделям\nРа"
+   },
+   "scout": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "input «on» 18×18"
+    ],
+    "smallN": 1,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Рынок",
+    "text": "🚐 0 🪑 0\nавто-прогон выключен\n▶️ Включить авто\n🚐 Машины\n🪑 Запчасти\n⚙️ Запросы\n🗑 Показывать снятые\n🗺 Тепловая карта — нажми землю\nSH\n0\nHB\n0\nHH\n0\nMV\n0\nNI\n0\nBB\n0\nBE\n0\nNW\n0\nST\n0\nSN\n0\nRP\n0\nHE\n0\nTH\n0\nS"
+   },
+   "detected": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «580» 138×36"
+    ],
+    "smallN": 2,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Проверка продаж",
+    "text": "ВОЗМОЖНЫЕ ПРОДАЖИ · 1\nLLM-сканер прошёл по архиву переписки и нашёл возможные сделки.\nHigh-confidence уже автоматически записаны в Продажи.\nЗдесь — кандидаты которые требуют твоей проверки. Поправь це"
+   },
+   "settings": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "input «disabled» 18×18",
+     "input «redirect» 18×18",
+     "input «production» 18×18",
+     "button «💾 Сохранить» 125×34",
+     "input «on» 18×18",
+     "button «Заменить» 95×34"
+    ],
+    "smallN": 25,
+    "trunc": [],
+    "truncN": 0,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Настройки",
+    "text": "Send mode\ndisabled\nredirect\nproduction\n💾 Сохранить\nPolling paused\n💾 Сохранить\nDebug email (для redirect mode)\n💾 Сохранить\nGmail poll interval (сек)\n💾 Сохранить\nGmail from filter\n💾 Сохранить\nInqui"
+   },
+   "thread-draft": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-long": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "b.ad-title «Sitzbank Citroën Jumpy»"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Citroën Jumpy",
+    "text": "Autoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · anna_k@example.invalid\n↗\nAnna_K · 📝\n20.10, 09:09\nHallo, ich interessiere mich sehr für Ihre Sitzbank. Ist sie noch verfügbar? Gibt es Risse oder V",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t2",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-pl": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Einzelsitz Fahrersitz VW T6»",
+     "b.ad-title «Einzelsitz Fahrersitz VW T6»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Einzelsitz Fahrersitz VW T6",
+    "text": "Werkstatt Ost\nEinzelsitz Fahrersitz VW T6\n250 €\nPiotr · piotr@example.invalid\n↗\nPiotr · 📝\n20.10, 06:09\nDzień dobry, czy fotel jest dostępny? Ile kosztuje wysyłka do Polski?\nДобрый день, кресло доступ",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t3",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-new": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Sitzbank Ford Transit Custom»",
+     "b.ad-title «Sitzbank Ford Transit Custom»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank Ford Transit Custom",
+    "text": "Ersatzteile Nord\nSitzbank Ford Transit Custom\n500 €\nJean · jean@example.invalid\n↗\nJean · 📝\n20.10, 10:09\nBonjour, prix final ?\nЗдравствуйте, финальная цена?\nЧерновик #6\nждёт проверки\nDE → клиенту\nRU и",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t6",
+     "to": "#/pipeline"
+    }
+   },
+   "thread-answered": {
+    "W": 322,
+    "H": 335,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Sitzbank 2er Mercedes Vito»",
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t4",
+     "to": "#/pipeline"
+    }
+   },
+   "client": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "button «Серьёзный» 109×32",
+     "button «Торгуется» 98×32",
+     "button «Тянет время» 117×32",
+     "button «Мошенник» 102×32",
+     "button «💾 Сохранить» 125×35",
+     "a «✉️ Написать» 116×35"
+    ],
+    "smallN": 7,
+    "trunc": [
+     "b.title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 1,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Klaus M.",
+    "text": "Klaus M.\nklausm.@example.invalid\n1 обращ. · 0 продажа\nСерьёзный\nТоргуется\nТянет время\nМошенник\n💾 Сохранить\n✉️ Написать\nПЕРЕПИСКИ\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nП",
+    "back": {
+     "how": "header",
+     "from": "#/client/klausm.%40example.invalid",
+     "to": "#/pipeline"
+    }
+   },
+   "review": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь",
+    "back": {
+     "how": "header",
+     "from": "#/thread/qa-t1/msg/1",
+     "to": "#/pipeline"
+    }
+   },
+   "tabbar": [
+    {
+     "t": "📥 Входящие",
+     "w": 62,
+     "h": 57,
+     "bottom": 318,
+     "H": 318
+    },
+    {
+     "t": "👥 Клиенты",
+     "w": 61,
+     "h": 57,
+     "bottom": 318,
+     "H": 318
+    },
+    {
+     "t": "💰 Продажи",
+     "w": 61,
+     "h": 57,
+     "bottom": 318,
+     "H": 318
+    },
+    {
+     "t": "🔎 Рынок",
+     "w": 61,
+     "h": 57,
+     "bottom": 318,
+     "H": 318
+    },
+    {
+     "t": "📊 Обзор",
+     "w": 61,
+     "h": 57,
+     "bottom": 318,
+     "H": 318
+    }
+   ],
+   "send-sheet-1": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «📨 Отправить как есть» 272×42",
+     "button «🤖 Предложить текст от ЛЛМ» 272×42",
+     "button «✕ Отменить» 272×42"
+    ],
+    "smallN": 5,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "send-sheet-final": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «📨 Отправить» 272×42",
+     "button «✏️ Редактировать» 272×42",
+     "button «🤖 Переписать идею ЛЛМ…» 272×42",
+     "button «✕ Отменить» 272×42"
+    ],
+    "smallN": 6,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "sheet-after-nav": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [
+     "span.unread-dot «unread-dot» right=327"
+    ],
+    "overflowN": 1,
+    "small": [
+     "button «Все аккаунты» 122×30",
+     "button «Ersatzteile Nord» 135×30",
+     "button «Autoteile Süd» 118×30",
+     "button «Werkstatt Ost» 119×30",
+     "button «Garage West» 114×30",
+     "button «Teile-Lager Mitte» 138×30",
+     "button «Все» 54×30",
+     "button «Ждут нас» 93×30",
+     "button «Ждём» 68×30",
+     "button «Автопилот» 103×30",
+     "button «↻» 40×30",
+     "button «Выбрать» 91×30",
+     "button «📨 Отправить» 272×42",
+     "button «✏️ Редактировать» 272×42",
+     "button «🤖 Переписать идею ЛЛМ…» 272×42",
+     "button «✕ Отменить» 272×42"
+    ],
+    "smallN": 16,
+    "trunc": [
+     "b.title «Sitzbank Citroën Jumpy»",
+     "div.tc-sub «Anna_K · Здравствуйте, очень интересует »",
+     "div.tc-sub «Klaus M. · Задняя скамья ещё есть? После»",
+     "div.tc-sub «Jean · Здравствуйте, финальная цена?»",
+     "b.title «Einzelsitz Fahrersitz VW T6»",
+     "div.tc-sub «Piotr · Добрый день, кресло доступно? Ск»",
+     "b.title «Sitzbank 2er Mercedes Vito»",
+     "div.tc-sub «M.Yilmaz · Спасибо, напишу завтра.»",
+     "div.tc-sub «B.ST · Могу забрать сегодня? Наличными.»"
+    ],
+    "truncN": 9,
+    "backVisible": false,
+    "tgBack": false,
+    "title": "Входящие",
+    "text": "Все аккаунты\nErsatzteile Nord\nAutoteile Süd\nWerkstatt Ost\nGarage West\nTeile-Lager Mitte\nВсе\nЖдут нас\nЖдём\nАвтопилот\n↻\nВыбрать\n📌 ЗАКРЕПЛЁННЫЕ · 1\nAutoteile Süd\nSitzbank Citroën Jumpy\n1000 €\nAnna_K · З"
+   },
+   "more-menu": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "keyboard-thread": {
+    "W": 306,
+    "H": 174,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   },
+   "compose-sheet": {
+    "W": 322,
+    "H": 335,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "h1. «Sitzbank 2er Mercedes Vito»",
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "keyboard-compose": {
+    "W": 322,
+    "H": 184,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26",
+     "button «🔁 Перевести» 139×42",
+     "button «✕ Отмена» 108×42"
+    ],
+    "smallN": 4,
+    "trunc": [
+     "h1. «Sitzbank 2er Mercedes Vito»",
+     "b.ad-title «Sitzbank 2er Mercedes Vito»"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Sitzbank 2er Mercedes Vito",
+    "text": "Garage West\nSitzbank 2er Mercedes Vito\n600 €\nM.Yilmaz · m.yilmaz@example.invalid\n↗\nM.Yilmaz\n19.10, 05:09\nDanke, ich melde mich morgen.\nСпасибо, напишу завтра.\nGarage West\n19.10, 06:09\nGerne, ich warte"
+   },
+   "sold-sheet": {
+    "W": 306,
+    "H": 318,
+    "hscroll": 0,
+    "overflow": [],
+    "overflowN": 0,
+    "small": [
+     "button «Назад» 33×35",
+     "a «↗» 15×26"
+    ],
+    "smallN": 2,
+    "trunc": [
+     "h1. «Rückbank Peugeot Traveller 2+1 Sitzbank »",
+     "b.ad-title «Rückbank Peugeot Traveller 2+1 Sitzbank »"
+    ],
+    "truncN": 2,
+    "backVisible": true,
+    "tgBack": false,
+    "title": "Rückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett",
+    "text": "Ersatzteile Nord\nRückbank Peugeot Traveller 2+1 Sitzbank Leder schwarz komplett\n450 €\nKlaus M. · klausm.@example.invalid\n↗\nKlaus M.\n19.10, 09:09\nHallo, ist die Bank noch verfügbar?\nЗдравствуйте, скамь"
+   }
+  },
+  "flows": {
+   "send_sheet_buttons": [
+    "🌐 Перевести на DE и отправить",
+    "📨 Отправить как есть",
+    "🤖 Предложить текст от ЛЛМ",
+    "✕ Отменить"
+   ],
+   "final_sheet_text": "Подготовка к отправке\nHallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen\nRU: Да, ещё есть. 300 мало, 400 можно.\n📨 Отправить\n✏️ Редактировать\n🤖 Переписать идею ЛЛМ…\n✕ Отменить",
+   "sheet_open_after_nav": true,
+   "unsaved": {
+    "left_to": "#/pipeline",
+    "warned": false,
+    "tg_confirm": [],
+    "text_after_return": "Hallo Klaus, ja, sie ist noch da. 300 € ist leider zu wenig, 400 € wäre möglich.\nMit freundlichen Grüßen",
+    "kept": false
+   },
+   "keyboard": {
+    "H": 174,
+    "textarea_top": 35,
+    "textarea_bottom": 175,
+    "textarea_visible": true,
+    "dock_top": 26,
+    "dock_covers_textarea": true,
+    "send_visible": true
+   },
+   "keyboard_compose": {
+    "H": 184,
+    "textarea_visible": false,
+    "primary": "✕ Отмена",
+    "primary_visible": false
+   },
+   "keyboard_error": "Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=re.compile(r\"Написать\")).first\n    - locator resolved to <button class=\"btn\">✉️ Написать</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is ",
+   "deeplink_review_1": {
+    "opened": "#/thread/qa-t1/msg/1",
+    "back_hops": [
+     "#/thread/qa-t1/msg/1",
+     "#/pipeline"
+    ]
+   },
+   "deeplink_thread_qa-t1": {
+    "opened": "#/thread/qa-t1",
+    "back_hops": [
+     "#/thread/qa-t1",
+     ""
+    ]
+   },
+   "deeplink_dashboard": {
+    "opened": "#/dashboard",
+    "back_hops": [
+     "#/dashboard"
+    ]
+   }
+  },
+  "events": {
+   "errors": [],
+   "http": [
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "unsaved"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "keyboard-thread"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "status": "failed",
+     "path": "http://127.0.0.1:8799/api/ma/messages/1/lock/release-beacon",
+     "err": "net::ERR_ABORTED",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "nonget": [
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "thread-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/acquire",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/2/lock/release",
+     "body": "",
+     "screen": "thread-long"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/acquire",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/3/lock/release",
+     "body": "",
+     "screen": "thread-pl"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/acquire",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/6/lock/release",
+     "body": "",
+     "screen": "thread-new"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "send-flow"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "send-sheet-final"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "more-menu"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "unsaved"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "keyboard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "sold-sheet"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/release",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-review_1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    },
+    {
+     "method": "POST",
+     "path": "/api/ma/messages/1/lock/acquire",
+     "body": "",
+     "screen": "deeplink-thread_qa-t1"
+    }
+   ],
+   "dialogs": []
+  }
+ }
+}
