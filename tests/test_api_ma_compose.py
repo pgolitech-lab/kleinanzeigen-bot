@@ -149,10 +149,9 @@ def test_compose_requires_auth(client):
 
 def test_compose_preview_translates_russian_input(client):
     c, mdb, msched, mclaude = client
-    mclaude.translate_only.side_effect = [
-        {"translation": "Hallo, das Auto ist verfügbar."},  # ru -> de
-        {"translation": "Здравствуйте, машина доступна."},  # de -> ru back-translate
-    ]
+    mclaude.translate_with_back.return_value = {
+        "translation": "Hallo, das Auto ist verfügbar.",
+        "back_translation": "Здравствуйте, машина доступна.", "target_lang": "de"}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/threads/abc/compose-preview",
                  json={"text": "Здравствуйте, машина доступна."},
@@ -161,8 +160,10 @@ def test_compose_preview_translates_russian_input(client):
     body = res.json()
     assert body["target_lang"] == "de"
     assert body["translated"] == "Hallo, das Auto ist verfügbar."
+    assert body["back_ru"] == "Здравствуйте, машина доступна."
     assert "note" not in body
-    assert mclaude.translate_only.call_count == 2
+    mclaude.translate_with_back.assert_called_once()  # один вызов вместо двух
+    mclaude.translate_only.assert_not_called()
 
 
 def test_compose_preview_non_cyrillic_input_skips_translation(client):

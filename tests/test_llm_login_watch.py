@@ -41,3 +41,11 @@ def test_undelivered_alert_is_retried():
     assert _run_msg(False, "CLI не авторизован", 1000, sent=False) == 1
     assert _run_msg(False, "CLI не авторизован", 1060) == 1  # не дошло — пробуем снова, а не ждём 6 ч
     assert _run_msg(False, "CLI не авторизован", 1120) == 0
+
+
+def test_llm_login_status_for_health():
+    tb._llm_login_state.update(ok=True, alerted_at=0.0, check_fails=0, checked_at=None)
+    assert tb.llm_login_status()["llm_login_ok"] is None
+    _run_msg(False, "CLI не авторизован", 1000)
+    st = tb.llm_login_status()
+    assert st["llm_login_ok"] is False and st["llm_checked_at"]

@@ -153,6 +153,18 @@ def test_send_translate_mode_empty_translation_aborts(client):
     msched.send_one.assert_not_called()
 
 
+def test_send_translate_result_in_wrong_language_aborts(client):
+    """Перевод вернул кириллицу немецкому клиенту → 409, в БД и клиенту ничего не уходит."""
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.return_value = {"translation": "Здравствуйте, ещё доступно"}
+    res = c.post("/api/ma/messages/123/send",
+                 json={"mode": "translate", "text": "Здравствуйте, ещё доступно"},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 409
+    mdb.update_message.assert_not_called()
+    msched.send_one.assert_not_called()
+
+
 def test_send_rejects_unknown_mode(client):
     c, mdb, mtb, msched, mclaude = client
     init = make_init_data(TEST_USER)
@@ -515,8 +527,9 @@ def test_regenerate_all_5_valid_strategies(client):
 
 def test_edit_ru_success(client):
     c, mdb, mtb, msched, mclaude = client
-    # translate_only вызывается дважды: forward (ru→de) и back (de→ru)
-    mclaude.translate_only.side_effect = ["Neue DE Text", "Новый back"]
+    # перевод + обратный перевод — один вызов translate_with_back
+    mclaude.translate_with_back.return_value = {
+        "translation": "Neue DE Text", "back_translation": "Новый back", "target_lang": "de"}
     init = make_init_data(TEST_USER)
     res = c.post("/api/ma/messages/123/edit-ru",
                  json={"text": "Новый RU текст"},
@@ -524,12 +537,24 @@ def test_edit_ru_success(client):
     assert res.status_code == 200
     body = res.json()
     assert body["msg_id"] == 123
-    assert mclaude.translate_only.call_count == 2
+    mclaude.translate_with_back.assert_called_once()
+    mclaude.translate_only.assert_not_called()
     args, kwargs = mdb.update_message.call_args
     assert kwargs["ru_answer"] == "Новый RU текст"
     assert kwargs["de_answer"] == "Neue DE Text"
     assert kwargs["ru_translation"] == "Новый back"
     assert kwargs["status"] == "edited"
+
+
+def test_edit_ru_falls_back_to_two_calls_without_translate_with_back(client):
+    c, mdb, mtb, msched, mclaude = client
+    del mclaude.translate_with_back  # сборка без opt/llm
+    mclaude.translate_only.side_effect = ["Neue DE Text", "Новый back"]
+    res = c.post("/api/ma/messages/123/edit-ru", json={"text": "Новый RU текст"},
+                 headers={"X-Telegram-Init-Data": make_init_data(TEST_USER)})
+    assert res.status_code == 200
+    assert mclaude.translate_only.call_count == 2
+    assert mdb.update_message.call_args.kwargs["de_answer"] == "Neue DE Text"
 
 
 def test_edit_de_success(client):

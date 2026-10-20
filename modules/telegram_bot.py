@@ -524,27 +524,19 @@ def _drain_deferred(thread_id: str) -> None:
 
 
 # ============================================================
-# No-op заглушки. TODO(api): удалить, когда модуль mail уберёт вызовы
-# из modules/incoming.py и modules/outgoing.py (api_ma их уже не зовёт).
-# ============================================================
-
-def refresh_pipeline_for_active_chats() -> None:
-    """No-op: интерактивного pipeline в боте больше нет (вся работа в MA)."""
-    return None
-
-
-def broadcast_thread_state(gmail_thread_id: str) -> None:
-    """No-op: мини-карточек треда в боте больше нет."""
-    return None
-
-
-# ============================================================
 # Мониторинг входа CLI в подписку Claude (все LLM-вызовы идут через неё)
 # ============================================================
 
 LLM_LOGIN_REMIND_SEC = 6 * 3600  # пока вход не восстановлен — напоминать не чаще раза в 6 ч
 LLM_CHECK_FAILS_ALERT = 3  # «не смогли проверить» (таймаут CLI) подряд — тогда тоже алерт
-_llm_login_state: dict[str, Any] = {"ok": True, "alerted_at": 0.0, "check_fails": 0}
+_llm_login_state: dict[str, Any] = {"ok": True, "alerted_at": 0.0, "check_fails": 0, "checked_at": None}
+
+
+def llm_login_status() -> dict[str, Any]:
+    """Последний результат check_llm_login_job (для /health; сам CLI тут не дёргаем — до 30 с)."""
+    st = _llm_login_state
+    return {"llm_login_ok": st["ok"] if st["checked_at"] else None,
+            "llm_checked_at": st["checked_at"]}
 
 
 def _notify_sent(text: str) -> bool:
@@ -568,6 +560,7 @@ def check_llm_login_job() -> str:
     ok, msg = llm.status()
     st = _llm_login_state
     now = time.time()
+    st["checked_at"] = datetime.utcnow().isoformat(timespec="seconds")
     if ok:
         if not st["ok"] and _notify_sent("🟩 <b>Подписка Claude снова подключена</b> — генерация ответов работает."):
             logger.info("LLM: вход в подписку восстановлен")

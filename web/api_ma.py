@@ -638,6 +638,9 @@ def ma_send(msg_id: int, body: "SendBody | None" = None,
         translated = (tr.get("translation", "") if isinstance(tr, dict) else str(tr)).strip()
         if not translated:
             raise HTTPException(500, "перевод вернулся пустым — отправка отменена")
+        if not b.force and _wrong_lang_for_client(translated, client_lang):
+            raise HTTPException(409, f"Перевод, похоже, не на языке клиента ({client_lang.upper()}) — "
+                                     "отправка отменена. Проверьте текст.")
         # Исходный текст оператора сохраняем как RU-зеркало для верификации
         db.update_message(msg_id, de_answer=translated, ru_answer=src_text,
                           ru_translation=src_text, status="edited")
@@ -703,7 +706,6 @@ def ma_translate_draft(msg_id: int, body: "TranslateDraftBody | None" = None,
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     actor = actor_from_user(user)
-    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     b = body or TranslateDraftBody()
@@ -802,15 +804,6 @@ def ma_sold(msg_id: int, body: SoldBody,
     }
 
 
-# Строка уже отправлена/закрыта — регенерация превратила бы её обратно в черновик
-_FINAL_STATUSES = {"sent", "sent_debug", "skipped", "skipped_sold", "archived", "sending"}
-
-
-def _ensure_draft_editable(row: Any) -> None:
-    if row["status"] in _FINAL_STATUSES:
-        raise HTTPException(409, f"сообщение уже в статусе {row['status']} — черновик не меняем")
-
-
 def _run_regenerate(res: "dict[str, Any]") -> None:
     """Регенерация идёт через drafts.regenerate_draft* — с полным контекстом (история треда,
     бриф объявления, уроки) и сохранением deal_brief; здесь только проверка результата."""
@@ -840,7 +833,6 @@ def ma_regenerate(msg_id: int, body: RegenerateBody,
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     actor = actor_from_user(user)
-    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft(msg_id, body.strategy))
@@ -852,6 +844,27 @@ class EditTextBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
 
 
+def _client_lang(row: Any) -> str:
+    """Язык клиента строки; NULL/пусто → 'de' (иначе перевод уходил «никуда»)."""
+    return ((row["client_lang"] if "client_lang" in row.keys() else None) or "de").lower()
+
+
+def _translate_with_back(text: str, target_lang: str, *, context: "str | None" = None) -> "tuple[str, str]":
+    """RU → язык клиента + обратный перевод на RU. Один вызов LLM (claude.translate_with_back),
+    в сборке без неё — два translate_only."""
+    both = getattr(claude, "translate_with_back", None)
+    if callable(both):
+        res = both(text, target_lang, source_lang="ru", context=context)
+        return (res.get("translation") or "", res.get("back_translation") or "")
+    # TODO(api): убрать ветку после слияния opt/llm
+    tr = claude.translate_only(text, target_lang=target_lang, source_lang="ru", context=context)
+    translated = tr.get("translation", "") if isinstance(tr, dict) else str(tr)
+    if target_lang == "ru":
+        return translated, translated
+    back = claude.translate_only(translated, target_lang="ru", source_lang=target_lang)
+    return translated, (back.get("translation", "") if isinstance(back, dict) else str(back))
+
+
 @router.post("/messages/{msg_id}/edit-ru")
 def ma_edit_ru(msg_id: int, body: EditTextBody,
                user: dict = Depends(verify_init_data_dep)) -> "dict[str, Any]":
@@ -861,14 +874,12 @@ def ma_edit_ru(msg_id: int, body: EditTextBody,
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     actor = actor_from_user(user)
-    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
-    target_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
-    de_res = claude.translate_only(body.text, target_lang=target_lang, source_lang="ru")
-    de_text = de_res.get("translation", "") if isinstance(de_res, dict) else str(de_res)
-    ru_res = claude.translate_only(de_text, target_lang="ru", source_lang=target_lang)
-    ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
+    target_lang = _client_lang(row)
+    de_text, ru_back = _translate_with_back(body.text, target_lang, context=row["ad_title"])
+    if not de_text.strip():
+        raise HTTPException(502, "перевод вернулся пустым — черновик не изменён")
     db.update_message(msg_id, ru_answer=body.text, de_answer=de_text,
                       ru_translation=ru_back, status="edited")
     return _message_review_dict(msg_id)
@@ -883,10 +894,9 @@ def ma_edit_de(msg_id: int, body: EditTextBody,
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     actor = actor_from_user(user)
-    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
-    source_lang = row["client_lang"] if "client_lang" in row.keys() else "de"
+    source_lang = _client_lang(row)
     ru_res = claude.translate_only(body.text, target_lang="ru", source_lang=source_lang)
     ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
     db.update_message(msg_id, de_answer=body.text, ru_translation=ru_back,
@@ -911,7 +921,6 @@ def ma_price(msg_id: int, body: PriceBody,
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     actor = actor_from_user(user)
-    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft_with_price(msg_id, body.eur))
@@ -927,7 +936,6 @@ def ma_instruction(msg_id: int, body: InstructionBody,
         raise HTTPException(404, "message not found")
     _ensure_draft_editable(row)
     actor = actor_from_user(user)
-    _ensure_draft_editable(row)
     _claim_or_409(msg_id, actor)
 
     _run_regenerate(scheduler.regenerate_draft_with_instruction(msg_id, body.text))
@@ -1061,6 +1069,8 @@ def _build_regen_context(msg_row: Any) -> tuple[Any, str, Any]:
         from scheduler import _regen_context
         return _regen_context(msg_row)
     except Exception:
+        # Превью без контекста хуже, но лучше, чем 500 — только не молча
+        logger.exception("autopilot preview: контекст треда не собран, msg=%s", msg_row["id"])
         return [], "", []
 
 
@@ -1674,12 +1684,12 @@ def ma_compose_preview(thread_id: str, body: ComposeBody,
             f"Перевод НЕ выполнялся, текст будет отправлен как есть. Проверьте, что это {target_lang.upper()}."
         )
     else:
-        tr = claude.translate_only(ru_text, target_lang=target_lang, source_lang="ru", context=ad_ctx)
-        translated = tr.get("translation", "") if isinstance(tr, dict) else ""
+        translated, back_ru = _translate_with_back(ru_text, target_lang, context=ad_ctx)
 
     if target_lang == "ru":
         back_ru = translated
-    else:
+    elif note:
+        # Текст без кириллицы ушёл как есть — RU-зеркало для оператора всё равно нужно
         back = claude.translate_only(translated, target_lang="ru", source_lang=target_lang)
         back_ru = back.get("translation", "") if isinstance(back, dict) else ""
     result = {"translated": translated, "back_ru": back_ru, "target_lang": target_lang, "ru_text": ru_text}
