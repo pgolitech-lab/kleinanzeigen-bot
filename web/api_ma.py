@@ -174,6 +174,26 @@ def _related_match(row: Any) -> dict[str, Any]:
     }
 
 
+def _related(buyer_email: "str | None", display_name: "str | None", *,
+             exclude_thread_id: "str | None" = None, account_id: "int | None" = None) -> dict[str, Any]:
+    """Другие треды клиента: `matches` — точно он (тот же email), `maybe_same` — возможно тот же
+    покупатель (то же имя в том же аккаунте: relay-email Kleinanzeigen свой на каждое объявление)."""
+    if not buyer_email:
+        return {"buyer_display_name": display_name, "matches": [], "maybe_same": []}
+    try:
+        rows = db.find_related_inquiries(
+            buyer_email, exclude_thread_id=exclude_thread_id, limit=10,
+            display_name=display_name, account_id=account_id, include_maybe=True)
+    except TypeError:
+        # TODO(api): убрать после слияния opt/db (там появился include_maybe)
+        rows = db.find_related_inquiries(buyer_email, exclude_thread_id=exclude_thread_id, limit=10)
+    exact, maybe = [], []
+    for r in rows:
+        is_maybe = "maybe_same" in r.keys() and bool(r["maybe_same"])
+        (maybe if is_maybe else exact).append(_related_match(r))
+    return {"buyer_display_name": display_name, "matches": exact, "maybe_same": maybe}
+
+
 def _thread_dict(thread_id: str) -> dict[str, Any]:
     """Полный thread payload (header + events + related). Used by GET threads and autopilot endpoints."""
     history = db.thread_history(thread_id)
@@ -200,14 +220,10 @@ def _thread_dict(thread_id: str) -> dict[str, Any]:
         "is_autopilot": is_autopilot,
     }
     events = [_event_to_api(e) for e in db.thread_events(thread_id)]
-    _buyer_email = last_in["buyer_name"] if "buyer_name" in last_in.keys() else None
-    related_matches = db.find_related_inquiries(
-        _buyer_email, exclude_thread_id=thread_id, limit=10,
-    ) if _buyer_email else []
-    related = {
-        "buyer_display_name": last_in["buyer_display_name"],
-        "matches": [_related_match(r) for r in related_matches],
-    }
+    related = _related(
+        last_in["buyer_name"] if "buyer_name" in last_in.keys() else None,
+        last_in["buyer_display_name"], exclude_thread_id=thread_id,
+        account_id=last_in["account_id"] if "account_id" in last_in.keys() else None)
     return {"header": header, "events": events, "related": related}
 
 
@@ -252,16 +268,18 @@ def ma_client_history(email: str, user: dict = Depends(verify_init_data_dep)) ->
 
     # display_name и total_cost — один коннект
     display_name = email
+    account_id = None
     total_cost_usd = 0.0
     with db.get_conn() as conn:
         dn_row = conn.execute(
-            "SELECT buyer_display_name FROM messages "
+            "SELECT buyer_display_name, account_id FROM messages "
             "WHERE buyer_name = ? AND buyer_display_name IS NOT NULL "
             "ORDER BY id DESC LIMIT 1",
             (email,),
         ).fetchone()
         if dn_row:
             display_name = dn_row["buyer_display_name"]
+            account_id = dn_row["account_id"]
         cost_row = conn.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM messages WHERE buyer_name = ?",
             (email,),
@@ -319,6 +337,9 @@ def ma_client_history(email: str, user: dict = Depends(verify_init_data_dep)) ->
         "total_negotiated_eur": total_negotiated_eur,
         "last_active_thread_id": last_active_thread_id,
         "threads": threads,
+        # Треды «возможно того же покупателя» (другой relay-email, то же имя и аккаунт)
+        "maybe_same": _related(email, display_name if dn_row else None,
+                               account_id=account_id)["maybe_same"],
     }
 
 
@@ -389,10 +410,10 @@ def _message_review_dict(msg_id: int) -> "dict[str, Any]":
     autopilot_row = db.get_thread_autopilot(thread_id) if thread_id else None
     lock_state = operator_lock.state(msg_id)
     lock_holder = lock_state[0] if lock_state else None
-    _buyer_email = row["buyer_name"] if "buyer_name" in row.keys() else None
-    related_matches = db.find_related_inquiries(
-        _buyer_email, exclude_thread_id=thread_id, limit=10,
-    ) if _buyer_email else []
+    related = _related(
+        row["buyer_name"] if "buyer_name" in row.keys() else None,
+        row["buyer_display_name"], exclude_thread_id=thread_id,
+        account_id=row["account_id"] if "account_id" in row.keys() else None)
     return {
         "msg_id": row["id"],
         "thread_id": thread_id,
@@ -416,10 +437,7 @@ def _message_review_dict(msg_id: int) -> "dict[str, Any]":
             "ru_translation": row["ru_translation"] if "ru_translation" in row.keys() else None,
         },
         "deal_brief": _parse_deal_brief(row["deal_brief_json"] if "deal_brief_json" in row.keys() else None),
-        "related": {
-            "buyer_display_name": row["buyer_display_name"],
-            "matches": [_related_match(r) for r in related_matches],
-        },
+        "related": related,
         "lock": {
             "holder": lock_holder,
             "remaining_min": operator_lock.remaining_min(msg_id),
