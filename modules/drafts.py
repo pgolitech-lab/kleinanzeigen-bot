@@ -148,3 +148,58 @@ def regenerate_draft_with_instruction(message_id: int, instruction: str) -> dict
         return {"kind": "error", "message": f"❌ Перегенерация упала: {e}"}
     _save_regen_result(message_id, msg, result)
     return {"kind": "regenerated", "message": "📝 Драфт перегенерирован по инструкции", "result": result}
+
+
+# ─────────────── Подсказки оператору (ничего не пишут в БД и не отправляют) ───────────────
+
+def _latest_incoming(thread_id: str) -> Any:
+    rows = db.thread_history(thread_id)
+    return next((r for r in reversed(rows) if r["direction"] == "in"), None), rows
+
+
+def variants(msg_id: int, tones: "list[str] | None" = None) -> dict[str, Any]:
+    """Черновики под тона (hold / minus5 / floor / decline) одним вызовом LLM.
+
+    Цены считает код, пол не нарушается (варианты ниже пола отбрасываются в `dropped`).
+    Возвращает claude.generate_variants(...). Ошибки: LookupError (нет письма),
+    RuntimeError/ValueError (письмо уже обработано, тоны неприменимы),
+    llm.LLMError/LLMLimitError/LLMResponseError — текст пригоден для оператора.
+    """
+    msg = db.get_message(msg_id)
+    if msg is None:
+        raise LookupError(f"письмо #{msg_id} не найдено")
+    return claude.generate_variants(msg, tones)
+
+
+def quick_reply(msg_id: int, kind: str, account_settings: "dict[str, Any] | None" = None) -> dict[str, Any]:
+    """Типовой короткий ответ (available / last_price / delivery / pickup / payment) на языке
+    покупателя + RU-зеркало (Haiku). account_settings — факты продавца: delivery / pickup / payment.
+    Возвращает claude.generate_quick_reply(...); ValueError — не хватает факта/цены."""
+    msg = db.get_message(msg_id)
+    if msg is None:
+        raise LookupError(f"письмо #{msg_id} не найдено")
+    return claude.generate_quick_reply(msg, kind, account_settings)
+
+
+def followup_ping(thread_id: str) -> dict[str, Any]:
+    """Напоминание клиенту, который молчит после нашего ответа.
+
+    Возвращает claude.generate_followup_ping(...) + days_silent, anchor_msg_id.
+    ValueError — если последним писал клиент (напоминать некому — нужно ответить).
+    """
+    from datetime import datetime
+    anchor, rows = _latest_incoming(thread_id)
+    if anchor is None:
+        raise LookupError(f"в треде {thread_id} нет входящих писем")
+    events = db.thread_events(thread_id)
+    if not events or events[-1]["kind"] != "out":
+        raise ValueError("последним писал клиент — нужен ответ, а не напоминание")
+    try:
+        last = datetime.fromisoformat((events[-1]["ts"] or "")[:19])
+        days = max(0.0, (datetime.utcnow() - last).total_seconds() / 86400)
+    except ValueError:
+        days = 1.0
+    lang = anchor["client_lang"] or next((r["client_lang"] for r in reversed(rows) if r["client_lang"]), None) or "de"
+    res = claude.generate_followup_ping(anchor, days_silent=days, client_lang=lang)
+    res.update(days_silent=round(days, 1), anchor_msg_id=anchor["id"])
+    return res

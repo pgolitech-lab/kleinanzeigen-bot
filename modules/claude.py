@@ -885,6 +885,320 @@ def regenerate_with_instruction(
                             brief_text=brief_text, history=history)
 
 
+# ─────────────────────────── Цены сделки ───────────────────────────
+
+def effective_floor(msg_row: Any) -> Optional[float]:
+    """Пол цены: максимум из минимума объявления (ad_briefs) и floor автопилота треда."""
+    from modules import ad_brief
+    from modules.guardrails import reconcile_floor
+    ap_floor = None
+    tid = _rget(msg_row, "gmail_thread_id")
+    if tid:
+        ap = db.get_thread_autopilot(tid)
+        if ap is not None:
+            ap_floor = _rget(ap, "floor_price_eur")
+    return reconcile_floor(ad_brief.ad_min_eur(_rget(msg_row, "ad_id")), ap_floor)
+
+
+def current_price(msg_row: Any) -> Optional[float]:
+    """Наша текущая цена: последняя озвученная в треде (deal_brief), иначе цена объявления."""
+    import json as _json
+    from modules import ad_brief
+    tid = _rget(msg_row, "gmail_thread_id")
+    for r in reversed(db.thread_history(tid) if tid else []):
+        bj = _rget(r, "deal_brief_json")
+        if not bj:
+            continue
+        try:
+            p = _json.loads(bj).get("negotiated_price_eur")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(p, (int, float)) and p > 0:
+            return float(p)
+    return ad_brief.ad_price_eur(_rget(msg_row, "ad_id"), _rget(msg_row, "ad_price"))
+
+
+def _round_price(p: float) -> float:
+    """Красивая цена: до 10 € при цене ≥ 200, до 5 € — ниже."""
+    step = 10 if p >= 200 else 5
+    return float(int(round(p / step)) * step)
+
+
+# ─────────────────────────── Варианты ответа под тон ───────────────────────────
+
+VARIANT_TONES = ("hold", "minus5", "floor", "decline")
+
+_VARIANTS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "client_lang": {"type": "string"},
+        "variants": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "tone": {"type": "string", "enum": list(VARIANT_TONES)},
+                    "price_eur": {"type": ["number", "null"],
+                                  "description": "цена, которую называем в этом варианте; null если цены нет"},
+                    "ru_answer": {"type": "string"},
+                    "client_answer": {"type": "string"},
+                    "ru_translation": {"type": "string"},
+                },
+                "required": ["tone", "price_eur", "ru_answer", "client_answer", "ru_translation"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["client_lang", "variants"],
+    "additionalProperties": False,
+}
+
+
+def _fmt_eur(p: Optional[float]) -> str:
+    return "—" if p is None else (f"{int(p)}" if float(p).is_integer() else f"{p:.2f}")
+
+
+def generate_variants(
+    msg_row: Any,
+    tones: Optional[list[str]] = None,
+    *,
+    floor_eur: Optional[float] = None,
+    base_price_eur: Optional[float] = None,
+) -> dict[str, Any]:
+    """Черновики под несколько тонов ОДНИМ вызовом: hold — держим цену, minus5 — уступка 5 %,
+    floor — последнее предложение по минимуму, decline — вежливый отказ от торга.
+
+    Цены считает код (не модель): base = наша текущая цена, minus5 = base·0.95 (округлено,
+    не ниже пола), floor = пол. Варианты, где модель назвала цену ниже пола или ответила
+    не на языке клиента, отбрасываются (в `dropped` с причиной).
+    Возвращает {variants:[{tone, price_eur, ru_answer, client_answer, ru_translation}],
+    dropped:[{tone, reason}], base_price_eur, floor_eur, client_lang, tokens_in, tokens_out, cost_usd}.
+    """
+    from modules.guardrails import floor_violation, language_verdict, text_violates_floor
+    if is_final(msg_row):
+        raise RuntimeError(f"Письмо #{_rget(msg_row, 'id')} уже обработано — варианты не нужны")
+    tones = [t for t in (tones or list(VARIANT_TONES)) if t in VARIANT_TONES]
+    if not tones:
+        raise ValueError(f"нет известных тонов; допустимы: {', '.join(VARIANT_TONES)}")
+    floor = floor_eur if floor_eur is not None else effective_floor(msg_row)
+    base = base_price_eur if base_price_eur is not None else current_price(msg_row)
+    prices: dict[str, Optional[float]] = {"hold": base, "decline": None, "floor": floor}
+    if base is not None:
+        m5 = _round_price(base * 0.95)
+        prices["minus5"] = max(m5, floor) if floor else m5
+    else:
+        prices["minus5"] = None
+    dropped: list[dict[str, str]] = []
+    if "floor" in tones and floor is None:
+        tones.remove("floor")
+        dropped.append({"tone": "floor", "reason": "минимум цены по объявлению не задан"})
+    if "minus5" in tones and base is None:
+        tones.remove("minus5")
+        dropped.append({"tone": "minus5", "reason": "текущая цена неизвестна"})
+    if not tones:
+        raise RuntimeError("ни один тон не применим: " + "; ".join(d["reason"] for d in dropped))
+
+    tone_text = {
+        "hold": f"hold — держим цену {_fmt_eur(prices['hold'])} € твёрдо, вежливо обосновываем.",
+        "minus5": f"minus5 — уступаем до {_fmt_eur(prices['minus5'])} € как лучшее предложение.",
+        "floor": f"floor — последнее, окончательное предложение {_fmt_eur(prices['floor'])} € (ниже не будет).",
+        "decline": "decline — вежливо отказываемся от торга/сделки, без новой цены, оставляем дверь открытой.",
+    }
+    history, brief_text = draft_context(msg_row)
+    memory_text, lessons_text = extra_context(msg_row)
+    client_lang = _rget(msg_row, "client_lang") or None
+    parts = _context_parts(
+        ad_title=_rget(msg_row, "ad_title") or "", ad_price=_rget(msg_row, "ad_price") or "",
+        ad_description=_rget(msg_row, "ad_description") or "", seller_name=_rget(msg_row, "seller_name") or "",
+        brief_text=brief_text, history=history, memory_text=memory_text, lessons_text=lessons_text,
+        ad_state=ad_state_for(msg_row),
+    )
+    parts += [
+        "=== НОВОЕ СООБЩЕНИЕ КЛИЕНТА (на него отвечаем) ===", (_rget(msg_row, "de_client") or "").strip(), "",
+        "=== ЗАДАЧА ===",
+        "Напиши по одному варианту ответа для КАЖДОГО тона ниже (variants — в том же порядке). "
+        "Цены бери ровно указанные, другие цены не называй. price_eur — названная цена или null.",
+        *tone_text_lines(tones, tone_text), "",
+        (f"Пол цены {_fmt_eur(floor)} € — ниже не называть ни в одном варианте." if floor else ""),
+        f"client_lang — «{client_lang}»." if client_lang else "client_lang — ISO-код языка клиента.",
+        "ru_answer — вариант по-русски; client_answer — на языке клиента; ru_translation — буквальный "
+        "обратный перевод client_answer.",
+        GERMAN_CLOSING_RULE,
+    ]
+    data, meta = call_json(
+        label="варианты ответа", model=smart_model(), system=_system_prompt(),
+        user="\n".join(p for p in parts if p is not None), schema=_VARIANTS_SCHEMA,
+        max_tokens=600 + 500 * len(tones), nonempty=("client_lang",),
+    )
+    lang = (data["client_lang"] or client_lang or "de").strip().lower()
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for v in data.get("variants") or []:
+        tone = v.get("tone")
+        if tone not in tones or tone in seen:
+            continue
+        seen.add(tone)
+        text = (v.get("client_answer") or "").strip()
+        price = v.get("price_eur")
+        reason = None
+        if not text or not (v.get("ru_answer") or "").strip():
+            reason = "пустой текст"
+        elif floor and (floor_violation(price, floor) or text_violates_floor(text, floor)):
+            reason = f"цена ниже минимума {_fmt_eur(floor)} €"
+        elif language_verdict(text, lang) == "mismatch":
+            reason = f"текст не на языке клиента ({lang})"
+        if reason:
+            logger.warning("варианты msg=%s: тон %s отброшен — %s", _rget(msg_row, "id"), tone, reason)
+            dropped.append({"tone": tone, "reason": reason})
+            continue
+        out.append({"tone": tone, "price_eur": price, "ru_answer": v["ru_answer"].strip(),
+                    "client_answer": text, "ru_translation": (v.get("ru_translation") or "").strip()})
+    for t in tones:
+        if t not in seen:
+            dropped.append({"tone": t, "reason": "модель не вернула вариант"})
+    if not out:
+        raise LLMResponseError("варианты ответа: ни один вариант не прошёл проверку — "
+                               + "; ".join(f"{d['tone']}: {d['reason']}" for d in dropped))
+    return {"variants": out, "dropped": dropped, "base_price_eur": base, "floor_eur": floor,
+            "client_lang": lang, "tokens_in": meta["tokens_in"], "tokens_out": meta["tokens_out"],
+            "cost_usd": meta["cost_usd"]}
+
+
+def tone_text_lines(tones: list[str], tone_text: dict[str, str]) -> list[str]:
+    return [f"- {tone_text[t]}" for t in tones]
+
+
+# ─────────────────────────── Быстрые ответы (быстрая модель) ───────────────────────────
+
+QUICK_REPLY_KINDS: dict[str, str] = {
+    "available": "Товар ещё в наличии — коротко подтверди и пригласи к следующему шагу (встреча/покупка).",
+    "last_price": "Назови нашу последнюю цену {price} € как окончательную, вежливо.",
+    "delivery": "Расскажи про доставку: {delivery}.",
+    "pickup": "Предложи самовывоз: {pickup}.",
+    "payment": "Расскажи про способы оплаты: {payment}.",
+}
+
+_QUICK_REPLY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "client_answer": {"type": "string"},
+        "ru_translation": {"type": "string", "description": "буквальный перевод client_answer на русский"},
+    },
+    "required": ["client_answer", "ru_translation"],
+    "additionalProperties": False,
+}
+
+
+def generate_quick_reply(
+    msg_row: Any, kind: str, account_settings: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Короткий типовой ответ (1–2 предложения) на языке покупателя + RU-зеркало, Haiku.
+
+    kind: available / last_price / delivery / pickup / payment.
+    account_settings: {"delivery": "DHL 10 €, 2–3 дня", "pickup": "Köln-Lindenthal, вечером",
+    "payment": "наличные или PayPal"} — факты продавца; без нужного факта — ValueError
+    (выдумывать условия доставки/оплаты нельзя). last_price берёт текущую цену треда.
+    Возвращает {client_answer, ru_translation, client_lang, kind, tokens_in, tokens_out, cost_usd}.
+    """
+    if kind not in QUICK_REPLY_KINDS:
+        raise ValueError(f"неизвестный kind={kind!r}; допустимы: {', '.join(QUICK_REPLY_KINDS)}")
+    settings = {k: v for k, v in (account_settings or {}).items() if v not in (None, "")}
+    if kind == "last_price":
+        price = current_price(msg_row)
+        if price is None:
+            raise ValueError("текущая цена по треду неизвестна — «последняя цена» невозможна")
+        floor = effective_floor(msg_row)
+        if floor and price < floor:
+            raise ValueError(f"текущая цена {_fmt_eur(price)} € ниже минимума {_fmt_eur(floor)} €")
+        settings["price"] = _fmt_eur(price)
+    elif kind in ("delivery", "pickup", "payment") and not settings.get(kind):
+        raise ValueError(f"в настройках аккаунта не задано «{kind}» — не выдумываю условия")
+    task = QUICK_REPLY_KINDS[kind].format(**{k: settings.get(k, "") for k in ("price", "delivery", "pickup", "payment")})
+    lang = (_rget(msg_row, "client_lang") or "de").lower()
+    lang_name, _ = lang_display(lang)
+    data, meta = call_json(
+        label=f"быстрый ответ {kind}", model=fast_model(),
+        system=("Ты продавец на Kleinanzeigen.de. Пишешь очень короткий (1–2 предложения) вежливый ответ "
+                "покупателю. Только факты из задачи, ничего не выдумывай."),
+        user=(f"Объявление: {_rget(msg_row, 'ad_title') or '—'}\n"
+              f"Сообщение покупателя: {_clip(_rget(msg_row, 'de_client') or '', 800)}\n\n"
+              f"Задача: {task}\n"
+              f"client_answer — на языке покупателя: {lang_name} (ISO {lang}). "
+              f"ru_translation — буквальный перевод client_answer на русский.\n" + GERMAN_CLOSING_RULE),
+        schema=_QUICK_REPLY_SCHEMA, max_tokens=400, nonempty=("client_answer", "ru_translation"),
+    )
+    from modules.guardrails import language_verdict
+    text = data["client_answer"].strip()
+    if language_verdict(text, lang) == "mismatch":
+        raise LLMResponseError(f"быстрый ответ {kind}: текст не на языке покупателя ({lang})")
+    return {"client_answer": text, "ru_translation": data["ru_translation"].strip(), "client_lang": lang,
+            "kind": kind, "tokens_in": meta["tokens_in"], "tokens_out": meta["tokens_out"],
+            "cost_usd": meta["cost_usd"]}
+
+
+# ─────────────────────────── Напоминание молчуну ───────────────────────────
+
+_PING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "ru_answer": {"type": "string"},
+        "client_answer": {"type": "string"},
+        "ru_translation": {"type": "string"},
+    },
+    "required": ["ru_answer", "client_answer", "ru_translation"],
+    "additionalProperties": False,
+}
+
+
+def generate_followup_ping(
+    anchor_row: Any,
+    *,
+    days_silent: float,
+    client_lang: str,
+) -> dict[str, Any]:
+    """Вежливое напоминание клиенту, который молчит после нашего ответа.
+
+    anchor_row — последнее входящее треда (для истории, объявления, памяти, уроков).
+    Возвращает {ru_answer, client_answer, ru_translation, client_lang, tokens_in, tokens_out, cost_usd}.
+    """
+    from modules.guardrails import language_verdict, text_violates_floor
+    tid = _rget(anchor_row, "gmail_thread_id") or ""
+    history = history_for(tid)
+    _, brief_text = draft_context(anchor_row)
+    memory_text, lessons_text = extra_context(anchor_row)
+    parts = _context_parts(
+        ad_title=_rget(anchor_row, "ad_title") or "", ad_price=_rget(anchor_row, "ad_price") or "",
+        ad_description=_rget(anchor_row, "ad_description") or "", seller_name=_rget(anchor_row, "seller_name") or "",
+        brief_text=brief_text, history=history, memory_text=memory_text, lessons_text=lessons_text,
+        ad_state=ad_state_for(anchor_row),
+    )
+    lang_name, _ = lang_display(client_lang)
+    days = int(days_silent) if days_silent >= 1 else 1
+    parts += [
+        "=== ЗАДАЧА ===",
+        f"Клиент молчит примерно {days} дн. после нашего последнего сообщения. Напиши вежливое ненавязчивое "
+        "напоминание: 1–2 коротких предложения, без давления и спам-фраз; можно спросить, актуально ли ещё, "
+        "нужны ли уточнения. НЕ повторяй уже сказанное, НЕ снижай цену сам, не называй новых цен.",
+        f"client_answer — на языке клиента: {lang_name} (ISO {client_lang}); ru_answer — по-русски; "
+        "ru_translation — буквальный перевод client_answer.",
+        GERMAN_CLOSING_RULE,
+    ]
+    data, meta = call_json(
+        label="напоминание клиенту", model=smart_model(), system=_system_prompt(),
+        user="\n".join(parts), schema=_PING_SCHEMA, max_tokens=700,
+        nonempty=("ru_answer", "client_answer", "ru_translation"),
+    )
+    text = data["client_answer"].strip()
+    if language_verdict(text, client_lang) == "mismatch":
+        raise LLMResponseError(f"напоминание: текст не на языке клиента ({client_lang})")
+    floor = effective_floor(anchor_row)
+    if floor and text_violates_floor(text, floor):
+        raise LLMResponseError(f"напоминание: названа цена ниже минимума {_fmt_eur(floor)} €")
+    return {"ru_answer": data["ru_answer"].strip(), "client_answer": text,
+            "ru_translation": data["ru_translation"].strip(), "client_lang": client_lang,
+            "tokens_in": meta["tokens_in"], "tokens_out": meta["tokens_out"], "cost_usd": meta["cost_usd"]}
+
+
 # ─────────────────────────── Уроки ───────────────────────────
 
 _LESSON_SCHEMA: dict[str, Any] = {
