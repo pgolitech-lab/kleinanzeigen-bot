@@ -1445,3 +1445,11 @@ em.good { color: var(--good); }
 .dash { display: flex; flex-direction: column; gap: 8px; }
 .r-unit.need { border-color: var(--warn); }
 .srow.no-link { cursor: default; }
+
+/* ===== варианты ответа (/variants) ===== */
+.variants { display: flex; flex-direction: column; gap: 10px; }
+.var { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.var-h { display: flex; justify-content: space-between; gap: 8px; }
+.var-t { margin: 0; white-space: pre-wrap; }
+.var-ru, .var-meta { margin: 0; color: var(--hint); white-space: pre-wrap; }
+.pchip.vchip { border-color: var(--accent); color: var(--accent); }

@@ -490,6 +490,10 @@ function renderThread(mount, params, data, opts = {}) {
     list.push({ key: "s:short", label: "Короче", strategy: "short" });
     list.push({ key: "s:friend", label: "Мягче", strategy: "friend" });
     list.push({ key: "s:regen", label: "🔁 Вариант", strategy: "regen" });
+    const vb = el(`<button type="button" class="pchip vchip"></button>`);
+    vb.textContent = "✨ Все варианты";
+    vb.addEventListener("click", () => variantsSheet());
+    pult.appendChild(vb);
     list.forEach(c => {
       const b = el(`<button type="button" class="pchip"></button>`);
       b.textContent = c.label;
@@ -497,6 +501,51 @@ function renderThread(mount, params, data, opts = {}) {
       b.addEventListener("click", () => applyChip(c, b, d));
       pult.appendChild(b);
     });
+  }
+
+  const TONE = { hold: "Держу цену", minus5: "Уступка −5 %", floor: "Последняя цена (минимум)", decline: "Вежливый отказ" };
+
+  // Все ценовые тона одним вызовом ИИ; выбор делает вариант черновиком (/variants/{tone}/apply)
+  async function variantsSheet() {
+    if (draftDirty() && !(await confirmSheet("Ваша правка в черновике будет заменена вариантом ИИ. Продолжить?", "Заменить"))) return;
+    const box = el(`<div class="variants"><div class="var-busy small">⏳ ИИ готовит варианты…</div></div>`);
+    openSheet(box, "✨ Варианты ответа");
+    let r;
+    try {
+      r = await api(`/api/ma/messages/${msgId}/variants`, { method: "POST", body: {}, timeoutMs: LLM_TIMEOUT_MS });
+    } catch (e) {
+      if (box.isConnected) box.innerHTML = "", box.appendChild(el(`<div class="text-danger small"></div>`)).textContent = e.message ?? String(e);
+      return;
+    }
+    if (!box.isConnected) return;
+    box.replaceChildren();
+    const meta = [];
+    if (r.base_price_eur != null) meta.push(`цена ${fmtEur(r.base_price_eur)}`);
+    if (r.floor_eur != null) meta.push(`минимум ${fmtEur(r.floor_eur)}`);
+    if (meta.length) box.appendChild(el(`<div class="var-meta small"></div>`)).textContent = meta.join(" · ");
+    (r.variants ?? []).forEach(v => {
+      const c = el(`<article class="var"><div class="var-h"><b></b><span></span></div><p class="var-t"></p><p class="var-ru small"></p><button class="btn btn-primary" type="button">Взять этот</button></article>`);
+      c.querySelector("b").textContent = TONE[v.tone] ?? v.tone;
+      c.querySelector(".var-h span").textContent = v.price_eur != null ? fmtEur(v.price_eur) : "";
+      c.querySelector(".var-t").textContent = v.client_text ?? "";
+      c.querySelector(".var-ru").textContent = v.ru_translation || v.ru_text || "";
+      c.querySelector("button").addEventListener("click", async ev => {
+        ev.currentTarget.disabled = true;
+        try {
+          syncDraft(await api(`/api/ma/messages/${msgId}/variants/${v.tone}/apply`, { method: "POST" }));
+          closeSheet();
+          toast("✅ Вариант взят в черновик");
+        } catch (e) {
+          toast(e.message ?? String(e), { level: "bad", ms: 5000 });
+          ev.currentTarget.disabled = false;
+        }
+      });
+      box.appendChild(c);
+    });
+    if (!(r.variants ?? []).length) box.appendChild(el(`<div class="empty"><p>Подходящих вариантов нет</p></div>`));
+    const dr = r.dropped ?? [];
+    if (dr.length) box.appendChild(el(`<div class="var-meta small"></div>`)).textContent =
+      `Не показаны (ниже минимума или нет данных): ${dr.map(d => TONE[d.tone ?? d] ?? d.tone ?? d).join(", ")}`;
   }
 
   function draftDirty() {
@@ -844,8 +893,41 @@ function renderThread(mount, params, data, opts = {}) {
     }
   }
 
+  // Текст от ИИ (быстрый ответ / напоминание) → форма «Написать» с готовым предпросмотром
+  async function llmCompose(path, body, title) {
+    toast("⏳ ИИ пишет текст…", { ms: 60000 });
+    try {
+      const r = await api(path, { method: "POST", body, timeoutMs: LLM_TIMEOUT_MS });
+      document.querySelector(".toast")?.remove();
+      if (!mount.isConnected) return;
+      const form = buildComposeForm({
+        threadId: params.thread_id, prefill: r,
+        onSubmitComplete: res => { closeSheet(); render(mount, params, {sendResult: res ?? {}}); },
+        onCancel: () => closeSheet(),
+      });
+      openSheet(form, title);
+    } catch (e) {
+      toast(`Ошибка: ${e.message ?? String(e)}`, { level: "bad", ms: 6000 });
+    }
+  }
+
+  const QUICK = [
+    ["available", "✅ Ещё в наличии"], ["last_price", "💶 Последняя цена"], ["delivery", "📦 Доставка"],
+    ["pickup", "📍 Самовывоз"], ["payment", "💳 Оплата"],
+  ];
+  function quickMenu() {
+    const last = [...(data.events ?? [])].reverse().find(e => e.msg_id)?.msg_id ?? msgId;
+    if (!last) { toast("Нет письма клиента, на которое отвечать"); return; }
+    menuSheet(QUICK.map(([kind, label]) => ({
+      label, onClick: () => llmCompose(`/api/ma/messages/${last}/quick`, {kind}, `⚡ ${label}`),
+    })), "Быстрый ответ");
+  }
+  const followupHandler = () => llmCompose(`/api/ma/threads/${encodeURIComponent(params.thread_id)}/followup`, {}, "🔔 Напоминание клиенту");
+
   function moreMenu() {
     menuSheet([
+      { label: "⚡ Быстрый ответ…", onClick: quickMenu },
+      { label: "🔔 Напомнить молчащему", onClick: followupHandler },
       { label: "👤 Клиент и история", onClick: historyHandler },
       review ? null : { label: "🤖 Предложить ответ ИИ", onClick: () => suggestHandler(null) },
       { label: "✉️ Написать своими словами", onClick: composeHandler },

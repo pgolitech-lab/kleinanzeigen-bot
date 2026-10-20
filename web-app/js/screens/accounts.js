@@ -77,6 +77,44 @@ function passwordSheet(a, onDone) {
   openSheet(box, `🔑 ${a.name}: доступы`);
 }
 
+// Факты продавца для «⚡ Быстрых ответов» в переписке (по-русски; ИИ напишет на языке покупателя)
+async function quickInfoSheet(a) {
+  const box = el(`
+    <div class="pw-form">
+      <label class="form-label small">Доставка</label>
+      <input class="form-control qi-delivery" maxlength="500" placeholder="DHL 10 €, 2–3 дня">
+      <label class="form-label small">Самовывоз</label>
+      <input class="form-control qi-pickup" maxlength="300" placeholder="Köln, вечером после 18">
+      <label class="form-label small">Оплата</label>
+      <input class="form-control qi-payment" maxlength="300" placeholder="наличными или PayPal">
+      <div class="form-error text-danger small" hidden></div>
+      <div class="sheet-actions"><button class="btn cancel-btn" type="button">Отмена</button><button class="btn btn-primary save-btn" type="button">💾 Сохранить</button></div>
+    </div>`);
+  const err = box.querySelector(".form-error");
+  const f = k => box.querySelector(`.qi-${k}`);
+  box.querySelector(".cancel-btn").addEventListener("click", () => closeSheet());
+  try {
+    const cur = await api(`/api/ma/accounts/${a.id}/quick-info`);
+    ["delivery", "pickup", "payment"].forEach(k => { f(k).value = cur?.[k] ?? ""; });
+  } catch (e) {
+    err.textContent = `Не удалось загрузить: ${e.message ?? e}`;
+    err.hidden = false;
+  }
+  box.querySelector(".save-btn").addEventListener("click", async ev => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api(`/api/ma/accounts/${a.id}/quick-info`, { method: "POST", body: { delivery: f("delivery").value, pickup: f("pickup").value, payment: f("payment").value } });
+      closeSheet();
+      toast("✅ Сохранено");
+    } catch (e) {
+      err.textContent = e.message ?? String(e);
+      err.hidden = false;
+      ev.currentTarget.disabled = false;
+    }
+  });
+  openSheet(box, `⚡ ${a.name}: быстрые ответы`);
+}
+
 export async function render(mount) {
   setLoading(mount, "Загружаю аккаунты…");
   let data, backup = null;
@@ -99,7 +137,7 @@ export async function render(mount) {
         <div class="ac-mail"></div>
         <div class="ac-tgls"></div>
         <div class="ac-flags"></div>
-        <div class="ac-acts"><button class="btn ac-test" type="button">Проверить вход</button><button class="btn ac-pw" type="button">🔑 Доступы</button></div>
+        <div class="ac-acts"><button class="btn ac-test" type="button">Проверить вход</button><button class="btn ac-pw" type="button">🔑 Доступы</button><button class="btn ac-qi" type="button">⚡ Быстрые ответы</button></div>
         <div class="ac-res small"></div>
       </article>`);
     c.querySelector(".ac-dot").style.background = accountColor(a.id);
@@ -135,6 +173,7 @@ export async function render(mount) {
         res.classList.add("bad");
       } finally { ev.currentTarget.disabled = false; }
     });
+    c.querySelector(".ac-qi").addEventListener("click", () => quickInfoSheet(a));
     c.querySelector(".ac-pw").addEventListener("click", () => passwordSheet(a, () => render(mount)));
     list.appendChild(c);
   });
