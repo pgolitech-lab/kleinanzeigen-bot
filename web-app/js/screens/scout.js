@@ -3,6 +3,7 @@
 import { api, LLM_TIMEOUT_MS } from "../api.js";
 import { el, esc, berlinTime, setLoading, setError, eur } from "../utils.js";
 import { openLink } from "../tg.js";
+import { heatMap } from "../components/heatmap.js";
 
 // --- словарики отображения ---
 const FUEL_RU = { electric: "⚡эл", diesel: "дизель", petrol: "бензин", hybrid: "гибрид" };
@@ -94,39 +95,6 @@ function countedOptions(all, key) {
   return [...m.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([value, n]) => ({ value, text: `${value} (${n})` }));
-}
-
-// Tile-grid картограмма земель ФРГ: [row, col, аббревиатура]. Схематично geo.
-const TILE_GRID = {
-  "Schleswig-Holstein": [0, 1, "SH"],
-  "Bremen": [1, 0, "HB"], "Hamburg": [1, 1, "HH"], "Mecklenburg-Vorpommern": [1, 2, "MV"],
-  "Niedersachsen": [2, 1, "NI"], "Brandenburg": [2, 2, "BB"], "Berlin": [2, 3, "BE"],
-  "Nordrhein-Westfalen": [3, 0, "NW"], "Sachsen-Anhalt": [3, 1, "ST"], "Sachsen": [3, 2, "SN"],
-  "Rheinland-Pfalz": [4, 0, "RP"], "Hessen": [4, 1, "HE"], "Thüringen": [4, 2, "TH"],
-  "Saarland": [5, 0, "SL"], "Baden-Württemberg": [5, 1, "BW"], "Bayern": [5, 2, "BY"],
-};
-
-// Тепловая карта: считает по землям из all, рисует tile-grid с цветом ∝ количеству.
-// onPick(land) — клик по плитке (фильтр).
-function heatMap(all, onPick) {
-  const counts = new Map();
-  all.forEach(r => { if (r.bundesland) counts.set(r.bundesland, (counts.get(r.bundesland) || 0) + 1); });
-  const max = Math.max(1, ...counts.values());
-  const wrap = el(`<div class="heatmap"></div>`);
-  for (const [land, [row, col, ab]] of Object.entries(TILE_GRID)) {
-    const n = counts.get(land) || 0;
-    const t = el(`<div class="heat-tile" role="button"></div>`);
-    t.style.gridRow = row + 1;
-    t.style.gridColumn = col + 1;
-    const intensity = n / max;
-    t.style.background = n ? `rgba(239,68,68,${(0.15 + 0.85 * intensity).toFixed(3)})` : "rgba(255,255,255,0.05)";
-    t.style.color = intensity > 0.5 ? "#fff" : "var(--bs-secondary-color)";
-    t.title = `${land}: ${n}`;
-    t.innerHTML = `<div class="ab">${ab}</div><div class="n">${n}</div>`;
-    if (n) t.addEventListener("click", () => onPick(land));
-    wrap.appendChild(t);
-  }
-  return wrap;
 }
 
 // Операторская правка: переклассифицировать / удалить. Удаляет из кэша + перерисовка.
@@ -275,7 +243,7 @@ function renderLandsView(container, kind) {
   root.appendChild(removedToggle(container, kind));
   const open = (land) => { S.land[kind] = land; S.view[kind] = "cities"; S.cityQ[kind] = ""; renderCitiesView(container, kind); };
 
-  const heatDet = el(`<details class="mb-2" open><summary class="small text-muted">🗺 Тепловая карта — нажми землю</summary></details>`);
+  const heatDet = el(`<section class="c-sec heat-sec mb-2"><h3>Тепловая карта · нажмите землю</h3></section>`);
   heatDet.appendChild(heatMap(all, open));
   root.appendChild(heatDet);
 

@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright  # noqa: E402
 SCREENS = {
     "inbox": "#/", "thread": "#/thread/T1", "clients": "#/clients",
     "client": "#/client/max%40example.invalid", "sales": "#/sales", "dashboard": "#/dashboard",
-    "scout": "#/scout", "settings": "#/settings", "more": "#/more", "triage": "#/triage", "detected": "#/detected", "stock": "#/stock", "product": "#/stock/1", "stockq": "#/stock/questions", "month": "#/stock/month", "accounts": "#/accounts",
+    "scout": "#/scout", "scoutmap": "#/scout/map", "scoutsearch": "#/scout/search", "settings": "#/settings", "more": "#/more", "triage": "#/triage", "detected": "#/detected", "stock": "#/stock", "product": "#/stock/1", "stockq": "#/stock/questions", "month": "#/stock/month", "accounts": "#/accounts",
 }
 
 

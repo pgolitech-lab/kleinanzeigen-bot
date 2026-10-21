@@ -5,7 +5,7 @@ import { el } from "../utils.js";
 const ITEMS = [
   { hash: "#/dashboard", icon: "📊", title: "Обзор",              sub: "сводка за сегодня и неделю" },
   { hash: "#/detected",  icon: "🔍", title: "Найденные продажи",  sub: "проверить, что продано по переписке" },
-  { hash: "#/scout",     icon: "🗺", title: "Рынок",              sub: "найти товар и увидеть цены" },
+  { hash: "#/scout",     icon: "🗺", title: "Рынок",              sub: "сиденья, тепловая карта, поиск" },
   { hash: "#/accounts",  icon: "📮", title: "Аккаунты",           sub: "5 почт Kleinanzeigen, проверка входа, бэкап" },
   { hash: "#/settings",  icon: "⚙️", title: "Настройки",          sub: "режим отправки, напоминания, служебное" },
 ];

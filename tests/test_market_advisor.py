@@ -721,3 +721,67 @@ def test_live_search_url_and_empty_is_not_error(env, monkeypatch):
     monkeypatch.setattr(scout, "fetch_search_page", blocked)
     rows, err = ma._live_search("Zwingenxyz")
     assert rows == [] and "не отдал выдачу" in err
+
+
+# --- автосводка по сиденьям (первый экран «Рынка») -----------------------------------
+
+def _seats_market(db_mod, now):
+    for i, (c, plz) in enumerate([("Köln", "50667"), ("Köln", "50668"), ("München", "80331"), ("Berlin", "10115")]):
+        add_market(db_mod, ad_id=f"87000000{i:02d}", title=f"Sitzbank Peugeot Traveller {i}", price=800 + 100 * i,
+                   plz=plz, city=c, first=_iso(now, 5), last=_iso(now, 0))
+    add_market(db_mod, ad_id="8700000090", title="Werkbank Holz", price=100, first=_iso(now, 1), last=_iso(now, 0))
+
+
+def test_seat_market_groups_our_seats_without_query(env, monkeypatch):
+    db_mod, _dbm, ma, now = env
+    _seats_market(db_mod, now)
+    add_msg(db_mod, ad_id="9200000001", title="3er Sitzbank Peugeot Traveller Leder", price="1500 €",
+            created_at=_iso(now, 1))
+    started = []
+    monkeypatch.setattr(ma, "start_seat_refresh", lambda phrases, force=False: started.append(list(phrases))
+                        or {"started": True, "reason": None, "due": 1})
+    r = ma.seat_market()
+    assert r["status"] == "ok" and r["total"] == 4 and started and "sitzbank traveller" in started[0]
+    g = r["groups"][0]
+    assert g["category"] == "sitzbank" and g["kind_ru"] == "Скамья" and not g["default"]
+    assert g["price"]["min"] == 800 and g["price"]["max"] == 1100 and g["ours"]["verdict"] == "pricier"
+    assert g["cities"][0]["city"] == "Köln" and g["cities"][0]["count"] == 2
+    assert {x["bundesland"] for x in r["lands"]} == {"Nordrhein-Westfalen", "Bayern", "Berlin"}
+    assert all(not x["ours"] and "Werkbank" not in x["title"] for x in g["listings"])
+
+
+def test_seat_market_without_our_seats_uses_default_phrases_and_cached_live(env, monkeypatch):
+    db_mod, dbm, ma, now = env
+    _seats_market(db_mod, now)
+    dbm.cache_set(ma._live_key("einzelsitz traveller"), "psearch", {"rows": [
+        {"ad_id": "8800000001", "title": "VIP Einzelsitz Traveller", "price_eur": 450.0, "city": "Bonn",
+         "plz": "53111", "url": "u", "posted_raw": "Heute"}]})
+    r = ma.seat_market(refresh=False)
+    assert r["status"] == "no_items" and all(g["default"] for g in r["groups"])
+    ez = next(g for g in r["groups"] if g["phrases"] == ["einzelsitz traveller"])
+    assert ez["sources"]["live"] == 1 and ez["listings"][0]["source"] == "live" and ez["sources"]["live_at"]
+    assert ez["listings"][0]["bundesland"] == "Nordrhein-Westfalen"
+
+
+def test_seat_refresh_skips_fresh_and_runs_one_at_a_time(env, monkeypatch):
+    _db, dbm, ma, _now = env
+    calls = []
+    monkeypatch.setattr(ma, "_live_search", lambda q: calls.append(q) or ([], None))
+    monkeypatch.setattr(ma.time, "sleep", lambda s: None)
+    dbm.cache_set(ma._live_key("sitzbank traveller"), "psearch", {"rows": []})
+    assert ma.start_seat_refresh(["sitzbank traveller"])["reason"] == "fresh"
+    assert ma._seat_lock.acquire(blocking=False)  # будто уже идёт прогон
+    try:
+        assert ma.start_seat_refresh(["einzelsitz traveller"])["reason"] == "running"
+    finally:
+        ma._seat_lock.release()
+    r = ma.start_seat_refresh(["einzelsitz traveller"])
+    assert r["started"]
+    for _ in range(100):
+        if not ma.seat_refresh_status()["running"]:
+            break
+        import time as _t
+        _t.sleep(0.02)
+    assert calls == ["einzelsitz traveller"] and ma.seat_refresh_status()["done"] == 1
+    assert ma._seat_lock.acquire(blocking=False)
+    ma._seat_lock.release()

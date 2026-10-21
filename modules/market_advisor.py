@@ -25,6 +25,7 @@ import logging
 import random
 import re
 import statistics
+import threading
 import time
 import unicodedata
 from datetime import datetime, timedelta
@@ -34,6 +35,7 @@ from zoneinfo import ZoneInfo
 import config
 from database import get_conn
 from modules import db_market
+from modules.plz import plz_to_bundesland
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +428,7 @@ class _Ctx:
             # Рынок: все запчасти scout (включая наши — отфильтруем ниже).
             self.market: dict[str, dict[str, Any]] = {}
             for r in conn.execute(
-                "SELECT ad_id, title, url, price_eur, price_raw, plz, city, description, posted_raw, "
+                "SELECT ad_id, title, url, price_eur, price_raw, plz, city, bundesland, description, posted_raw, "
                 "first_seen_at, last_seen_at, active, deactivated_at, COALESCE(verified_kind, kind) AS ek "
                 "FROM scout_listings WHERE COALESCE(rejected,0)=0"):
                 self.market[r["ad_id"]] = dict(r)
@@ -1723,9 +1725,10 @@ SEARCH_MAX_LISTINGS = 40       # сколько объявлений отдаё�
 def _search_row(m: dict[str, Any], ours: bool, now: datetime, source: str) -> dict[str, Any]:
     age = _iso_age_days(m.get("first_seen_at"), now)
     return {"ad_id": m.get("ad_id"), "title": m.get("title"), "price_eur": m.get("price_eur"),
-            "city": m.get("city"), "plz": m.get("plz"), "url": m.get("url"),
+            "city": m.get("city"), "plz": m.get("plz"),
+            "bundesland": m.get("bundesland") or plz_to_bundesland(m.get("plz")), "url": m.get("url"),
             "age_days": None if age is None else round(age, 1), "posted_raw": m.get("posted_raw"),
-            "active": bool(m.get("active", 1)), "ours": ours, "source": source}
+            "active": bool(m.get("active", 1)), "ours": bool(ours), "source": source}
 
 
 def _live_error_ru(raw: str) -> str:
@@ -1736,9 +1739,13 @@ def _live_error_ru(raw: str) -> str:
     return "Kleinanzeigen не отдал выдачу (похоже на блокировку или окно согласия) — попробуйте позже"
 
 
+def _live_key(query: str) -> str:
+    return "psearch:" + db_market.text_hash(" ".join(tokens(query)))
+
+
 def _live_search(query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
     """Публичная выдача по фразе (без логина, ≤ 2 страниц, кэш 6 ч). -> (rows, error)."""
-    key = "psearch:" + db_market.text_hash(" ".join(tokens(query)))
+    key = _live_key(query)
     cached = db_market.cache_get(key, max_age_days=SEARCH_LIVE_TTL_DAYS)
     if cached is not None:
         return cached.get("rows", []), None
@@ -1772,7 +1779,9 @@ def _live_search(query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
     finally:
         browser.close()
     if not rows:
-        return [], None  # выдача нормальная, но товара нет — это «пусто», не ошибка
+        # выдача нормальная, но товара нет — это «пусто», не ошибка; кэшируем, чтобы не дёргать снова
+        db_market.cache_set(key, "psearch", {"rows": []})
+        return [], None
     keep = [{k: r.get(k) for k in ("ad_id", "title", "url", "price_eur", "city", "plz", "posted_raw")}
             for r in rows]
     db_market.cache_set(key, "psearch", {"rows": keep})
@@ -1794,6 +1803,55 @@ def _price_stats(prices: list[float]) -> dict[str, Any]:
     return {"min": round(min(prices)), "p25": round(_percentile(prices, 0.25)),
             "median": round(statistics.median(prices)), "p75": round(_percentile(prices, 0.75)),
             "max": round(max(prices))}
+
+
+def _title_hit(qt: list[str], title: Optional[str]) -> bool:
+    """В заголовке есть ВСЕ слова запроса (слово заголовка может быть длиннее — префикс)."""
+    tt = set(tokens(title))
+    return bool(qt) and all(w in tt or any(x.startswith(w) for x in tt) for w in qt)
+
+
+def _median_or_none(g: list[dict[str, Any]]) -> Optional[int]:
+    ps = _clean_prices([x["price_eur"] for x in g if x.get("price_eur")])
+    return round(statistics.median(ps)) if ps else None
+
+
+def _where(market: list[dict[str, Any]], top: int = 10) -> dict[str, list[dict[str, Any]]]:
+    """Разрез «где продаётся»: города, районы (первые 2 цифры PLZ), земли — по убыванию числа."""
+    by_city: dict[tuple, list] = {}
+    by_reg: dict[str, list] = {}
+    by_land: dict[str, list] = {}
+    for r in market:
+        if r.get("city"):
+            by_city.setdefault((r["city"], (r.get("plz") or "")[:2]), []).append(r)
+        if r.get("plz"):
+            by_reg.setdefault(r["plz"][:2], []).append(r)
+        if r.get("bundesland"):
+            by_land.setdefault(r["bundesland"], []).append(r)
+    return {
+        "cities": sorted(({"city": k[0], "plz_area": k[1] or None, "count": len(g), "median_eur": _median_or_none(g)}
+                          for k, g in by_city.items()), key=lambda x: -x["count"])[:top],
+        "regions": sorted(({"plz_area": k, "count": len(g), "median_eur": _median_or_none(g)}
+                           for k, g in by_reg.items()), key=lambda x: -x["count"])[:top],
+        "lands": sorted(({"bundesland": k, "count": len(g), "median_eur": _median_or_none(g)}
+                         for k, g in by_land.items()), key=lambda x: -x["count"]),
+    }
+
+
+def _our_vs_market(price: Optional[float], priced: list[float]) -> dict[str, Any]:
+    """Наша цена против рынка: отклонение от медианы и доля рынка дороже нас."""
+    e: dict[str, Any] = {"vs_median_pct": None, "verdict": None, "rank_cheaper_than_pct": None, "position_ru": None}
+    if not price or len(priced) < MIN_COMPARABLE:
+        return e
+    med = round(statistics.median(priced))
+    d = round((price - med) / med * 100)
+    e["vs_median_pct"] = d
+    e["verdict"] = "pricier" if d > 5 else "cheaper" if d < -5 else "in_market"
+    e["rank_cheaper_than_pct"] = round(100 * sum(1 for x in priced if x > price) / len(priced))
+    word = {"pricier": "дороже", "cheaper": "дешевле", "in_market": "около"}[e["verdict"]]
+    e["position_ru"] = (f"наша цена {int(price)} € — {word} медианы {med} € "
+                        f"({d:+d} %), дешевле {e['rank_cheaper_than_pct']} % рынка")
+    return e
 
 
 def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTINGS,
@@ -1841,8 +1899,7 @@ def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTI
         return res
 
     def hit(title: Optional[str]) -> bool:
-        tt = set(tokens(title))
-        return all(w in tt or any(x.startswith(w) for x in tt) for w in qt)
+        return _title_hit(qt, title)
 
     since = COMPARABLE_DAYS
     rows: list[dict[str, Any]] = []
@@ -1867,42 +1924,19 @@ def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTI
     res["total"], res["n_active"] = len(market), sum(1 for r in market if r["active"])
     res["price"] = _price_stats(priced)
     # разрез «где продаётся»
-    by_city: dict[tuple, list] = {}
-    by_reg: dict[str, list] = {}
-    for r in market:
-        if r["city"]:
-            by_city.setdefault((r["city"], (r["plz"] or "")[:2]), []).append(r)
-        if r["plz"]:
-            by_reg.setdefault(r["plz"][:2], []).append(r)
-
-    def agg(g: list) -> tuple[int, Optional[int]]:
-        ps = _clean_prices([x["price_eur"] for x in g if x["price_eur"]])
-        return len(g), (round(statistics.median(ps)) if ps else None)
-    res["cities"] = sorted(({"city": k[0], "plz_area": k[1] or None, "count": agg(g)[0], "median_eur": agg(g)[1]}
-                            for k, g in by_city.items()), key=lambda x: -x["count"])[:10]
-    res["regions"] = sorted(({"plz_area": k, "count": agg(g)[0], "median_eur": agg(g)[1]}
-                             for k, g in by_reg.items()), key=lambda x: -x["count"])[:10]
+    where = _where(market)
+    res["cities"], res["regions"] = where["cities"], where["regions"]
     # где мы
-    med = res["price"]["median"]
     our_items = []
     for it in items:
-        if not all(w in set(tokens(it["title"])) or any(x.startswith(w) for x in tokens(it["title"])) for w in qt):
+        if not _title_hit(qt, it["title"]):
             continue
-        p = it["price_eur"]
-        e: dict[str, Any] = {"item_id": it["item_id"], "title": it["title"], "price_eur": p,
-                             "vs_median_pct": None, "verdict": None, "rank_cheaper_than_pct": None}
-        if p and med and len(priced) >= MIN_COMPARABLE:
-            d = round((p - med) / med * 100)
-            e["vs_median_pct"] = d
-            e["verdict"] = "pricier" if d > 5 else "cheaper" if d < -5 else "in_market"
-            e["rank_cheaper_than_pct"] = round(100 * sum(1 for x in priced if x > p) / len(priced))
-        our_items.append(e)
+        cmp = _our_vs_market(it["price_eur"], priced)
+        our_items.append({"item_id": it["item_id"], "title": it["title"], "price_eur": it["price_eur"],
+                          **{k: cmp[k] for k in ("vs_median_pct", "verdict", "rank_cheaper_than_pct")}})
     res["ours"] = {"count": len(our_items), "items": our_items, "position_ru": None}
     if our_items and our_items[0]["verdict"]:
-        e = our_items[0]
-        word = {"pricier": "дороже", "cheaper": "дешевле", "in_market": "около"}[e["verdict"]]
-        res["ours"]["position_ru"] = (f"наша цена {int(e['price_eur'])} € — {word} медианы {med} € "
-                                      f"({e['vs_median_pct']:+d} %), дешевле {e['rank_cheaper_than_pct']} % рынка")
+        res["ours"]["position_ru"] = _our_vs_market(our_items[0]["price_eur"], priced)["position_ru"]
     rows.sort(key=lambda r: (r["price_eur"] is None, r["price_eur"] or 0))
     res["listings"] = rows[:max(1, int(limit))]
     # честный статус
@@ -1925,6 +1959,201 @@ def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTI
         res["message_ru"] += f" Живая выдача недоступна: {res['sources']['live_error']}."
     return res
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# АВТОСВОДКА ПО СИДЕНЬЯМ (первый экран вкладки «Рынок»)
+# ══════════════════════════════════════════════════════════════════════════════
+
+SEAT_CATEGORIES = ("sitzbank", "einzelsitz", "sitze", "fahrersitze", "komplettsatz")
+SEAT_KIND_RU = {"sitzbank": "Скамья", "einzelsitz": "Одиночное сиденье", "sitze": "Сиденья",
+                "fahrersitze": "Передние сиденья", "komplettsatz": "Комплект сидений"}
+# Если живых наших сидений нет (всё продано) — всё равно показываем рынок по типовым запросам.
+SEAT_DEFAULT_PHRASES = ("sitzbank traveller", "einzelsitz traveller", "sitze spacetourer")
+SEAT_MAX_PHRASES = 5             # запросов на один товар (по моделям из признаков)
+SEAT_LIVE_SHOW_DAYS = 2.0        # живую выдачу из кэша показываем, пока ей не больше 2 сут.
+SEAT_REFRESH_H = 12              # фоновое обновление живой выдачи по фразе — не чаще раза в 12 ч
+SEAT_REFRESH_MAX = 6             # фраз за один фоновый прогон (≈ 6 × 2 стр.)
+SEAT_LISTINGS = 30               # объявлений конкурентов на товар в ответе
+
+_seat_lock = threading.Lock()
+_seat_state: dict[str, Any] = {"running": False, "started_at": None, "finished_at": None,
+                               "done": 0, "total": 0, "errors": []}
+
+
+def seat_phrases(item: dict[str, Any]) -> list[str]:
+    """Как покупатель ищет наше сиденье: «<тип> <модель>» по каждой модели из признаков (≤ 5)."""
+    word = _SEARCH_WORD.get(item.get("category") or "")
+    if not word:
+        return []
+    out: list[str] = []
+    for m in (item.get("features") or {}).get("models") or []:
+        ph = f"{word} {_MODEL_SEARCH[m]}" if m in _MODEL_SEARCH else None
+        if ph and ph not in out:
+            out.append(ph)
+    return out[:SEAT_MAX_PHRASES] or [word]
+
+
+def _live_cached(phrase: str, max_age_days: float) -> tuple[Optional[list[dict[str, Any]]], Optional[str]]:
+    """Живая выдача по фразе только из кэша (без сети) -> (rows, когда снята UTC ISO). (None, None) — кэша нет/устарел."""
+    key = _live_key(phrase)
+    c = db_market.cache_get(key, max_age_days=max_age_days)
+    if c is None:
+        return None, None
+    with get_conn() as conn:
+        r = conn.execute("SELECT created_at FROM market_llm_cache WHERE cache_key=?", (key,)).fetchone()
+    return list(c.get("rows") or []), (r["created_at"] if r else None)
+
+
+def seat_refresh_status() -> dict[str, Any]:
+    return {k: (list(v) if isinstance(v, list) else v) for k, v in _seat_state.items()}
+
+
+def _seat_refresh_run(phrases: list[str]) -> None:
+    try:
+        for i, ph in enumerate(phrases):
+            if i:
+                time.sleep(random.uniform(4.0, 8.0))  # вежливая пауза между запросами
+            try:
+                _rows, err = _live_search(ph)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("market: фоновое обновление сидений «%s» упало", ph)
+                err = str(e)[:200]
+            if err:
+                _seat_state["errors"].append(f"{ph}: {err}")
+            _seat_state["done"] = i + 1
+    finally:
+        _seat_state["running"] = False
+        _seat_state["finished_at"] = datetime.utcnow().isoformat(timespec="seconds")
+        _seat_lock.release()
+        if _seat_state["errors"] and len(_seat_state["errors"]) == len(phrases):
+            logger.error("market: живая выдача по сиденьям недоступна: %s", "; ".join(_seat_state["errors"])[:500])
+
+
+def start_seat_refresh(phrases: Iterable[str], force: bool = False) -> dict[str, Any]:
+    """Фоновое обновление живой выдачи по сиденьям: один поток, фразы по очереди, httpx →
+    Playwright только при подозрительном ответе (память NUC). Не стартует, пока идёт прогон scout
+    (там уже свой браузер) и если кэш фраз моложе SEAT_REFRESH_H. -> {started, reason, due}."""
+    due = [ph for ph in dict.fromkeys(phrases)
+           if force or _live_cached(ph, SEAT_REFRESH_H / 24)[0] is None][:SEAT_REFRESH_MAX]
+    if not due:
+        return {"started": False, "reason": "fresh", "due": 0}
+    if (config.get("market_seats_live", "1") or "1").strip() != "1":
+        return {"started": False, "reason": "disabled", "due": len(due)}
+    try:
+        from modules import scout_runner
+        if scout_runner.is_running():
+            return {"started": False, "reason": "scout_running", "due": len(due)}
+    except Exception:  # noqa: BLE001
+        logger.debug("market: scout_runner недоступен", exc_info=True)
+    if not _seat_lock.acquire(blocking=False):
+        return {"started": False, "reason": "running", "due": len(due)}
+    _seat_state.update(running=True, started_at=datetime.utcnow().isoformat(timespec="seconds"),
+                       finished_at=None, done=0, total=len(due), errors=[])
+    try:
+        threading.Thread(target=_seat_refresh_run, args=(due,), name="market-seats", daemon=True).start()
+    except Exception:
+        _seat_state["running"] = False
+        _seat_lock.release()
+        raise
+    return {"started": True, "reason": None, "due": len(due)}
+
+
+def seat_market(refresh: bool = True, limit: int = SEAT_LISTINGS, now: Optional[datetime] = None,
+                _ctx: Optional[_Ctx] = None) -> dict[str, Any]:
+    """Рынок по НАШИМ сиденьям без ручного ввода: для каждого живого товара-сиденья (скамья,
+    одиночное, комплект…) — запросы «<тип> <модель>» по его моделям, объединённая выдача
+    (накопленный рынок scout за 60 дн. + живая выдача из кэша ≤ 2 сут.), цены, где продаётся,
+    объявления конкурентов. Сеть в запросе НЕ трогает: refresh=True лишь запускает фоновое
+    обновление живой выдачи по устаревшим фразам (см. start_seat_refresh).
+
+    {
+      "status": "ok" | "no_data" | "no_items", "message_ru": str,
+      "data_health": {...health_info}, "checked_at": ISO,
+      "refresh": {"started", "reason", "due", "running", "done", "total", "finished_at", "errors"},
+      "total": int — объявлений конкурентов (без наших, без повторов между товарами), "n_active": int,
+      "lands": [{"bundesland", "count", "median_eur"}] — для тепловой карты,
+      "cities": [{"city", "plz_area", "count", "median_eur"}] — топ-10,
+      "groups": [{"item_id", "title", "category", "kind_ru", "price_eur", "default": bool, "phrases": [..],
+                  "total", "n_active", "price": {min,p25,median,p75,max},
+                  "ours": {vs_median_pct, verdict, rank_cheaper_than_pct, position_ru},
+                  "cities": [топ-5], "lands": [...], "sources": {"db": int, "live": int, "live_at": ISO|None},
+                  "listings": [{ad_id,title,price_eur,city,plz,bundesland,url,age_days,posted_raw,active,ours,source}]}]
+    }
+    """
+    ctx = _ctx or _Ctx(now)
+    items = [it for it in own_items(ctx) if it.get("category") in SEAT_CATEGORIES]
+    plan: list[tuple[Optional[dict[str, Any]], list[str]]] = [(it, seat_phrases(it)) for it in items]
+    is_default = not plan
+    if is_default:
+        plan = [(None, [ph]) for ph in SEAT_DEFAULT_PHRASES]
+    all_phrases = [ph for _it, phs in plan for ph in phs]
+    res: dict[str, Any] = {"status": "ok", "message_ru": "", "data_health": health_info(ctx),
+                           "checked_at": ctx.now.isoformat(timespec="seconds"),
+                           "refresh": {"started": False, "reason": None, "due": 0},
+                           "total": 0, "n_active": 0, "lands": [], "cities": [], "groups": []}
+    if refresh:
+        try:
+            res["refresh"] = start_seat_refresh(all_phrases)
+        except Exception:  # noqa: BLE001
+            logger.exception("market: фоновое обновление сидений не стартовало")
+            res["refresh"] = {"started": False, "reason": "error", "due": 0}
+    res["refresh"].update(seat_refresh_status())
+    union: dict[str, dict[str, Any]] = {}
+    for it, phrases in plan:
+        rows: dict[str, dict[str, Any]] = {}
+        n_live, live_at = 0, None
+        for ph in phrases:
+            qt = tokens(ph)
+            for m in ctx.market.values():
+                if m["ad_id"] in rows or m["ek"] != "part" or not _title_hit(qt, m["title"]):
+                    continue
+                age = _iso_age_days(m["last_seen_at"], ctx.now)
+                if not m["active"] and (age is None or age > COMPARABLE_DAYS):
+                    continue
+                rows[m["ad_id"]] = _search_row(m, ctx.is_ours(m["ad_id"]), ctx.now, "db")
+            lr, at = _live_cached(ph, SEAT_LIVE_SHOW_DAYS)
+            if at and (live_at is None or at > live_at):
+                live_at = at
+            for x in lr or []:
+                aid = x.get("ad_id")
+                if aid and aid not in rows and _title_hit(qt, x.get("title")):
+                    rows[aid] = _search_row({**x, "first_seen_at": None, "active": 1},
+                                            ctx.is_ours(aid), ctx.now, "live")
+                    n_live += 1
+        market = [r for r in rows.values() if not r["ours"]]
+        priced = _clean_prices([r["price_eur"] for r in market if r["price_eur"]])
+        where = _where(market, top=5)
+        cat = (it or {}).get("category") or tokens(phrases[0])[0]
+        listing = sorted(market, key=lambda r: (not r["active"], r["price_eur"] is None, r["price_eur"] or 0))
+        g = {"item_id": it["item_id"] if it else None, "title": it["title"] if it else phrases[0],
+             "category": cat, "kind_ru": SEAT_KIND_RU.get(cat, "Сиденья"),
+             "price_eur": it["price_eur"] if it else None, "default": it is None, "phrases": phrases,
+             "total": len(market), "n_active": sum(1 for r in market if r["active"]),
+             "price": _price_stats(priced),
+             "ours": _our_vs_market(it["price_eur"] if it else None, priced),
+             "cities": where["cities"], "lands": where["lands"],
+             "sources": {"db": sum(1 for r in market if r["source"] == "db"), "live": n_live, "live_at": live_at},
+             "listings": listing[:max(1, int(limit))]}
+        res["groups"].append(g)
+        for r in market:
+            union.setdefault(r["ad_id"], r)
+    allm = list(union.values())
+    res["total"], res["n_active"] = len(allm), sum(1 for r in allm if r["active"])
+    where = _where(allm)
+    res["lands"], res["cities"] = where["lands"], where["cities"]
+    if is_default:
+        res["status"] = "no_items"
+        res["message_ru"] = "Живых наших сидений по данным нет — показываю рынок по типовым запросам."
+    elif not allm:
+        res["status"] = "no_data"
+        res["message_ru"] = ("По нашим сиденьям в накопленных данных пусто."
+                             + (" Ищу на Kleinanzeigen в фоне — обновите через минуту." if res["refresh"].get("running")
+                                else ""))
+    if res["data_health"]["stale"] and res["status"] != "no_items":
+        res["message_ru"] = (res["message_ru"] + " " if res["message_ru"] else "") + \
+            f"Данные scout старые ({res['data_health']['reason']})."
+    return res
 
 # ══════════════════════════════════════════════════════════════════════════════
 
