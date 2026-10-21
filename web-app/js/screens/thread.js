@@ -136,6 +136,14 @@ function threadHead(data, onClient) {
     link.href = h.ad_url;
     // Один явный обработчик: открываем ровно один раз и гасим дальнейшую обработку клика
     link.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); openLink(h.ad_url); });
+    // Запасной путь без запуска приложения Kleinanzeigen: копируем ссылку в буфер
+    const copy = el(`<button class="ibtn th-copy" type="button" aria-label="Копировать ссылку">⧉</button>`);
+    copy.addEventListener("click", async ev => {
+      ev.stopPropagation();
+      try { await navigator.clipboard.writeText(h.ad_url); toast("Ссылка скопирована"); }
+      catch { toast("Не удалось скопировать"); }
+    });
+    link.after(copy);
   } else link.remove();
   return head;
 }

@@ -42,10 +42,7 @@ export function openLink(url) {
   const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
   if (url === _lastLink.url && now - _lastLink.at < _LINK_DEBOUNCE_MS) return;
   _lastLink = { url, at: now };
-  // Android: tg.openLink (и с try_browser) давал двойной запуск приложения Kleinanzeigen —
-  // пробуем нативное открытие WebView без посредника Telegram.
-  if (tg?.platform === "android") window.open(url, "_blank");
-  else if (tg?.openLink) tg.openLink(url);
+  if (tg?.openLink) tg.openLink(url);
   else window.open(url, "_blank");
 }
 
