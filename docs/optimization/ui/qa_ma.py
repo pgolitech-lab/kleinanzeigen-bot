@@ -186,6 +186,11 @@ def mock_get(path: str):
                      "products": [{"title": "Sitzbank 3er VW T6 Multivan", "sold": 2, "profit": 1100}, {"title": "Tisch T5", "sold": 2, "profit": 240}]}
     if route == "/api/ma/pipeline":
         return 200, PIPE
+    if re.match(r"^/api/ma/threads/[^/]+/market$", route):
+        # строка рынка у чипов торга (web/api_market.py thread_market), форма ответа та же
+        return 200, {"status": "ok", "n": 12, "p25": 380, "median": 420, "p75": 470,
+                     "recommended_eur": 430, "min_eur": 380, "verdict_ru": "цена в рынке",
+                     "text": "рынок 380–470 €, медиана 420 · 12 объявл."}
     m = re.match(r"^/api/ma/threads/([^/]+)$", route)
     if m:
         tid = urllib.parse.unquote(m.group(1))
@@ -386,7 +391,7 @@ async def snapshot(page):
       hash: location.hash, title: document.getElementById('htitle')?.textContent,
       back_visible: !document.querySelector('#hd .hback')?.classList.contains('d-none'),
       error: document.querySelector('#app .alert-danger')?.innerText || null,
-      has_tcard: !!document.querySelector('#app .tcard'), has_dock: !!document.querySelector('#app .dock'),
+      has_tcard: !!document.querySelector('#app .tcard'), has_dock: !!document.querySelector('#app .tdock, #app .dock'),
       has_sec: !!document.querySelector('#app .sec'),
       text: (document.querySelector('#app')?.innerText || '').replace(/\\s+/g,' ').slice(0, 160),
       active_tab: document.querySelector('#tabbar .tab.active .tl')?.textContent || null,
