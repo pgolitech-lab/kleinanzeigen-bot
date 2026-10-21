@@ -952,7 +952,12 @@ em.good { color: var(--good); }
 .deal-strip.open .ds-more { display: block; }
 .deal-strip .scale.lg { margin-top: 6px; }
 .deal-strip:not(.open) .ds-scale { display: none; }   /* термометр — по тапу, в строке только числа */
-body.kb .tdock, body.kb .dock { display: none; }   /* док не закрывает поле при вводе */
+/* при вводе док ужимается, но «Отправить» остаётся: оператор пишет клиенту — кнопка нужна под рукой */
+body.kb .dock { display: none; }
+body.kb .tdock > :not(.btn-send) { display: none; }
+body.kb .tdock { padding: 4px 6px; }
+body.kb .btn-send { flex: 1; min-height: 44px; }
+body.kb .btn-send small { display: none; }
 :root[data-layout="split3"] .deal-strip { display: none; }   /* на Fold-ландшафте — в правой панели */
 
 /* похожий покупатель */
