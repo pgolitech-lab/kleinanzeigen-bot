@@ -664,6 +664,9 @@ function renderThread(mount, params, data, opts = {}) {
       bl.append(el(`<span class="l-long"></span>`), el(`<span class="l-short">Отправить</span>`));
       bl.querySelector(".l-long").textContent = `Отправить ${langPhrase(clientLang)}`;
       send.querySelector("small").textContent = "язык проверю перед отправкой";
+      // Тап не уводит фокус из поля: иначе клавиатура прячется, док прыгает и тап
+      // попадает мимо кнопки
+      send.addEventListener("mousedown", e => e.preventDefault());
       send.addEventListener("click", () => sendHandler(send));
       dk.appendChild(send);
     } else if (!review) {

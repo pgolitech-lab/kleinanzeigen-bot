@@ -65,8 +65,12 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel, prefill
 
   // Правка исходного RU-текста делает предпросмотр неактуальным — обязателен повторный перевод.
   textarea.addEventListener("input", () => {
-    previewBox.classList.add("d-none");
-    lastPreview = null;
+    // Предпросмотр НЕ прячем (вместе с ним пропадала кнопка отправки): помечаем устаревшим,
+    // кнопка переводит заново. Отправить старый перевод по-прежнему нельзя.
+    if (lastPreview) {
+      lastPreview = null;
+      confirmSendBtn.textContent = "🔁 Текст изменён — перевести заново";
+    }
   });
 
   translateBtn.addEventListener("click", async () => {
@@ -89,6 +93,7 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel, prefill
         noteEl.classList.add("d-none");
       }
       lastPreview = { ru_text: r.ru_text ?? text, target_lang: r.target_lang ?? "de" };
+      confirmSendBtn.textContent = "✅ Подтвердить и отправить";
       previewBox.classList.remove("d-none");
     } catch (e) {
       showErr(e.message ?? String(e));
@@ -102,7 +107,7 @@ export function buildComposeForm({ threadId, onSubmitComplete, onCancel, prefill
 
   confirmSendBtn.addEventListener("click", async () => {
     clearErr();
-    if (!lastPreview) { showErr("Сначала переведите текст"); return; }
+    if (!lastPreview) { translateBtn.click(); return; }   // устаревший предпросмотр — сначала перевод
     const finalText = dePrev.value.trim();
     if (!finalText) { showErr("Текст клиенту не может быть пустым"); return; }
 
