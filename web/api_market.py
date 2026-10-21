@@ -37,6 +37,14 @@ def market_search(q: str = Query("", max_length=80), live: bool = False, limit: 
     return market_advisor.product_search(q, live=live, limit=limit)
 
 
+@router.get("/market/seats")
+def market_seats(refresh: bool = True, limit: int = Query(30, ge=1, le=100),
+                 user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
+    """Первый экран «Рынка»: рынок по нашим сиденьям без ручного ввода (из накопленных данных,
+    сеть не трогает). refresh=1 — запустить фоновое обновление живой выдачи по устаревшим фразам."""
+    return market_advisor.seat_market(refresh=refresh, limit=limit)
+
+
 @router.get("/market/duplicates")
 def market_duplicates(user: dict = Depends(verify_init_data_dep)) -> dict[str, Any]:
     return market_advisor.duplicates_report()

@@ -112,3 +112,27 @@ price_eur,vs_median_pct,verdict cheaper|pricier|in_market,rank_cheaper_than_pct}
 `cities[{city,plz_area,count,median_eur}]`, `regions[{plz_area,count,median_eur}]` (топ-10);
 `listings[{ad_id,title,price_eur,city,plz,url,age_days,posted_raw,active,ours,source db|live}]` (дешёвые первыми).
 no_data: кнопка «Искать на Kleinanzeigen» = повтор с live=1.
+Ответ поиска дополнительно отдаёт `lands[{bundesland,count,median_eur}]`, у объявлений есть `bundesland`.
+
+## Рынок по нашим сиденьям (вкладка «Рынок» → «Сиденья», открывается первой)
+`GET /api/ma/market/seats?refresh=1&limit=30` → `ma.seat_market(refresh, limit)`. Ничего не ищем вручную:
+для каждого нашего живого товара-сиденья (категории `sitzbank`, `einzelsitz`, `sitze`, `fahrersitze`, `komplettsatz`)
+строятся фразы «<тип> <модель>» (≤ 5 на товар); если своих сидений нет — типовые фразы (`SEAT_DEFAULT_PHRASES`).
+Источник — рынок scout за 60 дн. + живая выдача **только из кэша** (`market_llm_cache`, ключ `psearch:*`, ≤ 2 сут.).
+Запрос сам сеть НЕ трогает (отвечает за доли секунды).
+
+Фоновое обновление живой выдачи (`start_seat_refresh`) при `refresh=1`: один поток-демон, фразы по очереди
+с паузой 4–8 с, фраза не чаще раза в 12 ч, не больше 6 фраз за проход; пропускается, пока идёт scout
+(`scout_runner.is_running()`) — NUC мало памяти, Playwright поднимается лишь как запасной путь `_live_search`.
+Выключатель — настройка `market_seats_live` (`1` по умолчанию, `0` — только база). Если упали ВСЕ фразы —
+`logger.error` (попадёт в hourly-монитор). Экран, пока `refresh.running`, перечитывает сводку с `refresh=0` раз в 20 с.
+
+Ответ: `status` ok | no_data | no_items + `message_ru`; `data_health`; `refresh{started, reason fresh|disabled|
+scout_running|running|error, due, running, done, total, errors[], started_at, finished_at}`; `total`, `n_active`;
+`lands[{bundesland,count,median_eur}]` (тепловая карта); `cities`; `groups[{item_id, title, category, kind_ru,
+price_eur, default, phrases[], total, n_active, price{…}, ours{vs_median_pct,verdict,rank_cheaper_than_pct,position_ru},
+cities (топ-5), lands, sources{db,live,live_at}, listings[…+bundesland]}]` — сначала активные, затем по цене.
+
+Вкладки «Рынка» (`web-app/js/screens/market-hub.js`): `#/scout` — Сиденья, `#/scout/map` — разведка scout
+с тепловой картой (старый `#/scout/legacy` ведёт туда же), `#/scout/search` — поиск. Тепловая карта —
+общий компонент `components/heatmap.js`.
