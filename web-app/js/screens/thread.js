@@ -18,7 +18,7 @@ import { buildComposeForm } from "../components/compose-form.js";
 import { buildAutopilotForm } from "../components/autopilot-form.js";
 import { avatar, icon, langBadge, langName, toast } from "../components/kit.js";
 import { thermo, hasThermo } from "../components/thermo.js";
-import { initData } from "../tg.js";
+import { initData, openLink } from "../tg.js";
 
 const PENDING_STATUSES = new Set(["pending", "new", "edited", "approved"]);
 const CYRILLIC_CLIENT_LANGS = new Set(["ru", "uk", "be", "bg", "sr", "mk"]);
@@ -132,7 +132,11 @@ function threadHead(data, onClient) {
   head.querySelector(".th-ad").textContent = h.ad_title ?? "(без названия)";
   head.querySelector(".th-who").addEventListener("click", onClient);
   const link = head.querySelector(".th-link");
-  if (h.ad_url) link.href = h.ad_url; else link.remove();
+  if (h.ad_url) {
+    link.href = h.ad_url;
+    // Один явный обработчик: открываем ровно один раз и гасим дальнейшую обработку клика
+    link.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); openLink(h.ad_url); });
+  } else link.remove();
   return head;
 }
 
