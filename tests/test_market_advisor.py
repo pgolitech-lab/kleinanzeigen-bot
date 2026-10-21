@@ -785,3 +785,16 @@ def test_seat_refresh_skips_fresh_and_runs_one_at_a_time(env, monkeypatch):
     assert calls == ["einzelsitz traveller"] and ma.seat_refresh_status()["done"] == 1
     assert ma._seat_lock.acquire(blocking=False)
     ma._seat_lock.release()
+
+
+def test_search_row_state_live_stale_gone():
+    from datetime import datetime, timedelta
+    import modules.market_advisor as ma
+    now = datetime.utcnow()
+    iso = lambda d: (now - timedelta(days=d)).isoformat()
+    fresh = ma._search_row({"ad_id": "1", "active": 1, "last_seen_at": iso(1)}, False, now, "db")
+    old = ma._search_row({"ad_id": "2", "active": 1, "last_seen_at": iso(10)}, False, now, "db")
+    gone = ma._search_row({"ad_id": "3", "active": 0, "last_seen_at": iso(1)}, False, now, "db")
+    live = ma._search_row({"ad_id": "4", "active": 1}, False, now, "live")
+    assert [r["state"] for r in (fresh, old, gone, live)] == ["live", "stale", "gone", "live"]
+    assert [r["active"] for r in (fresh, old, gone, live)] == [True, False, False, True]

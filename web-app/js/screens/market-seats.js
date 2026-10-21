@@ -86,7 +86,7 @@ function adRow(a) {
   const r = el(`<a class="ms-ad" role="link"><b class="ms-at"></b><span class="ms-ap"></span><small class="ms-am"></small></a>`);
   r.querySelector(".ms-at").textContent = a.title ?? "Без названия";
   r.querySelector(".ms-ap").textContent = money(a.price_eur);
-  r.querySelector(".ms-am").textContent = [a.city, a.age_days != null ? ageRu(a.age_days) : a.posted_raw, a.active === false ? "снято" : "", a.source === "live" ? "свежая выдача" : ""].filter(Boolean).join(" · ");
+  r.querySelector(".ms-am").textContent = [a.city, a.age_days != null ? ageRu(a.age_days) : a.posted_raw, a.state === "gone" ? "🗑 снято" : a.state === "stale" ? "⚠ давно не видели" : "", a.source === "live" ? "свежая выдача" : ""].filter(Boolean).join(" · ");
   if (/^https:\/\//i.test(a.url ?? "")) {
     r.href = a.url;
     r.target = "_blank"; r.rel = "noopener";

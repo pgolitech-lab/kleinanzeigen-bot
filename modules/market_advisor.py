@@ -1719,16 +1719,26 @@ def repost_suggestions(limit: int = 5, now: Optional[datetime] = None, with_text
 
 SEARCH_LIVE_TTL_DAYS = 0.25    # живой запрос по одной фразе не чаще раза в 6 ч
 SEARCH_LIVE_PAGES = 2          # публичная выдача, ≤ 2 страниц (≈ 50 объявлений)
+SEARCH_STALE_DAYS = 3          # active=1, но не виден в выдаче дольше — считаем пропавшим, не «живым»
 SEARCH_MAX_LISTINGS = 40       # сколько объявлений отдаём списком
 
 
 def _search_row(m: dict[str, Any], ours: bool, now: datetime, source: str) -> dict[str, Any]:
     age = _iso_age_days(m.get("first_seen_at"), now)
+    seen = _iso_age_days(m.get("last_seen_at"), now)
+    # Состояние: live — в свежей выдаче; stale — флаг active ещё стоит, но давно не видели
+    # (скаут не успел пометить, скорее всего снято/удалено); gone — скаут пометил снятым.
+    if not m.get("active", 1):
+        state = "gone"
+    elif source != "live" and (seen is None or seen > SEARCH_STALE_DAYS):
+        state = "stale"
+    else:
+        state = "live"
     return {"ad_id": m.get("ad_id"), "title": m.get("title"), "price_eur": m.get("price_eur"),
             "city": m.get("city"), "plz": m.get("plz"),
             "bundesland": m.get("bundesland") or plz_to_bundesland(m.get("plz")), "url": m.get("url"),
             "age_days": None if age is None else round(age, 1), "posted_raw": m.get("posted_raw"),
-            "active": bool(m.get("active", 1)), "ours": bool(ours), "source": source}
+            "active": state == "live", "state": state, "ours": bool(ours), "source": source}
 
 
 def _live_error_ru(raw: str) -> str:
@@ -1937,7 +1947,7 @@ def product_search(query: str, live: bool = False, limit: int = SEARCH_MAX_LISTI
     res["ours"] = {"count": len(our_items), "items": our_items, "position_ru": None}
     if our_items and our_items[0]["verdict"]:
         res["ours"]["position_ru"] = _our_vs_market(our_items[0]["price_eur"], priced)["position_ru"]
-    rows.sort(key=lambda r: (r["price_eur"] is None, r["price_eur"] or 0))
+    rows.sort(key=lambda r: (not r["active"], r["price_eur"] is None, r["price_eur"] or 0))
     res["listings"] = rows[:max(1, int(limit))]
     # честный статус
     n = len(priced)
