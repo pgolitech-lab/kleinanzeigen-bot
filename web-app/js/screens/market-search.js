@@ -93,7 +93,6 @@ export async function render(mount) {
       </form>
       <div class="ms-sug"></div>
       <div class="ms-res"></div>
-      <a class="ms-legacy" href="#/scout/legacy">Разведка машин и запчастей по городам ›</a>
     </div>`);
   mount.replaceChildren(root);
   const input = root.querySelector(".ms-q"), sug = root.querySelector(".ms-sug"), res = root.querySelector(".ms-res");

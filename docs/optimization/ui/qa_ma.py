@@ -104,6 +104,55 @@ STOCK_PRODUCTS = [
 ]
 
 
+# «Рынок → Сиденья»: синтетика по форме market_advisor.seat_market (адреса example.invalid)
+_SEAT_CITIES = [("München", "80331", "Bayern"), ("Berlin", "10115", "Berlin"), ("Köln", "50667", "Nordrhein-Westfalen"),
+                ("Hamburg", "20095", "Hamburg"), ("Leipzig", "04109", "Sachsen"), ("Stuttgart", "70173", "Baden-Württemberg")]
+
+
+def _seat_ads(kind, base, n):
+    out = []
+    for i in range(n):
+        c, plz, land = _SEAT_CITIES[i % len(_SEAT_CITIES)]
+        out.append({"ad_id": f"{kind}{i}", "title": f"{kind} Toyota Proace Verso / Citroën SpaceTourer Nr. {i + 1}",
+                    "url": f"https://example.invalid/{kind}{i}", "price_eur": base + i * 60 if i % 5 else None,
+                    "city": c, "plz": plz, "bundesland": land, "age_days": i * 1.5, "posted_raw": None,
+                    "active": i % 7 != 6, "source": "live" if i % 3 == 0 else "db"})
+    return out
+
+
+def _seat_group(item_id, title, category, kind_ru, price, base, n):
+    ads = _seat_ads(category.capitalize(), base, n)
+    pr = sorted(a["price_eur"] for a in ads if a["price_eur"])
+    q = lambda f: pr[int(f * (len(pr) - 1))]
+    lands = {}
+    for a in ads:
+        lands.setdefault(a["bundesland"], []).append(a)
+    return {"item_id": item_id, "title": title, "category": category, "kind_ru": kind_ru, "price_eur": price, "default": False,
+            "phrases": [f"{category} proace verso", f"{category} spacetourer"], "total": n, "n_active": n - n // 7,
+            "price": {"min": pr[0], "p25": q(.25), "median": q(.5), "p75": q(.75), "max": pr[-1]},
+            "ours": {"vs_median_pct": 18, "verdict": "pricier", "rank_cheaper_than_pct": 20,
+                     "position_ru": f"наша цена {price} € — дороже медианы {q(.5)} € (+18 %), дешевле 20 % рынка"},
+            "cities": [{"city": c, "plz_area": plz[:2], "count": 3, "median_eur": base + 100} for c, plz, _ in _SEAT_CITIES[:5]],
+            "lands": [{"bundesland": k, "count": len(v), "median_eur": base + 120} for k, v in lands.items()],
+            "sources": {"db": n - n // 3, "live": n // 3, "live_at": NOW}, "listings": ads}
+
+
+def mock_seats():
+    groups = [_seat_group("p:1", "Sitzbank 2+1 Proace Verso", "sitzbank", "Скамьи", 1500, 900, 14),
+              _seat_group("p:2", "Einzelsitz Traveller", "einzelsitz", "Одиночные сиденья", 550, 250, 9)]
+    lands = {}
+    for g in groups:
+        for x in g["lands"]:
+            lands[x["bundesland"]] = lands.get(x["bundesland"], 0) + x["count"]
+    return {"status": "ok", "message_ru": "", "checked_at": NOW,
+            "data_health": {"scout_last_run": NOW, "age_days": 0.4, "stale": False, "reason": None},
+            "refresh": {"started": False, "reason": "fresh", "due": 0, "running": False, "started_at": None,
+                        "finished_at": NOW, "done": 4, "total": 4, "errors": []},
+            "total": 23, "n_active": 20,
+            "lands": sorted(({"bundesland": k, "count": v, "median_eur": 700} for k, v in lands.items()), key=lambda x: -x["count"]),
+            "cities": groups[0]["cities"], "groups": groups}
+
+
 def mock_get(path: str):
     p = urllib.parse.urlparse(path)
     route = p.path
@@ -176,6 +225,18 @@ def mock_get(path: str):
                      "today": {"new": 2, "sent": 1, "sold": 0},
                      "api_balance": {"snapshot_usd": None, "remaining_usd": None, "burn_per_day_usd": 0, "days_remaining": None},
                      "sales_7d": {"count": 0, "total_eur": 0.0}, "sales_30d": {"count": 1, "total_eur": 280.0}}
+    if route == "/api/ma/market/seats":
+        return 200, mock_seats()
+    if route == "/api/ma/market/search":
+        q = urllib.parse.parse_qs(p.query).get("q", [""])[0]
+        if not q:
+            return 200, {"status": "empty_query", "suggestions": [{"query": "sitzbank proace verso", "label": "Sitzbank 2+1 Proace Verso", "ours": 1}]}
+        g = _seat_group("p:1", "Sitzbank 2+1 Proace Verso", "sitzbank", "Скамьи", 1500, 900, 14)
+        return 200, {"status": "ok", "query": q, "message_ru": "", "total": g["total"], "n_active": g["n_active"],
+                     "price": g["price"], "cities": g["cities"], "lands": g["lands"], "regions": [],
+                     "ours": {"count": 1, "items": [], "position_ru": g["ours"]["position_ru"]},
+                     "sources": {"db": 9, "live": None, "live_error": None, "live_asked": False}, "suggestions": [],
+                     "listings": g["listings"], "data_health": {"stale": False, "age_days": 0.4, "reason": None}}
     counts = {"cars": 1, "parts": 1, "other": 0, "unverified": 0, "removed": 0}
     if route == "/api/ma/scout/overview":
         return 200, {"counts": counts, "auto_enabled": True, "interval_hours": 6, "running": False, "started_at": None,
@@ -376,7 +437,9 @@ async def main():
             await open_screen(page, "Клиенты", "#/clients")
             await open_screen(page, "Продажи", "#/sales")
             await open_screen(page, "Обзор", "#/dashboard")
-            await open_screen(page, "Рынок (Машины)", "#/scout")
+            await open_screen(page, "Рынок/Сиденья", "#/scout")
+            await open_screen(page, "Рынок/Поиск", "#/scout/search")
+            await open_screen(page, "Рынок/Карта (Машины)", "#/scout/map")
             for tab, lbl in (("part", "Запчасти"), ("queries", "Запросы"), ("car", "Машины")):
                 CUR["label"] = f"Рынок/{lbl}"
                 NET["api"] = 0
@@ -387,7 +450,7 @@ async def main():
                 except Exception as e:
                     ok = f"click fail: {e}"
                 snap = await snapshot(page)
-                R["screens"].append({"label": f"Рынок/{lbl}", "hash": "#/scout", "ttfc_ms": None, "click_ok": ok,
+                R["screens"].append({"label": f"Рынок/{lbl}", "hash": "#/scout/map", "ttfc_ms": None, "click_ok": ok,
                                      "api_requests": NET["api"], "all_requests": None, **snap})
             await open_screen(page, "Проверка продаж", "#/detected")
             await open_screen(page, "Настройки", "#/settings")

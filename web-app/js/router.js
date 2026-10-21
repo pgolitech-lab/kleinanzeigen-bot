@@ -16,8 +16,7 @@ const settings = () => import("./screens/settings.js");
 const sales    = () => import("./screens/sales.js");
 const detected = () => import("./screens/detected.js");
 const market   = () => import("./screens/market.js");
-const scout    = () => import("./screens/scout.js");
-const mksearch = () => import("./screens/market-search.js");
+const mhub     = () => import("./screens/market-hub.js");
 
 const more     = () => import("./screens/more.js");
 const triage   = () => import("./screens/triage.js");
@@ -42,8 +41,9 @@ const ROUTES = [
   { pattern: /^#\/stock\/types\/?$/,      screen: stock,  title: "Типы и себестоимость", params: () => ({ view: "types" }) },
   { pattern: /^#\/stock\/month\/?$/,      screen: stock,  title: "Отчёт за месяц", params: () => ({ view: "month" }) },
   { pattern: /^#\/stock\/(\d+)\/?$/,       screen: stock,  list: "stock", title: "Товар", params: m => ({ id: m[1] }), key: p => p.id },
-  { pattern: /^#\/scout\/?$/,             screen: mksearch, title: "Рынок", params: () => ({}) },
-  { pattern: /^#\/scout\/legacy\/?$/,      screen: scout,    title: "Разведка по городам", params: () => ({}) },
+  { pattern: /^#\/scout\/?$/,                    screen: mhub, title: "Рынок", params: () => ({ tab: "seats" }) },
+  { pattern: /^#\/scout\/(?:map|legacy)\/?$/,     screen: mhub, title: "Рынок", params: () => ({ tab: "map" }) },
+  { pattern: /^#\/scout\/search\/?$/,             screen: mhub, title: "Рынок", params: () => ({ tab: "search" }) },
   { pattern: /^#\/more\/?$/,              screen: more,     root: true, title: "Ещё", params: () => ({}) },
   { pattern: /^#\/detected\/?$/,          screen: detected, title: "Найденные продажи", params: () => ({}) },
   { pattern: /^#\/thread\/([^/]+)\/msg\/(.+)$/,  screen: thread, list: "pipeline", title: "Переписка", params: m => ({ thread_id: decodeURIComponent(m[1]), focus_msg_id: decodeURIComponent(m[2]) }), key: p => p.thread_id },  // focused deep-link
