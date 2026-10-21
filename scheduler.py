@@ -66,9 +66,17 @@ def _job_listener(event: Any) -> None:
 # Общий пул потоков для IMAP-опроса (по потоку на аккаунт), живёт весь процесс —
 # не создаём новый на каждый 15-секундный проход.
 _IMAP_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="imap-poll")
-# Бюджет времени прохода: дольше не ждём (IMAP_TIMEOUT=30 с + 1 ретрай). Аккаунт,
-# чей прошлый опрос ещё висит, в следующем проходе пропускается (`_POLLING`).
+# Бюджет времени прохода: дольше не ждём. Должен быть МЕНЬШЕ интервала опроса
+# (15 с) — иначе APScheduler пропускает запуски («maximum number of running
+# instances»), а быстрые аккаунты ждут самый медленный. Медленный аккаунт
+# дочитывает в фоне (IMAP_TIMEOUT=30 с + 1 ретрай); пока его опрос висит, в
+# следующих проходах он пропускается (`_POLLING`, исход «busy»).
 POLL_BUDGET_SEC = 40
+POLL_BUDGET_MARGIN_SEC = 3
+
+
+def _poll_budget_sec() -> float:
+    return max(5.0, min(POLL_BUDGET_SEC, config.gmail_poll_interval_sec() - POLL_BUDGET_MARGIN_SEC))
 ORPHAN_SCAN_MINUTES = 20
 INVENTORY_SYNC_MINUTES = 30
 
@@ -165,7 +173,8 @@ def poll_all_accounts() -> str:
     accounts = db.list_accounts(only_active=True)
     from_filter = config.gmail_from_filter() or None
     futures = {_IMAP_POOL.submit(_poll_one_account, acc, from_filter): acc for acc in accounts}
-    done, not_done = concurrent.futures.wait(futures, timeout=POLL_BUDGET_SEC)
+    budget = _poll_budget_sec()
+    done, not_done = concurrent.futures.wait(futures, timeout=budget)
     total_new = 0
     counts = {"ok": 0, "fail": 0, "busy": 0}
     for fut in done:
@@ -181,8 +190,10 @@ def poll_all_accounts() -> str:
         counts["busy"] += 1
         _account_outcome(futures[fut], "busy")
     if not_done:
-        logger.warning("IMAP-опрос: %d аккаунтов не уложились в %d с — дочитают в фоне",
-                       len(not_done), POLL_BUDGET_SEC)
+        # Штатно при медленном Gmail: аккаунт дочитает в фоне. Затяжной сбой ловит
+        # _account_outcome (ERROR после ACCOUNT_FAIL_ALERT неудач подряд).
+        logger.info("IMAP-опрос: %d аккаунтов не уложились в %.0f с — дочитают в фоне",
+                    len(not_done), budget)
     POLL_STATE["last_pass_sec"] = round(time.monotonic() - started, 2)
     POLL_STATE["last_errors"] = counts["fail"] + counts["busy"]
     if counts["ok"]:
