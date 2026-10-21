@@ -42,7 +42,9 @@ export function openLink(url) {
   const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
   if (url === _lastLink.url && now - _lastLink.at < _LINK_DEBOUNCE_MS) return;
   _lastLink = { url, at: now };
-  if (tg?.openLink) tg.openLink(url);
+  // Android: открываем во внешнем браузере, минуя встроенный просмотрщик Telegram —
+  // иначе App Link срабатывает и из него, и после него (приложение Kleinanzeigen дважды).
+  if (tg?.openLink) tg.openLink(url, tg.platform === "android" ? { try_browser: "chrome" } : undefined);
   else window.open(url, "_blank");
 }
 
