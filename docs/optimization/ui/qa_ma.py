@@ -186,6 +186,10 @@ def mock_get(path: str):
                      "products": [{"title": "Sitzbank 3er VW T6 Multivan", "sold": 2, "profit": 1100}, {"title": "Tisch T5", "sold": 2, "profit": 240}]}
     if route == "/api/ma/pipeline":
         return 200, PIPE
+    if re.match(r"^/api/ma/threads/[^/]+/market$", route):
+        # строка «📈 рынок …» у полосы сделки (web/api_market.thread_market)
+        return 200, {"status": "ok", "n": 18, "p25": 460, "median": 925, "p75": 1345, "recommended_eur": None,
+                     "min_eur": None, "verdict_ru": None, "text": "рынок 460–1345 €, медиана 925 · 18 объявл."}
     m = re.match(r"^/api/ma/threads/([^/]+)$", route)
     if m:
         tid = urllib.parse.unquote(m.group(1))
