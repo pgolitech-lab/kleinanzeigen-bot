@@ -21,11 +21,17 @@ tunnel_url_valid() { [[ "${1:-}" =~ $TUNNEL_RE ]]; }
 # в журнал при старте: «Starting metrics server on 127.0.0.1:37627/metrics».
 _cf_since() { systemctl show -p ActiveEnterTimestamp --value cloudflared 2>/dev/null; }
 
+# Журнал ТЕКУЩЕГО запуска cloudflared. Не через --since "<метка с CET>": journalctl не
+# разбирает аббревиатуру зимнего пояса (после перевода часов 2026-10-25 синк падал).
+_cf_journal() {
+  local inv
+  inv=$(systemctl show -p InvocationID --value cloudflared 2>/dev/null)
+  [ -n "$inv" ] || return 1
+  journalctl "_SYSTEMD_INVOCATION_ID=$inv" --no-pager 2>/dev/null
+}
+
 cf_metrics_addr() {
-  local start
-  start=$(_cf_since)
-  [ -n "$start" ] || return 1
-  journalctl -u cloudflared --since "$start" --no-pager 2>/dev/null \
+  _cf_journal \
     | grep -oE 'Starting metrics server on 127\.0\.0\.1:[0-9]+' \
     | tail -1 | grep -oE '127\.0\.0\.1:[0-9]+'
 }
@@ -34,7 +40,7 @@ cf_metrics_addr() {
 # сейчас), иначе — последний trycloudflare-URL из журнала с момента старта cloudflared.
 # Печатает URL и возвращает 0, либо возвращает 1 без вывода.
 cf_live_url() {
-  local addr host url start
+  local addr host url
   addr=$(cf_metrics_addr)
   if [ -n "$addr" ]; then
     host=$(curl -s -m 5 "http://$addr/quicktunnel" 2>/dev/null \
@@ -43,9 +49,7 @@ cf_live_url() {
       echo "https://$host"; return 0
     fi
   fi
-  start=$(_cf_since)
-  [ -n "$start" ] || return 1
-  url=$(journalctl -u cloudflared --since "$start" --no-pager 2>/dev/null \
+  url=$(_cf_journal \
     | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' \
     | grep -v '^https://api\.trycloudflare\.com$' | tail -1)
   if tunnel_url_valid "$url"; then echo "$url"; return 0; fi
