@@ -583,6 +583,31 @@ def test_edit_de_success(client):
     assert kwargs["status"] == "edited"
 
 
+def test_edit_de_llm_failure_is_502_not_500(client):
+    from modules.claude_utils import LLMResponseError
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_only.side_effect = LLMResponseError("перевод: ответ не JSON: 'пришлите текст'")
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/edit-de",
+                 json={"text": "Neuer DE Text"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 502
+    assert "Черновик не изменён" in res.json()["detail"]
+    mdb.update_message.assert_not_called()
+
+
+def test_edit_ru_llm_failure_is_502_not_500(client):
+    from modules.claude_utils import LLMResponseError
+    c, mdb, mtb, msched, mclaude = client
+    mclaude.translate_with_back.side_effect = LLMResponseError("перевод: ответ не JSON")
+    init = make_init_data(TEST_USER)
+    res = c.post("/api/ma/messages/123/edit-ru",
+                 json={"text": "Новый RU текст"},
+                 headers={"X-Telegram-Init-Data": init})
+    assert res.status_code == 502
+    mdb.update_message.assert_not_called()
+
+
 def test_edit_ru_empty_text_422(client):
     c, mdb, mtb, msched, mclaude = client
     init = make_init_data(TEST_USER)

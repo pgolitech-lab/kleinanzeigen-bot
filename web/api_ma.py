@@ -1535,9 +1535,25 @@ def _client_lang(row: Any) -> str:
     return ((row["client_lang"] if "client_lang" in row.keys() else None) or "de").lower()
 
 
+_TRANSLATE_FAIL_RU = "Перевод сейчас не получился — повторите через минуту. Черновик не изменён."
+
+
+def _translate_call(fn, *args, **kwargs):
+    """Перевод в правках оператора: сбой LLM → 502 с понятным текстом, а не 500 с Traceback."""
+    from modules import llm
+    from modules.claude_utils import LLMResponseError
+    try:
+        return fn(*args, **kwargs)
+    except llm.LLMLimitError as e:
+        raise HTTPException(503, str(e))
+    except (llm.LLMError, LLMResponseError) as e:
+        logger.warning("перевод не получился: %s", e)
+        raise HTTPException(502, _TRANSLATE_FAIL_RU)
+
+
 def _translate_with_back(text: str, target_lang: str, *, context: "str | None" = None) -> "tuple[str, str]":
     """RU → язык клиента + обратный перевод на RU одним вызовом LLM."""
-    res = claude.translate_with_back(text, target_lang, source_lang="ru", context=context)
+    res = _translate_call(claude.translate_with_back, text, target_lang, source_lang="ru", context=context)
     return (res.get("translation") or "", res.get("back_translation") or "")
 
 
@@ -1573,7 +1589,7 @@ def ma_edit_de(msg_id: int, body: EditTextBody,
     _claim_or_409(msg_id, actor)
 
     source_lang = _client_lang(row)
-    ru_res = claude.translate_only(body.text, target_lang="ru", source_lang=source_lang)
+    ru_res = _translate_call(claude.translate_only, body.text, target_lang="ru", source_lang=source_lang)
     ru_back = ru_res.get("translation", "") if isinstance(ru_res, dict) else str(ru_res)
     db.update_message(msg_id, de_answer=body.text, ru_translation=ru_back,
                       status="edited")

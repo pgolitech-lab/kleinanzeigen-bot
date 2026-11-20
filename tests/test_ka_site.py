@@ -158,6 +158,8 @@ class FakeSession:
 def _sync(**kw):
     kw.setdefault("translate", False)
     kw.setdefault("sleep", lambda s: None)
+    # Даты фикстур зафиксированы (октябрь 2026) — окно «не старше N дней» не должно от них отрезать
+    kw.setdefault("max_age_days", 100_000)
     return ka_site_sync.sync_unanswered(**kw)
 
 

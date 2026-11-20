@@ -783,7 +783,7 @@ def test_cost_priority_batch_over_product_over_standard(inv):
     assert inv.product_profile(pid)["unit_cost_source"] == "standard"
     inv.inv.update_product(pid, unit_cost_eur=150.0)
     assert inv.product_profile(pid)["unit_cost_eur"] == 150.0 and inv.product_profile(pid)["unit_cost_source"] == "estimate"
-    inv.receive_batch([(pid, 2)], 260.0)
+    inv.receive_batch([(pid, 2)], 260.0, occurred_at="2026-10-01T00:00:00")
     prof = inv.product_profile(pid)
     assert (prof["unit_cost_eur"], prof["unit_cost_source"]) == (130.0, "lots")
     # приход без цены берёт стандарт/оценку, «вложено» считается

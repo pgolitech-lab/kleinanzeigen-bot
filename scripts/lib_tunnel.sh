@@ -31,9 +31,20 @@ _cf_journal() {
 }
 
 cf_metrics_addr() {
-  _cf_journal \
+  local addr port
+  addr=$(_cf_journal \
     | grep -oE 'Starting metrics server on 127\.0\.0\.1:[0-9]+' \
-    | tail -1 | grep -oE '127\.0\.0\.1:[0-9]+'
+    | tail -1 | grep -oE '127\.0\.0\.1:[0-9]+')
+  if [ -n "$addr" ]; then echo "$addr"; return 0; fi
+  # Строка старта выпала из журнала (ротация/rate-limit у долгоживущего сервиса). cloudflared
+  # работает от root, владельца порта без sudo не видно — опрашиваем loopback-порты: метрики
+  # отвечают на /ready JSON-ом с readyConnections, чужие сервисы — нет.
+  for port in $(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -oE '^127\.0\.0\.1:[0-9]+$' | cut -d: -f2); do
+    if curl -s -m 2 "http://127.0.0.1:$port/ready" 2>/dev/null | grep -q '"readyConnections"'; then
+      echo "127.0.0.1:$port"; return 0
+    fi
+  done
+  return 1
 }
 
 # Живой адрес туннеля. Сначала /quicktunnel у метрик (точно то, что зарегистрировано

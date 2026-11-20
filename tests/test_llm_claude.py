@@ -150,6 +150,23 @@ def test_call_json_rejects_non_json(fake_llm):
         claude.generate_draft("Hallo")
 
 
+def test_call_json_retries_once_on_prose(fake_llm):
+    # Haiku изредка отвечает прозой вместо JSON — второй вызов должен вытянуть
+    answers = [_resp(None, texts=["Пришлите текст для перевода"]), _resp({"translation": "Hallo"})]
+    fake_llm.response = None
+    with patch.object(_FakeClient, "create", side_effect=lambda **kw: answers.pop(0)) as m:
+        assert claude.translate_only("Привет", target_lang="de", source_lang="ru")["translation"] == "Hallo"
+    assert m.call_count == 2
+
+
+def test_call_json_gives_up_after_second_prose(fake_llm):
+    answers = [_resp(None, texts=["нет текста"]), _resp(None, texts=["снова нет"])]
+    with patch.object(_FakeClient, "create", side_effect=lambda **kw: answers.pop(0)) as m:
+        with pytest.raises(claude_utils.LLMResponseError, match="не JSON"):
+            claude.translate_only("Привет", target_lang="de", source_lang="ru")
+    assert m.call_count == 2
+
+
 def test_call_json_takes_json_after_narrative(fake_llm):
     fake_llm.response = _resp(None, texts=["Сейчас проверю…", "Итог: " + json.dumps(DRAFT)])
     assert claude.generate_draft("Hallo")["client_answer"] == "Ja, noch da. MfG"

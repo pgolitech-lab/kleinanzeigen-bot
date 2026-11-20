@@ -107,6 +107,18 @@ def call_json(
     if web_search:
         kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
 
+    for attempt in (1, 2):
+        try:
+            return _call_json_once(label, model, schema, max_tokens, nonempty, kwargs)
+        except LLMResponseError as e:
+            # Haiku изредка отвечает прозой («пришлите текст») вместо JSON — один повтор лечит
+            if attempt == 2 or "не JSON" not in str(e):
+                raise
+            logger.warning("%s: ответ не JSON, повторяю вызов", label)
+    raise AssertionError("unreachable")
+
+
+def _call_json_once(label, model, schema, max_tokens, nonempty, kwargs):
     response = llm.Client().messages.create(**kwargs)
 
     stop = getattr(response, "stop_reason", None)
