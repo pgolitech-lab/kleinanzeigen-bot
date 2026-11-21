@@ -1270,6 +1270,17 @@ def start_callback_poller() -> None:
                 # HTTPError в RuntimeError, поэтому распознаём по тексту и логируем
                 # тихо, чтобы не засорять hourly error-monitor ложными ERROR.
                 msg = str(e)
+                # 429 Too Many Requests на long-poll getUpdates — это rate-limit
+                # Telegram, самоизлечивающееся транзиентное состояние того же класса,
+                # что и 5xx ниже. Telegram сам сообщает «retry after N» — уважаем
+                # паузу (минимум 5 с) и логируем тихо, чтобы не плодить ложные ERROR
+                # в hourly error-monitor.
+                if "Too Many Requests" in msg or "HTTP 429" in msg:
+                    m = re.search(r"retry after (\d+)", msg)
+                    delay = max(int(m.group(1)) if m else 5, 5)
+                    logger.debug("callback poll rate-limited (429), retry after %ss: %r", delay, e)
+                    time.sleep(delay)
+                    continue
                 transient = any(s in msg for s in (
                     "Bad Gateway", "Service Unavailable", "Gateway Timeout",
                     "HTTP 502", "HTTP 503", "HTTP 504",
